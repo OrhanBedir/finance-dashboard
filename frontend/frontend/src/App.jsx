@@ -10653,7 +10653,11 @@ function FinanceDashboard({
   currentUser,
   actionTrigger,
   onActionHandled,
+  sadeceFatura = false, // 23.10.2026: alt marka (Teknocenter) paneli — yalnız Fatura Girişi ekranı
+  onBack,
 }) {
+  // Alt marka fatura modu: kayıtlar oturumdaki firma adına (sunucu da firmayı oturumdan zorlar)
+  const markaFirma = sadeceFatura ? String(user?.marka || currentUser?.marka || "").trim().toUpperCase() : "";
   function parseDateTR(dateStr) {
     const [day, month, year] = dateStr.split(".");
     return new Date(`${year}-${month}-${day}`);
@@ -11900,6 +11904,8 @@ function FinanceDashboard({
     onActionHandled?.();
   }, [actionTrigger]);
 
+  useEffect(() => { if (sadeceFatura) setShowInvoiceEntryModal(true); }, [sadeceFatura]);
+
   useEffect(() => {
     if (showInvoiceEntryModal) {
       document.body.style.overflow = "hidden";
@@ -11913,6 +11919,7 @@ function FinanceDashboard({
   }, [showInvoiceEntryModal]);
 
   useEffect(() => {
+    if (sadeceFatura) return;
     fetchJson(`${API_BASE}/finance/personel/list`, { withAuth: true })
       .then((data) => setPersonnelMaster(data.rows || []))
       .catch((err) => {
@@ -12260,7 +12267,7 @@ function FinanceDashboard({
       }
 
       // Firma seçimi (modaldaki Şimşek/AHY toggle) — AHY ise AHY Taşeron Faturaları paneline yansır
-      payload.firma = altMarkaMi(invoiceForm.firma) ? String(invoiceForm.firma).toUpperCase() : "SIMSEK";
+      payload.firma = sadeceFatura ? markaFirma : (altMarkaMi(invoiceForm.firma) ? String(invoiceForm.firma).toUpperCase() : "SIMSEK");
       console.log("MANUAL INVOICE PAYLOAD:", payload);
 
       let _kayitSonuc = null;
@@ -12573,6 +12580,14 @@ function FinanceDashboard({
       setLoading(true);
       setErrorMessage("");
 
+      if (sadeceFatura) {
+        // Alt marka: yalnız fatura listesi (sunucu kendi firmasına süzer); ERC özet/ödeme/maaş uçları çağrılmaz
+        const d = await fetchJson(`${API_BASE}/finance/invoice-entry/list`, { withAuth: true });
+        setManualInvoiceRows(d.rows || []);
+        setSummary({});
+        return;
+      }
+
       const paymentsUrl = paymentDateFilter
         ? `${API_BASE}/finance/payments/list?payment_date=${encodeURIComponent(
             paymentDateFilter,
@@ -12632,7 +12647,7 @@ function FinanceDashboard({
     } finally {
       setLoading(false);
     }
-  }, [paymentDateFilter]);
+  }, [paymentDateFilter, sadeceFatura]);
 
   const handleShowOverdues = async () => {
     setShowOverdueModal(true);
@@ -12722,6 +12737,7 @@ function FinanceDashboard({
 
   // Tedarikçi aramasına göre hakediş yükle
   useEffect(() => {
+    if (sadeceFatura) return;
     const q = manualInvoiceSearch.trim();
     if (!q || q.length < 2) { setHakedisData(null); return; }
     const t = setTimeout(async () => {
@@ -12737,7 +12753,643 @@ function FinanceDashboard({
     return () => clearTimeout(t);
   }, [manualInvoiceSearch]);
 
+  // Fatura Girişi (liste + giriş/düzenleme formu) — ERC Finans Paneli ve alt marka (Teknocenter) panelinde ortak
+  const faturaGirisiJSX = (
+    <>
+      {showInvoiceEntryModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+            padding: "20px",
+          }}
+          onClick={() => {
+            if (sadeceFatura) { onBack?.(); return; }
+            setShowInvoiceEntryModal(false);
+            setShowInvoiceFormPanel(false);
+            setEditingInvoiceId(null);
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "100%",
+              maxWidth: "1280px",
+              height: "90vh",
+              borderRadius: "24px",
+              padding: 0,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* HEADER */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "20px 24px",
+                borderBottom: "1px solid #e5e7eb",
+                background: "#fff",
+                flexShrink: 0,
+              }}
+            >
+              <h3 className="listTitle" style={{ margin: 0 }}>
+                🧾 Fatura Girişi
+              </h3>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={() => {
+                  if (sadeceFatura) { onBack?.(); return; }
+                  setShowInvoiceEntryModal(false);
+                  setShowInvoiceFormPanel(false);
+                  setEditingInvoiceId(null);
+                }}
+              >
+                Kapat
+              </button>
+            </div>
+
+            {/* TOOLBAR */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderBottom: "1px solid #e5e7eb",
+                display: "flex",
+                gap: "12px",
+                flexWrap: "wrap",
+                alignItems: "center",
+                background: "#f8fafc",
+                flexShrink: 0,
+              }}
+            >
+              <input
+                type="text"
+                value={manualInvoiceSearch}
+                onChange={(e) => setManualInvoiceSearch(e.target.value)}
+                placeholder="Tedarikçi / fatura no / proje / site / PO ara"
+                style={{
+                  flex: "1 1 360px",
+                  minWidth: "280px",
+                }}
+              />
+
+              <select
+                value={manualInvoiceStatusFilter}
+                onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
+                style={{ minWidth: "180px" }}
+              >
+                <option value="ALL">Tüm Durumlar</option>
+                <option value="BEKLIYOR">Bekleyenler</option>
+                <option value="ODENDI">Ödenenler</option>
+              </select>
+
+              <button
+                type="button"
+                className="tab"
+                onClick={handleExportInvoiceDatabase}
+              >
+                Excel İndir
+              </button>
+
+              <button
+                type="button"
+                className="saveButton"
+                onClick={() => {
+                  setEditingInvoiceId(null);
+                  setInvoiceForm({
+                    bolge: "",
+                    proje: "",
+                    proje_kodu: "",
+                    fatura_no: "",
+                    fatura_tarihi: "",
+                    odeme_tarihi: "",
+                    tedarikci: "",
+                    rf_montaj_firma: "",
+                    fatura_kalemi: "",
+                    is_kalemi: "",
+                    po_no: "",
+                    site_id: "",
+                    tutar: "",
+                    kdv: "",
+                    toplam_tutar: "",
+                    odened_tutar: "",
+                    kalan_borc: "",
+                    note: "",
+                    fatura_turu: "GELEN",
+                    bagli_fatura_id: "",
+                  });
+                  setShowInvoiceFormPanel(true);
+                }}
+              >
+                Yeni Fatura Gir
+              </button>
+              {!sadeceFatura && (<>
+              <button
+                type="button"
+                onClick={handleOpenOdemeModal}
+                style={{ padding:"9px 18px", background:"#7e22ce", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
+              >
+                💳 Ödeme Gir
+              </button>
+              <button
+                type="button"
+                onClick={() => { setZirveModal(true); setZirveItems([]); setZirveFile(null); setZirveMsg(""); setZirveSecili({}); }}
+                title="Zirve e-Dönüşüm Gelen Faturalar Excel'ini içe aktar"
+                style={{ padding:"9px 18px", background:"#0e7490", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
+              >
+                ⬆ Zirve İçe Aktar
+              </button>
+              </>)}
+            </div>
+
+            {/* SUMMARY */}
+            <div style={{ padding:"12px 24px", display:"flex", gap:"10px", flexWrap:"wrap", borderBottom:"1px solid #e5e7eb", flexShrink:0, background:"#f8fafc" }}>
+              <div style={{ flex:"1 1 140px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 {manualInvoiceSearch.trim() ? `${manualInvoiceSearch.trim().toUpperCase()}'NİN KESTİĞİ` : "Toplam Gelen"}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#15803d" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalGelen||0,"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>↩️ Toplam İade</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#ea580c" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalIade||0,"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#fff1f2", border:"1.5px solid #fecdd3", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#9f1239", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>⚖️ Net Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#be123c" }}>{formatMoneyByCurrency((manualInvoiceSummary.totalGelen||0)-(manualInvoiceSummary.totalIade||0),"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#1e40af", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>💳 Toplam Ödenen</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#1d4ed8" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalPaid||0,"TRY")}</div>
+              </div>
+              <div style={{ flex:"1 1 140px", background:"#fef2f2", border:"1.5px solid #fecaca", borderRadius:12, padding:"10px 14px" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"#991b1b", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🔴 Kalan Borç</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#dc2626" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining||0,"TRY")}</div>
+              </div>
+              {!sadeceFatura && <div onClick={()=>{ if(hakedisData) setHakedisModal(true); }}
+                style={{ flex:"1 1 140px", background:hakedisData?"#faf5ff":"#f9fafb", border:`1.5px solid ${hakedisData?"#c4b5fd":"#e5e7eb"}`, borderRadius:12, padding:"10px 14px", cursor:hakedisData?"pointer":"default" }}>
+                <div style={{ fontSize:11, fontWeight:700, color:hakedisData?"#6d28d9":"#6b7280", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🏗️ Hakediş{hakedisData?" ↗":""}</div>
+                {hakedisLoading ? <div style={{ fontSize:12,color:"#9ca3af" }}>Yükleniyor...</div>
+                  : hakedisData ? <div style={{ fontSize:16,fontWeight:800,color:"#7c3aed" }}>{formatMoneyByCurrency(hakedisData.total_hakedis||0,"TRY")}</div>
+                  : <div style={{ fontSize:12,color:"#9ca3af" }}>Tedarikçi ara →</div>}
+              </div>}
+            </div>
+
+            {/* TABLE */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: "auto",
+                padding: "16px 24px 24px 24px",
+              }}
+            >
+              <div className="tableWrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tür</th>
+                      <th>Bölge</th>
+                      <th>Proje</th>
+                      <th>Proje Kodu</th>
+                      <th>Fatura No</th>
+                      <th>Fatura Tarihi</th>
+                      <th>Tedarikçi</th>
+                      <th>Firma</th>
+                      <th>PO No</th>
+                      <th>Site ID</th>
+                      <th>Toplam</th>
+                      <th>Ödenen</th>
+                      <th>Kalan</th>
+                      <th>İşlem</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredManualInvoiceRows.length === 0 ? (
+                      <EmptyRow colSpan={14} text="Kayıt bulunamadı" />
+                    ) : (
+                      filteredManualInvoiceRows.map((row, index) => (
+                        <tr key={row.id ?? index}>
+                          <td><span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, background:row.fatura_turu==='IADE'?"#fff7ed":"#f0fdf4", color:row.fatura_turu==='IADE'?"#c2410c":"#166534", border:`1px solid ${row.fatura_turu==='IADE'?"#fed7aa":"#86efac"}` }}>{row.fatura_turu==='IADE'?'↩ İade':'↓ Gelen'}</span></td>
+                          <td>{row.bolge || "-"}</td>
+                          <td>{row.proje || "-"}</td>
+                          <td>{row.proje_kodu || "-"}</td>
+                          <td>{row.fatura_no || "-"}</td>
+                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
+                          <td>{row.tedarikci || "-"}</td>
+                          {/* Fatura hangi firmaya kesildi → ödemeyi o firma yapar */}
+                          <td>
+                            {altMarkaMi(row.firma)
+                              ? <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#fff7ed", color:"#9a3412", border:"1px solid #fed7aa", whiteSpace:"nowrap" }}>🔧 {altMarkaKisa(row.firma)}</span>
+                              : <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", whiteSpace:"nowrap" }}>⚡ Şimşek</span>}
+                          </td>
+                          <td>{row.po_no || "-"}</td>
+                          <td>{row.site_id || "-"}</td>
+                          <td>{formatTRY(row.toplam_tutar || 0)}</td>
+                          <td>{formatTRY(row.odenen_tutar || 0)}</td>
+                          <td>{formatTRY(row.kalan_borc || 0)}</td>
+                          <td>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              {row.belge_path && (
+                                <a
+                                  href={row.belge_path.startsWith("http") ? row.belge_path : `${API_BASE.replace(/\/api$/,"")}/fatura-belgeler/${row.belge_path}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    padding: "5px 10px",
+                                    background: "#f0fdf4",
+                                    color: "#166534",
+                                    border: "1px solid #bbf7d0",
+                                    borderRadius: "6px",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    textDecoration: "none",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  📄 Belge
+                                </a>
+                              )}
+
+                              {/* Alt markada araç kirası faturası bu ekrandan değiştirilmez (sunucu da reddeder) */}
+                              {!(sadeceFatura && String(row.is_kalemi || "").toUpperCase() === "ARAC_KIRA") && (<>
+                              <button
+                                type="button"
+                                className="tab"
+                                onClick={() => {
+                                  handleEditManualInvoice(row);
+                                  setShowInvoiceFormPanel(true);
+                                }}
+                              >
+                                Düzenle
+                              </button>
+                              </>)}
+                              {!sadeceFatura && String(row.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
+                                <button type="button" className="tab" onClick={() => setOrtakOdemeFaturaId(row.id)} title="Araç kirası faturası — ortak ödeme kaydı (araç dönemi + nakit akışı tek kayıt)">💳 Ödeme</button>
+                              )}
+                              {ortakOdemeFaturaId === row.id && <OrtakOdemeModal faturaId={row.id} onClose={() => setOrtakOdemeFaturaId(null)} onDone={() => loadFinance()} />}
+
+                              {!(sadeceFatura && String(row.is_kalemi || "").toUpperCase() === "ARAC_KIRA") && (
+                              <button
+                                type="button"
+                                className="tab danger"
+                                onClick={() => handleDeleteManualInvoice(row)}
+                              >
+                                Sil
+                              </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ── Fatura Giriş / Düzenle Modal (top-level) ───────────── */}
+      {showInvoiceFormPanel && (
+        <div
+          onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 11000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#f8fafc", borderRadius: "20px", width: "100%", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", overflow: "hidden" }}
+          >
+            {/* Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
+                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
+                style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
+              >✕</button>
+            </div>
+
+            {/* Scrollable form content */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
+              <form onSubmit={handleSaveManualInvoice}>
+
+                {/* BÖLÜM 0: PDF Otomatik Doldurma */}
+                <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
+                    <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
+                        {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
+                      </div>
+                      {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
+                      {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
+                    </div>
+                    {!pdfParsing && (
+                      <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
+                        {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
+                        <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            setPdfFileName(file.name);
+                            setPdfParsing(true);
+                            setPdfFilled(null);
+                            try {
+                              const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+                              const fd = new FormData();
+                              fd.append("file", file);
+                              const r = await fetch(`${API_BASE}/invoice-parse`, {
+                                method:"POST",
+                                headers: { Authorization:`Bearer ${tkn}` },
+                                body: fd,
+                              });
+                              const data = await r.json();
+                              if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
+                              const p = data.parsed || {};
+                              setPdfTempKey(data.temp_key || "");
+                              const filled = [];
+                              setInvoiceForm(prev => {
+                                const next = { ...prev };
+                                if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
+                                if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
+                                if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
+                                if (p.is_kalemi)    { next.is_kalemi = p.is_kalemi;         filled.push("İş Kalemi"); }
+                                if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
+                                if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
+                                if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
+                                // Tevkifatlı fatura: Toplam = Ödenecek Tutar (tevkifat düşülmüş);
+                                // tevkif edilen KDV nota yazılır (sorumlu sıfatıyla beyan edilecek)
+                                if (p.tevkifat && Number(p.tevkifat) > 0) {
+                                  const tvkNot = `KDV Tevkifatı: ₺${Number(p.tevkifat).toLocaleString("tr-TR")} (sorumlu sıfatıyla vergi dairesine beyan edilir; toplam, tevkifat düşülmüş Ödenecek Tutar'dır)`;
+                                  next.note = [prev.note, tvkNot].filter(Boolean).join("\n");
+                                  filled.push("Tevkifat→Not");
+                                }
+                                return next;
+                              });
+                              setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
+                            } catch (err) {
+                              alert("PDF işleme hatası: " + err.message);
+                            } finally {
+                              setPdfParsing(false);
+                              if (invoicePdfRef.current) invoicePdfRef.current.value = "";
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                    {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
+                  </div>
+                </div>
+
+                {/* Fatura Türü */}
+                {!editingInvoiceId && (
+                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
+                  {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
+                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
+                      <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
+                    </label>
+                  ))}
+                  {invoiceForm.fatura_turu==='IADE' && (
+                    <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
+                      style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
+                      <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
+                      {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
+                        <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                )}
+
+                {/* Firma: Şimşek / AHY — AHY seçilirse AHY Taşeron Faturaları paneline yansır */}
+                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Firma:</span>
+                  {(sadeceFatura ? [[markaFirma,`🔷 ${user?.marka_ad || altMarkaKisa(markaFirma)}`,"#1e40af","#eff6ff","#93c5fd"]] : [["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["TEKNO","🔷 Teknocenter","#1e40af","#eff6ff","#93c5fd"]]).map(([val,lbl,col,bg,brd])=>(
+                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:(sadeceFatura ? markaFirma : (invoiceForm.firma||"SIMSEK"))===val?bg:"#f9fafb", border:`1.5px solid ${(sadeceFatura ? markaFirma : (invoiceForm.firma||"SIMSEK"))===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:(sadeceFatura ? markaFirma : (invoiceForm.firma||"SIMSEK"))===val?col:"#6b7280" }}>
+                      <input type="radio" name="fatura_firma" value={val} checked={(sadeceFatura ? markaFirma : (invoiceForm.firma||"SIMSEK"))===val} onChange={()=>setInvoiceForm(p=>({...p,firma:val}))} style={{ display:"none" }} />{lbl}
+                    </label>
+                  ))}
+                  {!sadeceFatura && altMarkaMi(invoiceForm.firma) && (
+                    <span style={{ fontSize:12, color:"#1e40af", fontWeight:600 }}>→ {altMarkaKisa(invoiceForm.firma)} panelindeki Taşeron Faturaları'nda görünür</span>
+                  )}
+                </div>
+
+                {/* BÖLÜM 1: Proje Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
+                    Proje Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara", list: "dl-fatura-bolge" },
+                      { label: "Proje", name: "proje", placeholder: "TT / TC", list: "dl-fatura-proje" },
+                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF", list: "dl-fatura-projekod" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder} list={f.list}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                    {/* 26.08.2026 (Orhan): Bölge = önce İzmir/Ankara/Antalya, sonra tüm iller;
+                        Proje Kodu = sistemdeki kayıtlı kodlar + faturalardan görülenler */}
+                    <datalist id="dl-fatura-bolge">
+                      {["İzmir","Ankara","Antalya",
+                        "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","Kahramanmaraş","Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis","Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir","Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa","Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
+                      ].map(s => <option key={s} value={s} />)}
+                    </datalist>
+                    <datalist id="dl-fatura-proje">
+                      {["TT","TC"].map(s => <option key={s} value={s} />)}
+                    </datalist>
+                    <datalist id="dl-fatura-projekod">
+                      {[...new Set(["56A0TCT","56A0QEF","56A0819","56A0NCD","56A0SJC",
+                        ...manualInvoiceRows.map(r => (r.proje_kodu || "").trim()).filter(Boolean)])]
+                        .sort().map(k => <option key={k} value={k} />)}
+                    </datalist>
+                  </div>
+                </div>
+
+                {/* BÖLÜM 2: Fatura Bilgileri */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
+                    Fatura Bilgileri
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
+                      { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
+                      { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
+                      { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
+                      { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
+                      { label: "PO No", name: "po_no", placeholder: "PO numarası" },
+                      { label: "Site ID", name: "site_id", placeholder: "BU8944" },
+                    ].map(f => f.name === "is_kalemi" ? (
+                      /* İş Kalemi: AHY Taşeron Faturaları'ndaki kategori chipleri */
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>İş Kalemi</label>
+                        <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+                          {MT_KATEGORILER.filter(([v]) => !sadeceFatura || v !== "ARAC_KIRA").map(([val, adi]) => {
+                            const secili = String(invoiceForm.is_kalemi || "").toUpperCase() === val;
+                            return (
+                              <button key={val} type="button" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: secili ? "" : val }))}
+                                style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: `1.5px solid ${secili ? "#1e3a5f" : "#e5e7eb"}`, background: secili ? "#1e3a5f" : "#fff", color: secili ? "#fff" : "#6b7280" }}>{adi}</button>
+                            );
+                          })}
+                          {invoiceForm.is_kalemi && !MT_KATEGORILER.some(([v]) => v === String(invoiceForm.is_kalemi).toUpperCase()) && (
+                            <button type="button" title="Serbest metin değer — kaldırmak için tıklayın" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: "" }))}
+                              style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: "1.5px solid #1e3a5f", background: "#1e3a5f", color: "#fff" }}>{invoiceForm.is_kalemi} ✕</button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
+                      <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
+                      <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange} disabled={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA"}
+                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
+                      <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>{String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" ? "Araç kirası faturasında kullanılmaz — ödeme tarihi ödeme kaydında girilir" : "Nakit Akış'ta taşeron satırı olarak görünür"}</div>
+                    </div>
+                  </div>
+                  {String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
+                    <AracKiraKalemEditor value={invoiceForm.arac_kalemler || []} toplam={Number(invoiceForm.toplam_tutar || 0)}
+                      onChange={(rows) => setInvoiceForm(pr => ({ ...pr, arac_kalemler: rows }))} />
+                  )}
+                </div>
+
+                {/* BÖLÜM 3: Finansal Bilgiler */}
+                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  {/* Para Birimi Seçimi */}
+                  <div style={{ marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
+                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>Para Birimi:</span>
+                    {["TRY","USD"].map(c => (
+                      <button key={c} type="button"
+                        onClick={() => setInvoiceForm(p => ({ ...p, currency: c, usd_kur: c === "USD" ? String(usdTryRate) : "" }))}
+                        style={{ padding:"6px 18px", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer",
+                          background: invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#f3f4f6",
+                          color: invoiceForm.currency === c ? "#fff" : "#6b7280",
+                          border: `2px solid ${invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#e5e7eb"}` }}>
+                        {c === "TRY" ? "₺ TRY" : "$ USD"}
+                      </button>
+                    ))}
+                    {invoiceForm.currency === "USD" && (
+                      <div style={{ display:"flex", alignItems:"center", gap:"6px", marginLeft:"8px" }}>
+                        <span style={{ fontSize:"12px", color:"#6b7280" }}>Kur:</span>
+                        <input type="number" step="0.01" value={invoiceForm.usd_kur}
+                          onChange={e => setInvoiceForm(p => ({ ...p, usd_kur: e.target.value }))}
+                          style={{ width:"80px", padding:"5px 8px", border:"1.5px solid #bfdbfe", borderRadius:"7px", fontSize:"13px", fontWeight:600 }}
+                          placeholder={String(usdTryRate)} />
+                        <span style={{ fontSize:"11px", color:"#9ca3af" }}>₺/$ (güncel: {usdTryRate?.toFixed(2)})</span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+                    Finansal Bilgiler
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
+                    {[
+                      { label: "Tutar (₺)", name: "tutar" },
+                      { label: "KDV (₺)", name: "kdv" },
+                      { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
+                      { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
+                      { label: "Kalan Borç (₺)", name: "kalan_borc" },
+                    ].map(f => (
+                      <div key={f.name}>
+                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
+                        <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
+                          disabled={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (f.name === "odenen_tutar" || f.name === "kalan_borc")}
+                          title={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (f.name === "odenen_tutar" || f.name === "kalan_borc") ? "Araç kirası faturası: ödenen/kalan yalnız ortak ödeme kayıtlarından hesaplanır (💳 Ödeme)" : undefined}
+                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
+                      Not / Açıklama
+                    </div>
+                    <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
+                  </div>
+
+                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+                      Fatura Belgesi (PDF / Fotoğraf)
+                    </div>
+                    {pdfTempKey && !editingInvoiceId ? (
+                      <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontSize:28 }}>📄</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
+                          <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
+                        </div>
+                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
+                      </div>
+                    ) : (
+                      <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                  <button type="button" className="tab"
+                    onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
+                    Vazgeç
+                  </button>
+                  <button type="submit" className="saveButton">
+                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   if (loading) return <div className="loading">Yükleniyor...</div>;
+
+  if (sadeceFatura) {
+    return (
+      <div style={{ padding: "24px 28px" }}>
+        {errorMessage && <div className="loading">Veri alınamadı: {errorMessage}</div>}
+        {faturaGirisiJSX}
+      </div>
+    );
+  }
 
   if (!summary) {
     return (
@@ -13872,618 +14524,7 @@ function FinanceDashboard({
         </div>
       )}
 
-      {showInvoiceEntryModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 9999,
-            padding: "20px",
-          }}
-          onClick={() => {
-            setShowInvoiceEntryModal(false);
-            setShowInvoiceFormPanel(false);
-            setEditingInvoiceId(null);
-          }}
-        >
-          <div
-            style={{
-              background: "#fff",
-              width: "100%",
-              maxWidth: "1280px",
-              height: "90vh",
-              borderRadius: "24px",
-              padding: 0,
-              boxShadow: "0 20px 50px rgba(0,0,0,0.2)",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* HEADER */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "20px 24px",
-                borderBottom: "1px solid #e5e7eb",
-                background: "#fff",
-                flexShrink: 0,
-              }}
-            >
-              <h3 className="listTitle" style={{ margin: 0 }}>
-                🧾 Fatura Girişi
-              </h3>
-
-              <button
-                type="button"
-                className="tab"
-                onClick={() => {
-                  setShowInvoiceEntryModal(false);
-                  setShowInvoiceFormPanel(false);
-                  setEditingInvoiceId(null);
-                }}
-              >
-                Kapat
-              </button>
-            </div>
-
-            {/* TOOLBAR */}
-            <div
-              style={{
-                padding: "16px 24px",
-                borderBottom: "1px solid #e5e7eb",
-                display: "flex",
-                gap: "12px",
-                flexWrap: "wrap",
-                alignItems: "center",
-                background: "#f8fafc",
-                flexShrink: 0,
-              }}
-            >
-              <input
-                type="text"
-                value={manualInvoiceSearch}
-                onChange={(e) => setManualInvoiceSearch(e.target.value)}
-                placeholder="Tedarikçi / fatura no / proje / site / PO ara"
-                style={{
-                  flex: "1 1 360px",
-                  minWidth: "280px",
-                }}
-              />
-
-              <select
-                value={manualInvoiceStatusFilter}
-                onChange={(e) => setManualInvoiceStatusFilter(e.target.value)}
-                style={{ minWidth: "180px" }}
-              >
-                <option value="ALL">Tüm Durumlar</option>
-                <option value="BEKLIYOR">Bekleyenler</option>
-                <option value="ODENDI">Ödenenler</option>
-              </select>
-
-              <button
-                type="button"
-                className="tab"
-                onClick={handleExportInvoiceDatabase}
-              >
-                Excel İndir
-              </button>
-
-              <button
-                type="button"
-                className="saveButton"
-                onClick={() => {
-                  setEditingInvoiceId(null);
-                  setInvoiceForm({
-                    bolge: "",
-                    proje: "",
-                    proje_kodu: "",
-                    fatura_no: "",
-                    fatura_tarihi: "",
-                    odeme_tarihi: "",
-                    tedarikci: "",
-                    rf_montaj_firma: "",
-                    fatura_kalemi: "",
-                    is_kalemi: "",
-                    po_no: "",
-                    site_id: "",
-                    tutar: "",
-                    kdv: "",
-                    toplam_tutar: "",
-                    odened_tutar: "",
-                    kalan_borc: "",
-                    note: "",
-                    fatura_turu: "GELEN",
-                    bagli_fatura_id: "",
-                  });
-                  setShowInvoiceFormPanel(true);
-                }}
-              >
-                Yeni Fatura Gir
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenOdemeModal}
-                style={{ padding:"9px 18px", background:"#7e22ce", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
-              >
-                💳 Ödeme Gir
-              </button>
-              <button
-                type="button"
-                onClick={() => { setZirveModal(true); setZirveItems([]); setZirveFile(null); setZirveMsg(""); setZirveSecili({}); }}
-                title="Zirve e-Dönüşüm Gelen Faturalar Excel'ini içe aktar"
-                style={{ padding:"9px 18px", background:"#0e7490", color:"#fff", border:"none", borderRadius:"8px", fontSize:"14px", fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:"6px", whiteSpace:"nowrap" }}
-              >
-                ⬆ Zirve İçe Aktar
-              </button>
-            </div>
-
-            {/* SUMMARY */}
-            <div style={{ padding:"12px 24px", display:"flex", gap:"10px", flexWrap:"wrap", borderBottom:"1px solid #e5e7eb", flexShrink:0, background:"#f8fafc" }}>
-              <div style={{ flex:"1 1 140px", background:"#f0fdf4", border:"1.5px solid #86efac", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#166534", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>📥 {manualInvoiceSearch.trim() ? `${manualInvoiceSearch.trim().toUpperCase()}'NİN KESTİĞİ` : "Toplam Gelen"}</div>
-                <div style={{ fontSize:16, fontWeight:800, color:"#15803d" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalGelen||0,"TRY")}</div>
-              </div>
-              <div style={{ flex:"1 1 140px", background:"#fff7ed", border:"1.5px solid #fed7aa", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#9a3412", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>↩️ Toplam İade</div>
-                <div style={{ fontSize:16, fontWeight:800, color:"#ea580c" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalIade||0,"TRY")}</div>
-              </div>
-              <div style={{ flex:"1 1 140px", background:"#fff1f2", border:"1.5px solid #fecdd3", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#9f1239", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>⚖️ Net Borç</div>
-                <div style={{ fontSize:16, fontWeight:800, color:"#be123c" }}>{formatMoneyByCurrency((manualInvoiceSummary.totalGelen||0)-(manualInvoiceSummary.totalIade||0),"TRY")}</div>
-              </div>
-              <div style={{ flex:"1 1 140px", background:"#eff6ff", border:"1.5px solid #bfdbfe", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#1e40af", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>💳 Toplam Ödenen</div>
-                <div style={{ fontSize:16, fontWeight:800, color:"#1d4ed8" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalPaid||0,"TRY")}</div>
-              </div>
-              <div style={{ flex:"1 1 140px", background:"#fef2f2", border:"1.5px solid #fecaca", borderRadius:12, padding:"10px 14px" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:"#991b1b", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🔴 Kalan Borç</div>
-                <div style={{ fontSize:16, fontWeight:800, color:"#dc2626" }}>{formatMoneyByCurrency(manualInvoiceSummary.totalRemaining||0,"TRY")}</div>
-              </div>
-              <div onClick={()=>{ if(hakedisData) setHakedisModal(true); }}
-                style={{ flex:"1 1 140px", background:hakedisData?"#faf5ff":"#f9fafb", border:`1.5px solid ${hakedisData?"#c4b5fd":"#e5e7eb"}`, borderRadius:12, padding:"10px 14px", cursor:hakedisData?"pointer":"default" }}>
-                <div style={{ fontSize:11, fontWeight:700, color:hakedisData?"#6d28d9":"#6b7280", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:4 }}>🏗️ Hakediş{hakedisData?" ↗":""}</div>
-                {hakedisLoading ? <div style={{ fontSize:12,color:"#9ca3af" }}>Yükleniyor...</div>
-                  : hakedisData ? <div style={{ fontSize:16,fontWeight:800,color:"#7c3aed" }}>{formatMoneyByCurrency(hakedisData.total_hakedis||0,"TRY")}</div>
-                  : <div style={{ fontSize:12,color:"#9ca3af" }}>Tedarikçi ara →</div>}
-              </div>
-            </div>
-
-            {/* TABLE */}
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                overflow: "auto",
-                padding: "16px 24px 24px 24px",
-              }}
-            >
-              <div className="tableWrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Tür</th>
-                      <th>Bölge</th>
-                      <th>Proje</th>
-                      <th>Proje Kodu</th>
-                      <th>Fatura No</th>
-                      <th>Fatura Tarihi</th>
-                      <th>Tedarikçi</th>
-                      <th>Firma</th>
-                      <th>PO No</th>
-                      <th>Site ID</th>
-                      <th>Toplam</th>
-                      <th>Ödenen</th>
-                      <th>Kalan</th>
-                      <th>İşlem</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredManualInvoiceRows.length === 0 ? (
-                      <EmptyRow colSpan={14} text="Kayıt bulunamadı" />
-                    ) : (
-                      filteredManualInvoiceRows.map((row, index) => (
-                        <tr key={row.id ?? index}>
-                          <td><span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, background:row.fatura_turu==='IADE'?"#fff7ed":"#f0fdf4", color:row.fatura_turu==='IADE'?"#c2410c":"#166534", border:`1px solid ${row.fatura_turu==='IADE'?"#fed7aa":"#86efac"}` }}>{row.fatura_turu==='IADE'?'↩ İade':'↓ Gelen'}</span></td>
-                          <td>{row.bolge || "-"}</td>
-                          <td>{row.proje || "-"}</td>
-                          <td>{row.proje_kodu || "-"}</td>
-                          <td>{row.fatura_no || "-"}</td>
-                          <td>{formatDateOnly(row.fatura_tarihi)}</td>
-                          <td>{row.tedarikci || "-"}</td>
-                          {/* Fatura hangi firmaya kesildi → ödemeyi o firma yapar */}
-                          <td>
-                            {altMarkaMi(row.firma)
-                              ? <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#fff7ed", color:"#9a3412", border:"1px solid #fed7aa", whiteSpace:"nowrap" }}>🔧 {altMarkaKisa(row.firma)}</span>
-                              : <span style={{ padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:"#eff6ff", color:"#1e40af", border:"1px solid #bfdbfe", whiteSpace:"nowrap" }}>⚡ Şimşek</span>}
-                          </td>
-                          <td>{row.po_no || "-"}</td>
-                          <td>{row.site_id || "-"}</td>
-                          <td>{formatTRY(row.toplam_tutar || 0)}</td>
-                          <td>{formatTRY(row.odenen_tutar || 0)}</td>
-                          <td>{formatTRY(row.kalan_borc || 0)}</td>
-                          <td>
-                            <div style={{ display: "flex", gap: "8px" }}>
-                              {row.belge_path && (
-                                <a
-                                  href={row.belge_path.startsWith("http") ? row.belge_path : `${API_BASE.replace(/\/api$/,"")}/fatura-belgeler/${row.belge_path}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{
-                                    padding: "5px 10px",
-                                    background: "#f0fdf4",
-                                    color: "#166534",
-                                    border: "1px solid #bbf7d0",
-                                    borderRadius: "6px",
-                                    fontSize: "12px",
-                                    fontWeight: 600,
-                                    textDecoration: "none",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  📄 Belge
-                                </a>
-                              )}
-
-                              <button
-                                type="button"
-                                className="tab"
-                                onClick={() => {
-                                  handleEditManualInvoice(row);
-                                  setShowInvoiceFormPanel(true);
-                                }}
-                              >
-                                Düzenle
-                              </button>
-                              {String(row.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
-                                <button type="button" className="tab" onClick={() => setOrtakOdemeFaturaId(row.id)} title="Araç kirası faturası — ortak ödeme kaydı (araç dönemi + nakit akışı tek kayıt)">💳 Ödeme</button>
-                              )}
-                              {ortakOdemeFaturaId === row.id && <OrtakOdemeModal faturaId={row.id} onClose={() => setOrtakOdemeFaturaId(null)} onDone={() => loadFinance()} />}
-
-                              <button
-                                type="button"
-                                className="tab danger"
-                                onClick={() => handleDeleteManualInvoice(row)}
-                              >
-                                Sil
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ── Fatura Giriş / Düzenle Modal (top-level) ───────────── */}
-      {showInvoiceFormPanel && (
-        <div
-          onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 11000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background: "#f8fafc", borderRadius: "20px", width: "100%", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", overflow: "hidden" }}
-          >
-            {/* Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #e5e7eb", flexShrink: 0 }}>
-              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#1e293b" }}>
-                {editingInvoiceId ? "🧾 Fatura Düzenle" : "🧾 Yeni Fatura Girişi"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}
-                style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", fontSize: "18px", cursor: "pointer", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}
-              >✕</button>
-            </div>
-
-            {/* Scrollable form content */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
-              <form onSubmit={handleSaveManualInvoice}>
-
-                {/* BÖLÜM 0: PDF Otomatik Doldurma */}
-                <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
-                    <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
-                        {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
-                      </div>
-                      {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
-                      {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
-                    </div>
-                    {!pdfParsing && (
-                      <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
-                        {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
-                        <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            setPdfFileName(file.name);
-                            setPdfParsing(true);
-                            setPdfFilled(null);
-                            try {
-                              const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
-                              const fd = new FormData();
-                              fd.append("file", file);
-                              const r = await fetch(`${API_BASE}/invoice-parse`, {
-                                method:"POST",
-                                headers: { Authorization:`Bearer ${tkn}` },
-                                body: fd,
-                              });
-                              const data = await r.json();
-                              if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
-                              const p = data.parsed || {};
-                              setPdfTempKey(data.temp_key || "");
-                              const filled = [];
-                              setInvoiceForm(prev => {
-                                const next = { ...prev };
-                                if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
-                                if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
-                                if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
-                                if (p.is_kalemi)    { next.is_kalemi = p.is_kalemi;         filled.push("İş Kalemi"); }
-                                if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
-                                if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
-                                if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
-                                // Tevkifatlı fatura: Toplam = Ödenecek Tutar (tevkifat düşülmüş);
-                                // tevkif edilen KDV nota yazılır (sorumlu sıfatıyla beyan edilecek)
-                                if (p.tevkifat && Number(p.tevkifat) > 0) {
-                                  const tvkNot = `KDV Tevkifatı: ₺${Number(p.tevkifat).toLocaleString("tr-TR")} (sorumlu sıfatıyla vergi dairesine beyan edilir; toplam, tevkifat düşülmüş Ödenecek Tutar'dır)`;
-                                  next.note = [prev.note, tvkNot].filter(Boolean).join("\n");
-                                  filled.push("Tevkifat→Not");
-                                }
-                                return next;
-                              });
-                              setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
-                            } catch (err) {
-                              alert("PDF işleme hatası: " + err.message);
-                            } finally {
-                              setPdfParsing(false);
-                              if (invoicePdfRef.current) invoicePdfRef.current.value = "";
-                            }
-                          }}
-                        />
-                      </label>
-                    )}
-                    {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
-                  </div>
-                </div>
-
-                {/* Fatura Türü */}
-                {!editingInvoiceId && (
-                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
-                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Fatura Türü:</span>
-                  {[["GELEN","📥 Gelen Fatura (Alış)","#166534","#f0fdf4","#86efac"],["IADE","↩️ İade Fatura (Kesilen)","#c2410c","#fff7ed","#fed7aa"]].map(([val,lbl,col,bg,brd])=>(
-                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:invoiceForm.fatura_turu===val?bg:"#f9fafb", border:`1.5px solid ${invoiceForm.fatura_turu===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:invoiceForm.fatura_turu===val?col:"#6b7280" }}>
-                      <input type="radio" name="fatura_turu" value={val} checked={invoiceForm.fatura_turu===val} onChange={()=>setInvoiceForm(p=>({...p,fatura_turu:val}))} style={{ display:"none" }} />{lbl}
-                    </label>
-                  ))}
-                  {invoiceForm.fatura_turu==='IADE' && (
-                    <select value={invoiceForm.bagli_fatura_id||""} onChange={e=>setInvoiceForm(p=>({...p,bagli_fatura_id:e.target.value}))}
-                      style={{ flex:1, minWidth:200, padding:"7px 12px", border:"1.5px solid #fed7aa", borderRadius:8, fontSize:13 }}>
-                      <option value="">— Bağlı Fatura Seç (opsiyonel)</option>
-                      {manualInvoiceRows.filter(r=>r.fatura_turu!=='IADE').map(r=>(
-                        <option key={r.id} value={r.id}>{r.fatura_no} — {r.tedarikci} — {formatTRY(r.toplam_tutar)}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                )}
-
-                {/* Firma: Şimşek / AHY — AHY seçilirse AHY Taşeron Faturaları paneline yansır */}
-                <div style={{ background:"#fff", borderRadius:14, padding:"14px 20px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
-                  <span style={{ fontWeight:700, fontSize:13, color:"#374151" }}>Firma:</span>
-                  {[["SIMSEK","🟨 Şimşek Haberleşme","#92400e","#fffbeb","#fcd34d"],["TEKNO","🔷 Teknocenter","#1e40af","#eff6ff","#93c5fd"]].map(([val,lbl,col,bg,brd])=>(
-                    <label key={val} style={{ display:"flex", alignItems:"center", gap:6, cursor:"pointer", padding:"7px 14px", borderRadius:8, background:(invoiceForm.firma||"SIMSEK")===val?bg:"#f9fafb", border:`1.5px solid ${(invoiceForm.firma||"SIMSEK")===val?brd:"#e5e7eb"}`, fontWeight:600, fontSize:13, color:(invoiceForm.firma||"SIMSEK")===val?col:"#6b7280" }}>
-                      <input type="radio" name="fatura_firma" value={val} checked={(invoiceForm.firma||"SIMSEK")===val} onChange={()=>setInvoiceForm(p=>({...p,firma:val}))} style={{ display:"none" }} />{lbl}
-                    </label>
-                  ))}
-                  {altMarkaMi(invoiceForm.firma) && (
-                    <span style={{ fontSize:12, color:"#1e40af", fontWeight:600 }}>→ {altMarkaKisa(invoiceForm.firma)} panelindeki Taşeron Faturaları'nda görünür</span>
-                  )}
-                </div>
-
-                {/* BÖLÜM 1: Proje Bilgileri */}
-                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
-                    Proje Bilgileri
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                    {[
-                      { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara", list: "dl-fatura-bolge" },
-                      { label: "Proje", name: "proje", placeholder: "TT / TC", list: "dl-fatura-proje" },
-                      { label: "Proje Kodu", name: "proje_kodu", placeholder: "56A0QEF", list: "dl-fatura-projekod" },
-                    ].map(f => (
-                      <div key={f.name}>
-                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder} list={f.list}
-                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                      </div>
-                    ))}
-                    {/* 26.08.2026 (Orhan): Bölge = önce İzmir/Ankara/Antalya, sonra tüm iller;
-                        Proje Kodu = sistemdeki kayıtlı kodlar + faturalardan görülenler */}
-                    <datalist id="dl-fatura-bolge">
-                      {["İzmir","Ankara","Antalya",
-                        "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik","Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli","Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep","Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","Kahramanmaraş","Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis","Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir","Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa","Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
-                      ].map(s => <option key={s} value={s} />)}
-                    </datalist>
-                    <datalist id="dl-fatura-proje">
-                      {["TT","TC"].map(s => <option key={s} value={s} />)}
-                    </datalist>
-                    <datalist id="dl-fatura-projekod">
-                      {[...new Set(["56A0TCT","56A0QEF","56A0819","56A0NCD","56A0SJC",
-                        ...manualInvoiceRows.map(r => (r.proje_kodu || "").trim()).filter(Boolean)])]
-                        .sort().map(k => <option key={k} value={k} />)}
-                    </datalist>
-                  </div>
-                </div>
-
-                {/* BÖLÜM 2: Fatura Bilgileri */}
-                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
-                    Fatura Bilgileri
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-                    {[
-                      { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
-                      { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
-                      { label: "RF Montaj Firma", name: "rf_montaj_firma", placeholder: "Subcon firma adı" },
-                      { label: "Fatura Kalemi", name: "fatura_kalemi", placeholder: "Malzeme / Hizmet" },
-                      { label: "İş Kalemi", name: "is_kalemi", placeholder: "KONAKLAMA / PROJE" },
-                      { label: "PO No", name: "po_no", placeholder: "PO numarası" },
-                      { label: "Site ID", name: "site_id", placeholder: "BU8944" },
-                    ].map(f => f.name === "is_kalemi" ? (
-                      /* İş Kalemi: AHY Taşeron Faturaları'ndaki kategori chipleri */
-                      <div key={f.name}>
-                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>İş Kalemi</label>
-                        <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
-                          {MT_KATEGORILER.map(([val, adi]) => {
-                            const secili = String(invoiceForm.is_kalemi || "").toUpperCase() === val;
-                            return (
-                              <button key={val} type="button" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: secili ? "" : val }))}
-                                style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: `1.5px solid ${secili ? "#1e3a5f" : "#e5e7eb"}`, background: secili ? "#1e3a5f" : "#fff", color: secili ? "#fff" : "#6b7280" }}>{adi}</button>
-                            );
-                          })}
-                          {invoiceForm.is_kalemi && !MT_KATEGORILER.some(([v]) => v === String(invoiceForm.is_kalemi).toUpperCase()) && (
-                            <button type="button" title="Serbest metin değer — kaldırmak için tıklayın" onClick={() => setInvoiceForm(pr => ({ ...pr, is_kalemi: "" }))}
-                              style={{ padding: "7px 10px", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer", border: "1.5px solid #1e3a5f", background: "#1e3a5f", color: "#fff" }}>{invoiceForm.is_kalemi} ✕</button>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={f.name}>
-                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                        <input name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder={f.placeholder}
-                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                      </div>
-                    ))}
-                    <div>
-                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Fatura Tarihi</label>
-                      <input type="date" name="fatura_tarihi" value={invoiceForm.fatura_tarihi} onChange={handleInvoiceFormChange}
-                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                    </div>
-                    <div>
-                      <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#7e22ce", marginBottom: "6px" }}>💸 Ödeme Tarihi</label>
-                      <input type="date" name="odeme_tarihi" value={invoiceForm.odeme_tarihi} onChange={handleInvoiceFormChange} disabled={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA"}
-                        style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #d8b4fe", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box", background:"#fdf4ff" }} />
-                      <div style={{ fontSize:"10px", color:"#9ca3af", marginTop:"3px" }}>{String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" ? "Araç kirası faturasında kullanılmaz — ödeme tarihi ödeme kaydında girilir" : "Nakit Akış'ta taşeron satırı olarak görünür"}</div>
-                    </div>
-                  </div>
-                  {String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
-                    <AracKiraKalemEditor value={invoiceForm.arac_kalemler || []} toplam={Number(invoiceForm.toplam_tutar || 0)}
-                      onChange={(rows) => setInvoiceForm(pr => ({ ...pr, arac_kalemler: rows }))} />
-                  )}
-                </div>
-
-                {/* BÖLÜM 3: Finansal Bilgiler */}
-                <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                  {/* Para Birimi Seçimi */}
-                  <div style={{ marginBottom:"16px", display:"flex", alignItems:"center", gap:"10px" }}>
-                    <span style={{ fontSize:"13px", fontWeight:600, color:"#374151" }}>Para Birimi:</span>
-                    {["TRY","USD"].map(c => (
-                      <button key={c} type="button"
-                        onClick={() => setInvoiceForm(p => ({ ...p, currency: c, usd_kur: c === "USD" ? String(usdTryRate) : "" }))}
-                        style={{ padding:"6px 18px", borderRadius:"8px", fontWeight:700, fontSize:"13px", cursor:"pointer",
-                          background: invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#f3f4f6",
-                          color: invoiceForm.currency === c ? "#fff" : "#6b7280",
-                          border: `2px solid ${invoiceForm.currency === c ? (c === "USD" ? "#1d4ed8" : "#166534") : "#e5e7eb"}` }}>
-                        {c === "TRY" ? "₺ TRY" : "$ USD"}
-                      </button>
-                    ))}
-                    {invoiceForm.currency === "USD" && (
-                      <div style={{ display:"flex", alignItems:"center", gap:"6px", marginLeft:"8px" }}>
-                        <span style={{ fontSize:"12px", color:"#6b7280" }}>Kur:</span>
-                        <input type="number" step="0.01" value={invoiceForm.usd_kur}
-                          onChange={e => setInvoiceForm(p => ({ ...p, usd_kur: e.target.value }))}
-                          style={{ width:"80px", padding:"5px 8px", border:"1.5px solid #bfdbfe", borderRadius:"7px", fontSize:"13px", fontWeight:600 }}
-                          placeholder={String(usdTryRate)} />
-                        <span style={{ fontSize:"11px", color:"#9ca3af" }}>₺/$ (güncel: {usdTryRate?.toFixed(2)})</span>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
-                    Finansal Bilgiler
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
-                    {[
-                      { label: "Tutar (₺)", name: "tutar" },
-                      { label: "KDV (₺)", name: "kdv" },
-                      { label: "Toplam Tutar (₺) *", name: "toplam_tutar" },
-                      { label: "Ödenen Tutar (₺)", name: "odenen_tutar" },
-                      { label: "Kalan Borç (₺)", name: "kalan_borc" },
-                    ].map(f => (
-                      <div key={f.name}>
-                        <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
-                        <input type="number" step="0.01" name={f.name} value={invoiceForm[f.name]} onChange={handleInvoiceFormChange} placeholder="0"
-                          disabled={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (f.name === "odenen_tutar" || f.name === "kalan_borc")}
-                          title={String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (f.name === "odenen_tutar" || f.name === "kalan_borc") ? "Araç kirası faturası: ödenen/kalan yalnız ortak ödeme kayıtlarından hesaplanır (💳 Ödeme)" : undefined}
-                          style={{ width: "100%", padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
-                      Not / Açıklama
-                    </div>
-                    <textarea name="note" value={invoiceForm.note} onChange={handleInvoiceFormChange} placeholder="Ödeme planı, açıklama, notlar..." rows={5}
-                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", resize: "vertical", boxSizing: "border-box" }} />
-                  </div>
-
-                  <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
-                      Fatura Belgesi (PDF / Fotoğraf)
-                    </div>
-                    {pdfTempKey && !editingInvoiceId ? (
-                      <div style={{ border:"1.5px solid #86efac", borderRadius:10, padding:"14px 16px", background:"#f0fdf4", display:"flex", alignItems:"center", gap:10 }}>
-                        <span style={{ fontSize:28 }}>📄</span>
-                        <div style={{ flex:1 }}>
-                          <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
-                          <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
-                        </div>
-                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
-                      </div>
-                    ) : (
-                      <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                  <button type="button" className="tab"
-                    onClick={() => { setShowInvoiceFormPanel(false); setEditingInvoiceId(null); }}>
-                    Vazgeç
-                  </button>
-                  <button type="submit" className="saveButton">
-                    {editingInvoiceId ? "Güncelle" : "Faturayı Kaydet"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
+      {faturaGirisiJSX}
 
       {/* ── Taşeron Ödeme Motoru Modal ─────────────────────────── */}
       {showOdemeModal && (
@@ -35908,6 +35949,7 @@ function App() {
       case "cashflow": return "Nakit Akışı";
       case "marka_pl": return "Kâr / Zarar (P&L)";
       case "marka_taseron": return "Taşeron Faturaları";
+      case "marka_fatura_girisi": return "Fatura Girişi";
       case "marka_fatura_takip": return "Şimşek Fatura Takip";
       case "taseron_borc": return "Taşeron Borçlar";
       case "erc_taseron": return "Taşeron Hesabı";
@@ -36127,6 +36169,7 @@ function App() {
                     ] : []),
                     ...(isAltMarka && isAdmin ? [
                       { ikon:'💰', label:'Nakit Akışı (Günlük)', aktif: page==='marka_nakit', onClick:()=>setPage('marka_nakit') },
+                      { ikon:'🧾', label:'Fatura Girişi', aktif: page==='marka_fatura_girisi', onClick:()=>setPage('marka_fatura_girisi') },
                       { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron', onClick:()=>setPage('marka_taseron') },
                       { ikon:'🧾', label:'Şimşek Fatura Takip', aktif: page==='marka_fatura_takip', onClick:()=>setPage('marka_fatura_takip') },
                     ] : []),
@@ -36209,6 +36252,7 @@ function App() {
             {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
             {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
+            {page === "marka_fatura_girisi" && isAltMarka && isAdmin && <FinanceDashboard user={user} currentUser={user} sadeceFatura onBack={() => setPage("marka_finans")} />}
             {page === "marka_fatura_takip" && isAltMarka && <SimsekFaturaTakipPanel currentUser={user} />}
             {page === "erc_taseron" && !isAltMarka && <ErcTaseronPanel />}
             {page === "taseron_borc" && !isAltMarka && <TaseronBorcPanel />}
