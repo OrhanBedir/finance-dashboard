@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-22-marka-kapsam", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-marka-fatura", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -719,6 +719,15 @@ const puantajOkuma = okumaKapisi((u, req) => ikOkumaYetkili(u) || _rol(u) === "r
   || req?.izinler?.puantaj_goruntule === true, "Puantaj görme yetkiniz yok"); // + kullanıcı yetki ayarı (21.10.2026)
 // 21.10.2026: İSG kayıtları (eğitim/belge matrisi, uyarılar, İSG Excel'i, personel İSG/belge dökümü) İK okuma yetkilisine
 // + rol izin setinde isg_goruntule olan role (İSG Sorumlusu) açık; maaş/banka alanları ikMaskele ile zaten gizlenir
+// 23.10.2026 (Orhan): alt marka (Teknocenter vb.) yetkili rolü ERC "Fatura Girişi"ni kendi firması kapsamında kullanır.
+// Tüm Finans Paneli yetkisi VERİLMEZ — yalnız aşağıdaki fatura uçları; kapsam "MARKA FATURA KAPSAMI" katmanında zorlanır.
+function markaFaturaKapsami(req) {
+  const u = req?.user || optionalAuth(req);
+  if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return null;
+  return MARKA_KASA_ROLLER.includes(_rol(u)) ? String(u.marka).trim().toUpperCase() : null;
+}
+const faturaYazma = rolKapisi((u, req) => finansYazmaYetkili(u) || !!markaFaturaKapsami(req), "Fatura kaydı değiştirme yetkiniz yok");
+const faturaOkuma = okumaKapisi((u, req) => finansYazmaYetkili(u) || !!markaFaturaKapsami(req), "Fatura kayıtlarını görme yetkiniz yok");
 const isgOkuma = okumaKapisi((u, req) => ikOkumaYetkili(u) || !!ROL_IZINLERI[_rol(u)]?.isg_goruntule
   || req?.izinler?.isg_goruntule === true, "İSG kayıtlarını görme yetkiniz yok"); // + kullanıcı yetki ayarı (21.10.2026)
 const finansOkuma = okumaKapisi(finansYazmaYetkili, "Finans kayıtlarını görme yetkiniz yok");
@@ -1376,6 +1385,73 @@ app.use(async (req, res, next) => {
   } catch (e) {
     console.error("[marka-kapsami]", e.message);
     res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
+  }
+});
+// ═══ MARKA FATURA KAPSAMI (23.10.2026, Orhan) ═══════════════════════════════════════════════════
+// Alt marka yetkilisi ERC Fatura Girişi uçlarını yalnız KENDİ firması etiketli (invoice_entries.firma) kayıtlar için kullanır:
+// liste/dışa aktarım süzülür, yeni kayıt ve güncellemede firma oturumdan zorlanır, kimlikli uçlarda kaydın firması doğrulanır,
+// bağlı fatura da kendi firmasından olmalı. Araç kirası faturası (fatura_arac_kalem akışı) bu yoldan girilmez/değiştirilmez.
+// Finans yetkilisi ve diğer kullanıcılar bu katmandan etkilenmez.
+const MARKA_FATURA_YOLU = /^\/(finance\/invoice-entry(\/|$)|invoice-entries\/\d+\/belge$)/;
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    if (!MARKA_FATURA_YOLU.test(yol)) return next();
+    const M = markaFaturaKapsami(req);
+    if (!M) return next();
+    req.markaFatura = M;
+    const red = (m) => res.status(403).json({ ok: false, error: m || "Bu fatura başka bir firmaya ait — erişim yetkiniz yok" });
+    const b = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : null;
+    const aracIstek = b && (String(b.is_kalemi || "").toUpperCase() === "ARAC_KIRA" || (Array.isArray(b.arac_kalemler) && b.arac_kalemler.length > 0));
+    const kayit = async (id) => {
+      const r = await pool.query(
+        `SELECT UPPER(COALESCE(firma,'')) AS m, UPPER(COALESCE(is_kalemi,'')) AS k,
+                EXISTS (SELECT 1 FROM fatura_arac_kalem WHERE fatura_id = $1) AS arac
+           FROM invoice_entries WHERE id = $1`, [id]).catch(() => pool.query(
+        `SELECT UPPER(COALESCE(firma,'')) AS m, UPPER(COALESCE(is_kalemi,'')) AS k, false AS arac FROM invoice_entries WHERE id = $1`, [id]));
+      return r.rows[0];
+    };
+    // AHY_/TEKNO_ önekli taşeron adı kaydı o markaya etiketler — başka markanın öneki verilemez
+    const onekUygun = () => { const o = b && altMarkaOnekiOf(b.rf_montaj_firma); return !o || o === M; };
+    const bagliUygun = async () => {
+      if (!b || b.bagli_fatura_id == null || b.bagli_fatura_id === "") return true;
+      const k = await kayit(Number(b.bagli_fatura_id));
+      return !!k && k.m === M;
+    };
+    if (req.method === "GET" && yol === "/finance/invoice-entry/list") {
+      const orig = res.json.bind(res);
+      res.json = (o) => orig(o && Array.isArray(o.rows) ? { ...o, rows: o.rows.filter((r) => String(r.firma || "").toUpperCase() === M) } : o);
+      return next();
+    }
+    if (req.method === "GET" && yol === "/finance/invoice-entry/export-excel") return next(); // sorgu req.markaFatura ile süzülür
+    if (req.method === "POST" && yol === "/finance/invoice-entry/add") {
+      if (aracIstek) return red("Araç kirası faturaları bu ekrandan girilmez");
+      if (!(await bagliUygun())) return red("Bağlı fatura başka bir firmaya ait");
+      if (!onekUygun()) return red("Taşeron adı başka bir firmanın önekini taşıyor");
+      // Geçici PDF yalnız /invoice-parse'ın ürettiği tmp dosyası olabilir (kayıtta kopyalanıp kaynağı silinir —
+      // başka bir belgenin yolu verilerek kopyalanması/silinmesi engellenir)
+      if (b && b.temp_belge_key != null && b.temp_belge_key !== "" && !/^fatura-belgeler\/\d+-tmp-\d+\.pdf$/.test(String(b.temp_belge_key)))
+        return red("Geçersiz geçici belge");
+      if (b) b.firma = M;
+      return next();
+    }
+    const idm = yol.match(/^\/(?:finance\/invoice-entry|invoice-entries)\/(\d+)(\/belge)?$/);
+    if (!idm) return red("Bu işlem için yetkiniz yok");
+    const k = await kayit(Number(idm[1]));
+    if (!k) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    if (k.m !== M) return red();
+    if (k.arac || k.k === "ARAC_KIRA") return red("Araç kirası faturaları bu ekrandan değiştirilmez");
+    if (req.method === "PUT") {
+      if (aracIstek) return red("Araç kirası faturaları bu ekrandan girilmez");
+      if (!(await bagliUygun())) return red("Bağlı fatura başka bir firmaya ait");
+      if (!onekUygun()) return red("Taşeron adı başka bir firmanın önekini taşıyor");
+      if (b) b.firma = M;
+    }
+    next();
+  } catch (e) {
+    console.error("[marka-fatura]", e.message);
+    res.status(500).json({ ok: false, error: "Fatura kapsamı doğrulanamadı" });
   }
 });
 // TÜM KULLANICILARI LİSTELE
@@ -6896,7 +6972,7 @@ async function faturaNoMukerrerMi(fatura_no, haricId) {
   return r.rows[0] || null;
 }
 
-app.post("/finance/invoice-entry/add", finansYazma, async (req, res) => {
+app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
   try {
     const {
       bolge,
@@ -6931,6 +7007,8 @@ app.post("/finance/invoice-entry/add", finansYazma, async (req, res) => {
       return res.status(400).json({ ok: false, error: "Araç Kirası faturasında en az bir araç (plaka + dönem + tutar) satırı zorunlu" });
     }
     const mukerrer = await faturaNoMukerrerMi(fatura_no);
+    if (mukerrer && req.markaFatura && String(mukerrer.firma || "").toUpperCase() !== req.markaFatura)
+      return res.status(409).json({ ok: false, error: "Bu fatura numarası sistemde kayıtlı; aynı faturayı ikinci kez girmeyin." });
     if (mukerrer) {
       return res.status(409).json({ ok: false,
         error: `Bu fatura numarası zaten kayıtlı (${mukerrer.tedarikci} · ${altMarkaMi(mukerrer.firma) ? mukerrer.firma : "Şimşek"} etiketi). Aynı faturayı ikinci kez girmeyin — iki panel de aynı kayıttan beslenir.` });
@@ -7048,7 +7126,7 @@ app.post("/finance/invoice-entry/add", finansYazma, async (req, res) => {
   }
 });
 
-app.get("/finance/invoice-entry/list", finansOkuma, async (req, res) => {
+app.get("/finance/invoice-entry/list", faturaOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT ie.*, bf.fatura_no AS bagli_fatura_no
@@ -7064,7 +7142,7 @@ app.get("/finance/invoice-entry/list", finansOkuma, async (req, res) => {
   }
 });
 
-app.get("/finance/invoice-entry/export-excel", finansOkuma, async (req, res) => {
+app.get("/finance/invoice-entry/export-excel", faturaOkuma, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
@@ -7087,8 +7165,9 @@ app.get("/finance/invoice-entry/export-excel", finansOkuma, async (req, res) => 
         COALESCE(note, '') AS note,
         created_at
       FROM invoice_entries
+      ${req.markaFatura ? "WHERE UPPER(COALESCE(firma,'')) = $1" : ""}
       ORDER BY fatura_tarihi DESC NULLS LAST, id DESC
-    `);
+    `, req.markaFatura ? [req.markaFatura] : []);
 
     const query = String(req.query.query || "")
       .toLowerCase()
@@ -7333,7 +7412,7 @@ app.get("/finance/invoice-entry/export-excel", finansOkuma, async (req, res) => 
   }
 });
 
-app.delete("/finance/invoice-entry/:id", finansYazma, async (req, res) => {
+app.delete("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
   try {
     const result = await pool.query(
       `DELETE FROM invoice_entries WHERE id = $1 RETURNING id`,
@@ -13463,7 +13542,7 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
 
 /* ================== MASTER UPDATE ================== */
 
-app.put("/finance/invoice-entry/:id", finansYazma, async (req, res) => {
+app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
   try {
     const { id } = req.params;
     const {
@@ -17524,6 +17603,7 @@ app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), as
 
 app.post(
   "/invoice-entries/:id/belge",
+  faturaYazma, // 23.10.2026: kapısızdı — finans yetkilisi ya da kendi firması kapsamında alt marka
   uploadFaturaBelge.single("belge"),
   async (req, res) => {
     const { id } = req.params;
@@ -17571,7 +17651,7 @@ app.post(
   }
 );
 
-app.delete("/invoice-entries/:id/belge", finansYazma, async (req, res) => {
+app.delete("/invoice-entries/:id/belge", faturaYazma, async (req, res) => {
   const { id } = req.params;
   try {
     const r = await pool.query("SELECT belge_path FROM invoice_entries WHERE id=$1", [id]);
@@ -18944,6 +19024,8 @@ app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
         AND EXTRACT(MONTH FROM i.odeme_tarihi) = $2
         AND (COALESCE(i.odenen_tutar, 0) - COALESCE(okd.t, 0)) > 0
         AND i.odeme_tarihi IS NOT NULL
+        -- 23.10.2026: alt marka (AHY/TEKNO) etiketli faturanın ödemesi o markanın nakit akışında sayılır; burada çift sayılmaz
+        AND UPPER(TRIM(COALESCE(i.firma,''))) NOT IN (${altMarkaInSql()})
 
       UNION ALL
 
