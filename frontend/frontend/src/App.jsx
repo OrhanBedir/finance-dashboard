@@ -22797,8 +22797,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     const b = belgeler[idx];
     const url = b ? fisUrl(b) : "";
     const pdf = /\.pdf($|\?)/i.test(url);
-    const kunye = !b ? "" : b.kirpildi === true ? "✂️ Mobilde kırpılmış" : b.kirpildi === false ? "Orijinal (kırpılmadan yüklendi)" : "Kırpma bilgisi yok (eski kayıt)";
-    const kunyeRenk = b?.kirpildi === true ? ["#dcfce7", "#166534"] : b?.kirpildi === false ? ["#fef3c7", "#92400e"] : ["#f1f5f9", "#475569"];
+    // 24.10.2026: otomatik fiş kırpma durumu sunucunun kendi işinden (kirpma_durum); eski kayıtlarda önceki künye
+    const KD = { OTOMATIK: ["✂️ Otomatik kırpıldı", "#dcfce7", "#166534"], KULLANICI: ["✂️ Kullanıcı düzeltti", "#dbeafe", "#1e40af"],
+      KIRPILMADI: ["Kırpılmadı (orijinal)", "#fef3c7", "#92400e"], MOBIL_ELLE: ["✂️ Mobilde elle kırpıldı", "#dcfce7", "#166534"],
+      DOGRULANAMADI: ["Kırpma bilgisi doğrulanamadı", "#fee2e2", "#991b1b"] };
+    const kd = b && KD[b.kirpma_durum];
+    const kunye = !b ? "" : kd ? kd[0] : b.kirpildi === true ? "✂️ Mobilde kırpılmış" : b.kirpildi === false ? "Orijinal (kırpılmadan yüklendi)" : b.kaynak === "web" ? "Web'den yüklendi (kırpılmadı)" : "Kırpma bilgisi yok (eski kayıt)";
+    const kunyeRenk = kd ? [kd[1], kd[2]] : b?.kirpildi === true ? ["#dcfce7", "#166534"] : b?.kirpildi === false ? ["#fef3c7", "#92400e"] : ["#f1f5f9", "#475569"];
+    const kirpmaUyari = b?.kirpma_durum === "OTOMATIK" && Array.isArray(b?.kirpma?.uyarilar) && b.kirpma.uyarilar.length ? b.kirpma.uyarilar.join(" · ") : "";
     const olcu = b?.genislik ? `${b.genislik}×${b.yukseklik} px` : "";
     const indir = async () => {
       try { const r = await fetch(url); const bl = await r.blob(); const u = URL.createObjectURL(bl); const a = document.createElement("a"); a.href = u; a.download = b?.dosya_adi || "fis.jpg"; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); }
@@ -22818,6 +22824,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               {b && <div style={{ display: "flex", gap: "6px", marginTop: "4px", flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ background: kunyeRenk[0], color: kunyeRenk[1], borderRadius: "999px", padding: "2px 9px", fontSize: "11px", fontWeight: 700 }}>{kunye}</span>
                 {olcu && <span style={{ fontSize: "11px", color: "#64748b" }}>{olcu}</span>}
+                {kirpmaUyari && <span title="Kullanıcı bu uyarıyı görerek ekledi" style={{ fontSize: "11px", color: "#92400e" }}>⚠ {kirpmaUyari}</span>}
                 <span style={{ fontSize: "11px", color: "#94a3b8" }}>{b.dosya_adi}{b.created_at ? ` · ${_notZaman(b.created_at)}` : ""}</span>
               </div>}
             </div>
@@ -22831,6 +22838,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               </>}
               {b && <button type="button" onClick={indir} style={{ ...zb, background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}>⬇ İndir</button>}
               {b && <a href={url} target="_blank" rel="noreferrer" style={{ ...zb, textDecoration: "none", background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}>↗ Aç</a>}
+              {b?.isleme_id && b.kirpma_durum !== "KIRPILMADI" && <a href={tokenliUrl(`${API_BASE}/hr/masraf-belge/${b.id}/orijinal`)} target="_blank" rel="noreferrer" title="Kırpılmadan önceki fotoğraf (yetkili erişim)" style={{ ...zb, textDecoration: "none", background: "#f8fafc", color: "#334155" }}>🖼 Orijinal</a>}
               {b && silinebilir && (
                 <button type="button" onClick={async () => {
                   if (!window.confirm("Bu fiş silinsin mi?")) return;

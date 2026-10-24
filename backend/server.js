@@ -74,7 +74,7 @@ function detectTenant(email, subconName) {
 const { createWorker } = require("tesseract.js");
 const { detectRegion } = require("./utils/regionHelper");
 const { applyPremiumExcelStyle } = require("./utils/excelStyle");
-const { uploadToStorage, deleteFromStorage, supabase, BUCKET } = require("./supabase-storage");
+const { uploadToStorage, deleteFromStorage, supabase, BUCKET, ozelYukle, ozelIndir, ozelSil } = require("./supabase-storage");
 
 // ─── OCR HELPER ──────────────────────────────────────────────────────────────
 
@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-24-ai-fatura-sema", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-24-fis-kirpma", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -983,7 +983,7 @@ const ISG_OKUMA = [
   // Kendi iş avansı / masraf (personel akışı)
   /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(bakiye|hesap|excel)$/, /^\/hr\/personel-odeme$/, /^\/hr\/personel-secim$/,
   /^\/hr\/masraf-form$/, /^\/hr\/masraf-form\/\d+$/, /^\/hr\/masraf-form\/\d+\/(excel|pdf)$/, /^\/hr\/masraf-form\/bakiye\/\d+$/,
-  /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/islem-gecmisi\/(avans|masraf)\/\d+$/,
+  /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/hr\/masraf-belge\/\d+\/orijinal$/, /^\/islem-gecmisi\/(avans|masraf)\/\d+$/,
   /^\/hr\/mobile-dashboard$/, /^\/hr\/atanan-arac$/, /^\/hr\/araclar$/, /^\/is-atama\/benim$/,
   // Personel listesi (kişi seçimleri; maaş/banka alanları maskeli). İSG / puantaj / Rollout / Araç & Depo / Günlük iş /
   // Bölge Analizi / Malzeme yolları izne bağlı: IZIN_OKUMA_YOLLARI (21.10.2026)
@@ -997,6 +997,7 @@ const ISG_YAZMA = [
   ["POST", /^\/hr\/masraf-form$/], ["DELETE", /^\/hr\/masraf-form\/\d+$/], ["PUT", /^\/hr\/masraf-form\/\d+\/submit$/],
   ["POST", /^\/hr\/masraf-kalem$/], ["PUT", /^\/hr\/masraf-kalem\/\d+$/], ["DELETE", /^\/hr\/masraf-kalem\/\d+$/],
   ["POST", /^\/hr\/masraf-kalem\/\d+\/not$/], ["POST", /^\/hr\/masraf-belge\/\d+$/], ["DELETE", /^\/hr\/masraf-belge\/\d+$/],
+  ["POST", /^\/hr\/masraf-belge\/\d+\/isle$/], // otomatik fiş kırpma (24.10.2026)
 ];
 // Yanıtlardan çıkarılan alanlar (maaş, ücret, banka, ödeme tutarı; araç kira/depozito; saha hakediş/perakende tutarı)
 const ISG_GIZLI_PERSONEL = ["net_maas", "bankadan_gosterilen", "elden_verilen", "iban", "banka_adi",
@@ -1153,6 +1154,10 @@ app.use(async (req, res, next) => {
       }
       if ((mm = yol.match(/^\/hr\/masraf-belge\/file\/([^/]+)$/))) {
         const b = await pool.query(`SELECT mk.form_id FROM masraf_belge mb JOIN masraf_kalem mk ON mk.id = mb.kalem_id WHERE mb.dosya_adi=$1 ORDER BY mb.id DESC LIMIT 1`, [decodeURIComponent(mm[1])]).catch(() => ({ rows: [] }));
+        if (!b.rows[0] || !(await isgMasrafFormSahibi(u, b.rows[0].form_id))) return red("Bu belge size ait değil");
+      }
+      if ((mm = yol.match(/^\/hr\/masraf-belge\/(\d+)\/orijinal$/))) {
+        const b = await pool.query(`SELECT mk.form_id FROM masraf_belge mb JOIN masraf_kalem mk ON mk.id = mb.kalem_id WHERE mb.id=$1`, [Number(mm[1])]).catch(() => ({ rows: [] }));
         if (!b.rows[0] || !(await isgMasrafFormSahibi(u, b.rows[0].form_id))) return red("Bu belge size ait değil");
       }
       // Yanıt maskesi + firma kapsamı (alt marka İSG kullanıcısı yalnız kendi bordro firmasını görür)
@@ -21723,6 +21728,118 @@ pool.query(`ALTER TABLE masraf_belge
   ADD COLUMN IF NOT EXISTS kirpildi BOOLEAN,
   ADD COLUMN IF NOT EXISTS kaynak TEXT,
   ADD COLUMN IF NOT EXISTS kirpma JSONB`).catch(() => {});
+// ═══ OTOMATİK FİŞ KIRPMA (24.10.2026, Orhan) ═══════════════════════════════════════════════════════
+// Mobil fotoğrafı POST /hr/masraf-belge/:kalemId/isle ile gönderir: orijinal ÖZEL depoya yazılır, belge(ler) yapay
+// zekâ + klasik görüntü işlemeyle bulunur, kırpılmış önizlemeler döner (henüz masraf eki YOK). Kullanıcı onaylayınca
+// POST /hr/masraf-belge/:kalemId { isleme_id, secimler[] } ile kırpma SUNUCUDA orijinalden yeniden üretilir ve ek olur —
+// mobilin "kırpıldı" bilgisine değil sunucunun kendi işine dayanır. Orijinal masraf_belge listesine ikinci ek olarak
+// girmez; yalnız GET /hr/masraf-belge/:id/orijinal (fiş dosyasıyla aynı yetki/kapsam) üzerinden akıtılır.
+// Durum (kirpma_durum): OTOMATIK | KULLANICI (köşeler düzeltildi) | KIRPILMADI (kullanıcı orijinali seçti) |
+// MOBIL_ELLE (eski mobil sürümün kendi kırpması, ölçüsü doğrulandı) | DOGRULANAMADI (beyan dosyayla uyuşmadı).
+const fisKirpma = require("./fisKirpma");
+pool.query(`CREATE TABLE IF NOT EXISTS masraf_fis_isleme (
+  id SERIAL PRIMARY KEY,
+  kalem_id INTEGER, form_id INTEGER, kullanici_email TEXT NOT NULL,
+  sha256 TEXT NOT NULL, orijinal_ad TEXT, mime TEXT, boyut INTEGER,
+  genislik INTEGER, yukseklik INTEGER, exif_yon INTEGER,
+  orijinal_depo TEXT, orijinal_yol TEXT,
+  durum TEXT NOT NULL DEFAULT 'ISLENIYOR', sonuc JSONB, model TEXT, sure_ms INTEGER, hata TEXT, deneme INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT now(), updated_at TIMESTAMP DEFAULT now(), eklendi_at TIMESTAMP)`)
+  .then(() => pool.query(`ALTER TABLE masraf_fis_isleme ENABLE ROW LEVEL SECURITY`))
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS masraf_fis_isleme_anahtar_idx ON masraf_fis_isleme (kullanici_email, kalem_id, sha256)`))
+  .then(() => pool.query(`ALTER TABLE masraf_belge
+    ADD COLUMN IF NOT EXISTS isleme_id INTEGER,
+    ADD COLUMN IF NOT EXISTS aday_no INTEGER,
+    ADD COLUMN IF NOT EXISTS kirpma_durum TEXT,
+    ADD COLUMN IF NOT EXISTS istek_id TEXT`))
+  .then(() => pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS masraf_belge_istek_idx ON masraf_belge (istek_id) WHERE istek_id IS NOT NULL`))
+  .catch((e) => console.error("[fis-kirpma tablo]", e.message));
+const fisUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+const FIS_SAATLIK_SINIR = Number(process.env.FIS_SAATLIK_SINIR || 40);
+const _fisKilit = new Map();   // aynı fotoğrafın eşzamanlı ikinci isteği ilkinin sonucunu bekler (çift model çağrısı yok)
+const _fisSayac = new Map();   // e-posta → { t, n }: kişi başı saatlik yeni işlem sınırı (model maliyeti)
+const FIS_MESAJ = {
+  GUVENILIR: "Fiş algılandı ve otomatik kırpıldı.",
+  KONTROL: "Fiş algılandı, ancak kırpmayı kontrol etmeniz gerekiyor.",
+  COKLU: "Fotoğrafta birden fazla fiş bulundu — bu kaleme eklenecekleri seçin.",
+  FIS_YOK: "Fotoğrafta fiş algılanamadı.",
+};
+function fisHataYaniti(res, e) {
+  if (e instanceof fisKirpma.FisKirpmaHatasi) return res.status(e.http).json({ error: e.message, asama: e.asama });
+  console.error("[fis-kirpma]", e.message);
+  return res.status(500).json({ error: e.message });
+}
+// Fiş işlem sonucunu mobil yanıtına çevirir: önizlemeler her seferinde orijinalden üretilir (saklanmaz)
+async function fisIslemeYaniti(row, buf, ciktilar = null, onbellek = false) {
+  const s = row.sonuc || {}, olcu = { w: row.genislik, h: row.yukseklik };
+  let ham = null;
+  const adaylar = [];
+  for (const [i, a] of (s.adaylar || []).entries()) {
+    let c = ciktilar?.[i];
+    if (!c) { ham = ham || await fisKirpma.yonluHam(buf); c = (await fisKirpma.fisUret(buf, a.kose, ham)).buffer; }
+    adaylar.push({ no: a.no, kose: a.kose, olcu: a.olcu, guvenilir: a.guvenilir, uyarilar: a.uyarilar, etiket: a.etiket, onizleme: await fisKirpma.onizleme(c) });
+  }
+  const aiHata = row.durum === "AI_HATA";
+  const durum = aiHata ? "AI_HATA" : s.durum;
+  const elle = aiHata || durum === "FIS_YOK" ? await fisKirpma.klasikTahmin(buf, olcu).catch(() => null) : null;
+  return {
+    isleme_id: row.id, durum, olcu, adaylar, onbellek,
+    mesaj: aiHata ? `Sebep: ${row.hata || "servis hatası"}. Fotoğrafınız saklandı — tekrar deneyebilir ya da elle kırpabilirsiniz.` : FIS_MESAJ[durum] || "",
+    kaynak: { onizleme: await fisKirpma.onizleme(buf, 1280, 75) },
+    elle_baslangic: elle,
+  };
+}
+// Yüklenen fiş dosyasından OCR (tutar / plaka) — süreli; dosya kaydı OCR'dan bağımsız tamamdır
+async function masrafBelgeOcr(belgeId, buffer, kalem) {
+  const ocrTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+  const ocrResult = await Promise.race([ocrFis(buffer), ocrTimeout]).catch(() => null);
+  let ocrTutar = null, matchedPlaka = null, ocrPlakaEslesti = null, ocrPara = null;
+  if (ocrResult) {
+    ocrTutar = ocrResult.amount;
+    ocrPara = ocrResult.currency || null;
+    let ocrPlaka = ocrResult.plaka;
+    const rawPlates = ocrResult.rawPlates || [];
+    if (kalem.kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
+      const enteredPlaka = (kalem.plaka || "").trim() || (kalem.aciklama || "").replace(/^Site ID:\s*[^|]+\|\s*/i, "").trim();
+      const candidates = rawPlates.length ? rawPlates : [ocrPlaka];
+      if (enteredPlaka) {
+        for (const cand of candidates) {
+          const found = plakaEsles(cand, [enteredPlaka]);
+          if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
+        }
+        if (ocrPlakaEslesti === null) { matchedPlaka = ocrPlaka; ocrPlakaEslesti = false; }
+      } else {
+        // No entered plate — skip plate check
+        matchedPlaka = ocrPlaka;
+        ocrPlakaEslesti = null;
+      }
+    }
+  }
+  const updated = await pool.query(
+    `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3, ocr_para=$5 WHERE id=$4 RETURNING *`,
+    [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId, ocrPara]
+  );
+  return updated.rows[0];
+}
+// Süresi dolan / bağlanmamış orijinallerin temizliği: eklenmeyen işlem 48 saat sonra, eki silinen işlem
+// (EKLENDI ama masraf_belge'de karşılığı yok) 48 saat sonra özel depodan silinir; kayıt iz olarak kalır.
+async function fisIslemeTemizle() {
+  try {
+    const r = await pool.query(`SELECT i.id, i.orijinal_depo, i.orijinal_yol FROM masraf_fis_isleme i
+      WHERE i.orijinal_yol IS NOT NULL AND i.updated_at < now() - interval '48 hours'
+        AND (i.durum <> 'EKLENDI' OR NOT EXISTS (SELECT 1 FROM masraf_belge mb WHERE mb.isleme_id = i.id))
+      ORDER BY i.id LIMIT 200`);
+    for (const x of r.rows) {
+      try {
+        await ozelSil(x.orijinal_depo, x.orijinal_yol);
+        await pool.query(`UPDATE masraf_fis_isleme SET durum='TEMIZLENDI', orijinal_yol=NULL, updated_at=now() WHERE id=$1`, [x.id]);
+      } catch (e) { console.error("[fis-kirpma temizlik]", x.id, e.message); }
+    }
+    if (r.rows.length) console.log(`[fis-kirpma temizlik] ${r.rows.length} geçici orijinal silindi`);
+  } catch (e) { console.error("[fis-kirpma temizlik]", e.message); }
+}
+setTimeout(fisIslemeTemizle, Number(process.env.FIS_TEMIZLIK_ILK_MS || 5 * 60 * 1000)).unref();
+setInterval(fisIslemeTemizle, 60 * 60 * 1000).unref();
 const MF_ONAYDA = ["ROLLOUT_BEKLE", "MUHASEBE_BEKLE", "PM_BEKLE", "DIREKTOR_BEKLE"];
 async function masrafKalemYetki(req, kalemId) {
   const u = optionalAuth(req);
@@ -21897,92 +22014,223 @@ app.delete("/hr/masraf-kalem/:id", taseronDegil, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST fotoğrafı otomatik kırpma için işle (24.10.2026) — masraf eki OLUŞTURMAZ, önizleme döner
+app.post("/hr/masraf-belge/:kalemId/isle", taseronDegil, (req, res, next) => fisUpload.single("dosya")(req, res, (e) => {
+  if (!e) return next();
+  return res.status(e.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: e.code === "LIMIT_FILE_SIZE" ? "Fotoğraf çok büyük (en fazla 20 MB)" : "Dosya alınamadı" });
+}), async (req, res) => {
+  try {
+    const kalemId = Number(req.params.kalemId);
+    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    const y = await masrafKalemYetki(req, kalemId);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!(y.duzenlenebilir || (y.onayda && y.tam))) return res.status(403).json({ error: y.taslak ? "Bu kaleme fiş ekleme yetkiniz yok" : "Bu formun durumunda fiş eklenemez" });
+    const email = _eposta(y.u), buf = req.file.buffer;
+    const d = await fisKirpma.dosyaDogrula(buf);
+    const anahtar = `${email}|${kalemId}|${d.sha256}`;
+    if (!_fisKilit.has(anahtar)) {
+      _fisKilit.set(anahtar, (async () => {
+        let row = (await pool.query(`SELECT * FROM masraf_fis_isleme WHERE kullanici_email=$1 AND kalem_id=$2 AND sha256=$3
+          AND durum NOT IN ('TEMIZLENDI') AND orijinal_yol IS NOT NULL ORDER BY id DESC LIMIT 1`, [email, kalemId, d.sha256])).rows[0];
+        // Aynı fotoğraf daha önce işlendiyse model yeniden çağrılmaz (önizlemeler orijinalden yeniden üretilir)
+        if (row && row.sonuc && row.durum !== "AI_HATA") return fisIslemeYaniti(row, buf, null, true);
+        if (!row) {
+          const sayac = _fisSayac.get(email);
+          const sy = sayac && Date.now() - sayac.t < 3600e3 ? sayac : { t: Date.now(), n: 0 };
+          if (sy.n >= FIS_SAATLIK_SINIR) throw new fisKirpma.FisKirpmaHatasi("sinir", "Bir saatte çok fazla fiş işlendi — biraz sonra tekrar deneyin", 429);
+          sy.n++; _fisSayac.set(email, sy);
+          const dep = await ozelYukle("masraf-orijinal", buf, d.mime, d.format === "jpeg" ? "jpg" : d.format);
+          row = (await pool.query(`INSERT INTO masraf_fis_isleme (kalem_id, form_id, kullanici_email, sha256, orijinal_ad, mime, boyut,
+              genislik, yukseklik, exif_yon, orijinal_depo, orijinal_yol, durum)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ISLENIYOR') RETURNING *`,
+            [kalemId, y.form.form_id, email, d.sha256, utf8Name(req.file.originalname || "fis.jpg").slice(0, 200), d.mime, d.boyut, d.w, d.h, d.exif_yon, dep.depo, dep.yol])).rows[0];
+        }
+        try {
+          const { ciktilar, ...sonuc } = await fisKirpma.fisAlgila(buf, d);
+          row = (await pool.query(`UPDATE masraf_fis_isleme SET durum='HAZIR', sonuc=$2, model=$3, sure_ms=$4, hata=NULL,
+              deneme=COALESCE(deneme,0)+1, updated_at=now() WHERE id=$1 RETURNING *`, [row.id, JSON.stringify(sonuc), sonuc.model || null, sonuc.sure_ms])).rows[0];
+          console.log(`[fis-kirpma] işlem ${row.id}: ${sonuc.durum}, ${sonuc.adaylar.length} aday, ${sonuc.sure_ms} ms`);
+          return fisIslemeYaniti(row, buf, ciktilar);
+        } catch (e) {
+          // Algılama başarısız: fotoğraf saklı kalır, hata kaydedilir; kullanıcı tekrar dener ya da elle kırpar
+          const mesaj = e instanceof fisKirpma.FisKirpmaHatasi ? e.message : `Otomatik algılama başarısız: ${e.message}`;
+          console.error(`[fis-kirpma] işlem ${row.id} algılama hatası (${e.asama || "?"}):`, e.message);
+          row = (await pool.query(`UPDATE masraf_fis_isleme SET durum='AI_HATA', hata=$2, deneme=COALESCE(deneme,0)+1, updated_at=now()
+            WHERE id=$1 RETURNING *`, [row.id, mesaj.slice(0, 500)])).rows[0];
+          return fisIslemeYaniti(row, buf);
+        }
+      })().finally(() => setTimeout(() => _fisKilit.delete(anahtar), 0)));
+    }
+    res.json(await _fisKilit.get(anahtar));
+  } catch (e) { fisHataYaniti(res, e); }
+});
+
+// Onaylanan otomatik / düzeltilmiş kırpmayı ek yapar: kırpma orijinalden SUNUCUDA yeniden üretilir.
+// secimler: [{ aday_no?, kose?:[[x,y]×4], kirpma?: "yok", istek_id }] — her seçim aynı kaleme ayrı ek olur.
+// istek_id tekrar denemede aynı eki döndürür (çift ek yok); aynı aday aynı kaleme ikinci kez eklenmez.
+async function fisIslemeEkle(req, res, y, kalemId, kalem) {
+  const email = _eposta(y.u);
+  const isl = (await pool.query(`SELECT * FROM masraf_fis_isleme WHERE id=$1`, [Number(req.body.isleme_id)])).rows[0];
+  if (!isl || Number(isl.kalem_id) !== kalemId || isl.kullanici_email !== email) return res.status(404).json({ error: "Fiş işlemi bulunamadı" });
+  if (!isl.orijinal_yol) return res.status(410).json({ error: "Fotoğrafın saklama süresi doldu — lütfen fotoğrafı yeniden yükleyin" });
+  const secimler = Array.isArray(req.body.secimler) ? req.body.secimler : [];
+  if (!secimler.length || secimler.length > 6) return res.status(400).json({ error: "Eklenecek fiş seçilmedi" });
+  for (const sc of secimler) if (sc?.istek_id != null && !/^[A-Za-z0-9_-]{8,64}$/.test(String(sc.istek_id))) return res.status(400).json({ error: "Geçersiz istek kimliği" });
+  const buf = await ozelIndir(isl.orijinal_depo, isl.orijinal_yol);
+  const d = await fisKirpma.dosyaDogrula(buf);
+  if (d.sha256 !== isl.sha256) throw new Error("Saklanan orijinal fotoğraf bütünlük denetiminden geçmedi");
+  const s = isl.sonuc || {}, olcu = { w: d.w, h: d.h };
+  let ham = null;
+  const sonuc = [];
+  for (const sc of secimler) {
+    const istekId = sc.istek_id ? String(sc.istek_id) : null;
+    if (istekId) {
+      const v = (await pool.query(`SELECT * FROM masraf_belge WHERE istek_id=$1`, [istekId])).rows[0];
+      if (v) { if (Number(v.kalem_id) !== kalemId) return res.status(409).json({ error: "İstek kimliği başka bir kaleme ait" }); sonuc.push({ ...v, zaten_var: true }); continue; }
+    }
+    const aday = sc.aday_no != null ? (s.adaylar || []).find((a) => a.no === Number(sc.aday_no)) : null;
+    if (sc.aday_no != null && !aday) return res.status(400).json({ error: `Aday ${sc.aday_no} bulunamadı` });
+    let durum, cikti, kose = null;
+    if (sc.kirpma === "yok") {
+      durum = "KIRPILMADI";
+      const o = await fisKirpma.yonluOrijinal(buf, d);
+      cikti = { buffer: o.buffer, w: o.w, h: o.h, mime: o.mime, uzanti: o.uzanti, yontem: "yok" };
+    } else {
+      const istenen = sc.kose || aday?.kose;
+      if (!istenen) return res.status(400).json({ error: "Kırpma köşeleri yok" });
+      kose = fisKirpma.koseDogrula(istenen, olcu);
+      durum = aday && !fisKirpma.duzeltildiMi(kose, aday) ? "OTOMATIK" : "KULLANICI";
+      if (durum === "OTOMATIK") {
+        kose = aday.kose;
+        const v = (await pool.query(`SELECT * FROM masraf_belge WHERE kalem_id=$1 AND isleme_id=$2 AND aday_no=$3 AND kirpma_durum='OTOMATIK' LIMIT 1`, [kalemId, isl.id, aday.no])).rows[0];
+        if (v) { sonuc.push({ ...v, zaten_var: true }); continue; }
+      }
+      ham = ham || await fisKirpma.yonluHam(buf);
+      const o = await fisKirpma.fisUret(buf, kose, ham);
+      cikti = { ...o, mime: "image/jpeg", uzanti: "jpg" };
+      kose = o.kose;
+    }
+    const kok = String(isl.orijinal_ad || "fis").replace(/\.[a-z0-9]+$/i, "").slice(0, 80);
+    const ad = durum === "KIRPILMADI" ? `${kok}.${cikti.uzanti}` : `${kok}-kirpik${aday ? `-${aday.no}` : ""}.jpg`;
+    const { url } = await uploadToStorage("masraf-belgeler", `${Date.now()}-${ad}`, cikti.buffer, cikti.mime);
+    const kirpma = { kose, cikti: { w: cikti.w, h: cikti.h }, kaynak_olcu: olcu, yontem: cikti.yontem,
+      aday_kose: aday?.kose || null, uyarilar: aday?.uyarilar || [], keskinlik: aday?.isaret?.keskinlik ?? null, model: isl.model || null };
+    let row;
+    try {
+      row = (await pool.query(`INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, genislik, yukseklik, exif_yon, kirpildi, kaynak, kirpma,
+          isleme_id, aday_no, kirpma_durum, istek_id)
+        VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+        [kalemId, kalem.form_id, ad, url, cikti.w, cikti.h, durum !== "KIRPILMADI",
+          { OTOMATIK: "sunucu-otomatik", KULLANICI: "sunucu-kullanici", KIRPILMADI: "sunucu-orijinal" }[durum],
+          JSON.stringify(kirpma), isl.id, aday?.no ?? null, durum, istekId])).rows[0];
+    } catch (e) {
+      await deleteFromStorage(url).catch(() => {});
+      if (e.code === "23505" && istekId) { const v = (await pool.query(`SELECT * FROM masraf_belge WHERE istek_id=$1`, [istekId])).rows[0]; if (v) { sonuc.push({ ...v, zaten_var: true }); continue; } }
+      throw e;
+    }
+    row = await masrafBelgeOcr(row.id, cikti.buffer, kalem);
+    islemGecmisiYaz(req, "masraf", y.form.form_id, "BELGE_EKLE", null, { kalem_id: kalemId, dosya: ad, kirpma: durum, isleme_id: isl.id }, null);
+    sonuc.push(row);
+  }
+  await pool.query(`UPDATE masraf_fis_isleme SET durum='EKLENDI', eklendi_at=COALESCE(eklendi_at, now()), updated_at=now() WHERE id=$1`, [isl.id]);
+  res.json({ ...sonuc[0], belgeler: sonuc });
+}
+
 // POST upload belge for kalem
 app.post("/hr/masraf-belge/:kalemId", taseronDegil, masrafUpload.single("dosya"), async (req, res) => {
   try {
     const { kalemId } = req.params;
-    if (!req.file) return res.status(400).json({ error: "Dosya yok" });
+    if (!req.file && !req.body?.isleme_id) return res.status(400).json({ error: "Dosya yok" });
     const y = await masrafKalemYetki(req, kalemId);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
     if (!(y.duzenlenebilir || (y.onayda && y.tam))) return res.status(403).json({ error: y.taslak ? "Bu kaleme fiş ekleme yetkiniz yok" : "Bu formun durumunda fiş eklenemez" });
     const kalem = await pool.query("SELECT form_id, kategori, aciklama, plaka FROM masraf_kalem WHERE id=$1", [kalemId]);
     if (!kalem.rows[0]) return res.status(404).json({ error: "Kalem bulunamadı" });
-    const { form_id, kategori, aciklama: kalemAciklama } = kalem.rows[0];
+    if (!req.file) return await fisIslemeEkle(req, res, y, Number(kalemId), kalem.rows[0]);
+    const { form_id } = kalem.rows[0];
 
     // Dosya künyesi (20.10.2026): piksel ölçüsü + EXIF yönü sharp'tan; kırpma bilgisi mobilden
     // (kirpildi=1/0, kaynak, kirpma={originX,originY,width,height}). Dosyanın kendisi değiştirilmez.
+    // 24.10.2026: eski mobil sürümün "kırpıldı" beyanı dosyanın gerçek ölçüsüyle doğrulanır; uyuşmazsa kırpılmış sayılmaz.
     let kunye = { genislik: null, yukseklik: null, exif_yon: null };
     try {
       const m = await require("sharp")(req.file.buffer).metadata();
       const yon = m.orientation || 1, dik = yon >= 5;
       kunye = { genislik: (dik ? m.height : m.width) || null, yukseklik: (dik ? m.width : m.height) || null, exif_yon: yon };
     } catch {}
-    const kirpildi = req.body?.kirpildi === undefined ? null : ["1", "true"].includes(String(req.body.kirpildi));
+    let kirpildi = req.body?.kirpildi === undefined ? null : ["1", "true"].includes(String(req.body.kirpildi));
     const kaynak = req.body?.kaynak ? String(req.body.kaynak).slice(0, 40) : (req.get("user-agent") || "").includes("Mozilla") ? "web" : null;
     let kirpma = null;
     try { if (req.body?.kirpma) kirpma = JSON.parse(req.body.kirpma); } catch {}
+    let kirpmaDurum = kirpildi === false ? "KIRPILMADI" : null;
+    if (kirpildi === true) {
+      const tutar = kirpma && kunye.genislik && Math.abs(Number(kirpma.width) - kunye.genislik) <= 2 && Math.abs(Number(kirpma.height) - kunye.yukseklik) <= 2;
+      kirpmaDurum = tutar ? "MOBIL_ELLE" : "DOGRULANAMADI";
+      if (!tutar) kirpildi = null;
+    }
 
     // 1. Upload first — guaranteed regardless of OCR
     const fname = `${Date.now()}-${utf8Name(req.file.originalname)}`;
     const { url } = await uploadToStorage("masraf-belgeler", fname, req.file.buffer, req.file.mimetype);
     const { rows } = await pool.query(
-      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, genislik, yukseklik, exif_yon, kirpildi, kaynak, kirpma)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [kalemId, form_id, utf8Name(req.file.originalname), url, kunye.genislik, kunye.yukseklik, kunye.exif_yon, kirpildi, kaynak, kirpma ? JSON.stringify(kirpma) : null]
+      `INSERT INTO masraf_belge (kalem_id, form_id, dosya_adi, dosya_yolu, genislik, yukseklik, exif_yon, kirpildi, kaynak, kirpma, kirpma_durum)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [kalemId, form_id, utf8Name(req.file.originalname), url, kunye.genislik, kunye.yukseklik, kunye.exif_yon, kirpildi, kaynak, kirpma ? JSON.stringify(kirpma) : null, kirpmaDurum]
     );
-    const belgeId = rows[0].id;
 
     // 2. OCR with strict timeout — runs after upload is saved
-    const fileBuffer = req.file.buffer;
-    const ocrTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
-    const ocrResult = await Promise.race([ocrFis(fileBuffer), ocrTimeout]);
-
-    let ocrTutar = null, matchedPlaka = null, ocrPlakaEslesti = null, ocrPara = null;
-    if (ocrResult) {
-      ocrTutar = ocrResult.amount;
-      ocrPara = ocrResult.currency || null;
-      let ocrPlaka = ocrResult.plaka;
-      const rawPlates = ocrResult.rawPlates || [];
-      if (kategori === "YAKIT" && (ocrPlaka || rawPlates.length)) {
-        const enteredPlaka = (kalem.rows[0].plaka || "").trim() || (kalemAciklama || "").replace(/^Site ID:\s*[^|]+\|\s*/i, "").trim();
-        const candidates = rawPlates.length ? rawPlates : [ocrPlaka];
-        if (enteredPlaka) {
-          for (const cand of candidates) {
-            const found = plakaEsles(cand, [enteredPlaka]);
-            if (found) { matchedPlaka = found; ocrPlakaEslesti = true; break; }
-          }
-          if (ocrPlakaEslesti === null) { matchedPlaka = ocrPlaka; ocrPlakaEslesti = false; }
-        } else {
-          // No entered plate — skip plate check
-          matchedPlaka = ocrPlaka;
-          ocrPlakaEslesti = null;
-        }
-      }
-    }
-
-    // 3. Update with OCR results (even if null)
-    const updated = await pool.query(
-      `UPDATE masraf_belge SET ocr_tutar=$1, ocr_plaka=$2, ocr_plaka_eslesti=$3, ocr_para=$5 WHERE id=$4 RETURNING *`,
-      [ocrTutar, matchedPlaka, ocrPlakaEslesti, belgeId, ocrPara]
-    );
+    const guncel = await masrafBelgeOcr(rows[0].id, req.file.buffer, kalem.rows[0]);
     islemGecmisiYaz(req, "masraf", y.form.form_id, "BELGE_EKLE", null, { kalem_id: Number(kalemId), dosya: req.file.originalname || null }, null);
-    res.json(updated.rows[0]);
+    res.json(guncel);
   } catch (e) {
     console.error("MASRAF BELGE UPLOAD ERROR:", e.message);
+    if (e instanceof fisKirpma.FisKirpmaHatasi) return fisHataYaniti(res, e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET orijinal fotoğraf (otomatik kırpılan fişlerde) — yetki/kapsam fiş dosyasıyla aynı; URL verilmez, sunucu akıtır
+app.get("/hr/masraf-belge/:id/orijinal", async (req, res) => {
+  try {
+    const u = belgeOkuyan(req, res);
+    if (!u) return;
+    const params = [Number(req.params.id)];
+    const kosul = [];
+    if (!masrafTamGorus(req)) {
+      params.push(_eposta(u));
+      kosul.push(`$2 <> '' AND (LOWER(TRIM(COALESCE(mf.talep_eden_email,''))) = $2 OR LOWER(TRIM(COALESCE(p.email,''))) = $2)`);
+    }
+    const k = altMarkaKapsam(req);
+    if (k) kosul.push(kapsamPersonelSql(k), kapsamKalemSql(k));
+    const r = await pool.query(`SELECT i.id AS isleme_id, i.orijinal_depo, i.orijinal_yol, i.mime FROM masraf_belge mb
+        JOIN masraf_fis_isleme i ON i.id = mb.isleme_id
+        LEFT JOIN masraf_form mf ON mf.id = mb.form_id
+        LEFT JOIN personel p ON p.id = mf.personel_id
+        LEFT JOIN masraf_kalem mk ON mk.id = mb.kalem_id
+       WHERE mb.id = $1${kosul.map((c) => ` AND ${c}`).join("")}`, params);
+    const x = r.rows[0];
+    if (!x) return res.status(404).json({ error: "Orijinal fotoğraf yok ya da görme yetkiniz yok" });
+    if (!x.orijinal_yol) return res.status(410).json({ error: "Orijinal fotoğraf artık saklanmıyor" });
+    const buf = await ozelIndir(x.orijinal_depo, x.orijinal_yol);
+    res.set({ "Content-Type": x.mime || "image/jpeg", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": `inline; filename="fis-${req.params.id}-orijinal.${(x.mime || "").includes("png") ? "png" : "jpg"}"` });
+    res.send(buf);
+  } catch (e) { console.error("[fis-orijinal]", e.message); res.status(500).json({ error: "Orijinal fotoğraf alınamadı" }); }
 });
 
 // DELETE belge
 app.delete("/hr/masraf-belge/:id", taseronDegil, async (req, res) => {
   try {
-    const b = await pool.query("SELECT dosya_yolu, kalem_id FROM masraf_belge WHERE id=$1", [req.params.id]);
+    const b = await pool.query("SELECT dosya_yolu, kalem_id, isleme_id FROM masraf_belge WHERE id=$1", [req.params.id]);
     if (!b.rows[0]) return res.json({ ok: true });
     const y = await masrafKalemYetki(req, b.rows[0].kalem_id);
     if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
     if (!y.duzenlenebilir) return res.status(403).json({ error: y.taslak ? "Bu fişi silme yetkiniz yok" : "Form onaya gönderildiği için fiş silinemez" });
     await deleteFromStorage(b.rows[0].dosya_yolu);
     await pool.query("DELETE FROM masraf_belge WHERE id=$1", [req.params.id]);
+    // Fotoğraftan başka ek kalmadıysa işlem "eklenmemiş" sayılır: orijinal 48 saat sonra temizlikte silinir
+    if (b.rows[0].isleme_id) await pool.query(`UPDATE masraf_fis_isleme SET durum = CASE WHEN sonuc IS NULL THEN 'AI_HATA' ELSE 'HAZIR' END, updated_at=now()
+      WHERE id=$1 AND durum='EKLENDI' AND NOT EXISTS (SELECT 1 FROM masraf_belge WHERE isleme_id=$1)`, [b.rows[0].isleme_id]).catch(() => {});
     islemGecmisiYaz(req, "masraf", y.form.form_id, "BELGE_SIL", { kalem_id: b.rows[0].kalem_id, dosya: String(b.rows[0].dosya_yolu || "").split("/").pop() || null }, null, null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -24897,10 +25145,11 @@ app.get("/hr/masraf-form/:id/pdf", async (req, res) => {
 
         // PDF'te fiş ~270×360 pt'lik slota basılıyor — telefon fotoğrafını tam
         // çözünürlükte gömmek dosyayı 30+ MB yapıp indirmeyi koparıyordu
-        // (10.08.2026, form #120 vakası). 1200px uzun kenar fazlasıyla okunur.
+        // (10.08.2026, form #120 vakası). 24.10.2026: kırpılmış uzun fişte (POS slipi) 1200 px yükseklik
+        // genişliği ~350 px'e düşürüp yazıyı okunmaz yapıyordu → 1800 px / kalite 80 (yine dosya başı ~0,3-0,5 MB).
         const buf = await pipeline
-          .resize({ width: 900, height: 1200, fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 72, mozjpeg: true })
+          .resize({ width: 1000, height: 1800, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80, mozjpeg: true })
           .toBuffer({ resolveWithObject: true });
         trimmed.push({ buf: buf.data, w: buf.info.width, h: buf.info.height, meta: img });
       } catch {
