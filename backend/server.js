@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-23-saha-fatura", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-24-ai-fatura-okuma", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -5724,8 +5724,9 @@ app.get("/master/by-site", async (req, res) => {
    (farklı tam kodlar birleştirilmez). Önce önekle başlayanlar, sonra kısmi eşleşmeler. Büyük/küçük harf ve baş/son boşluk
    yok sayılır; LIKE jokerleri (_ %) kaçışlanır.
    Kapsam (backend): ERC kullanıcıları tüm kaynaklar; alt marka (Teknocenter) yalnız kendi işleri — taşeronu marka önekli
-   günlük iş (TEKNO_…) ve Rollout satırları (devralınan marka dahil değil, PO-yalnız sahalar dahil değil); taşeron hesabı yalnız
-   kendi günlük iş sahaları. Salt okuma. */
+   günlük iş (TEKNO_…), Rollout satırları ve KENDİ firması etiketli faturaların Site ID / saha satırları (devralınan marka dahil
+   değil, PO-yalnız sahalar dahil değil, başka firmanın faturası dahil değil); taşeron hesabı yalnız kendi günlük iş sahaları.
+   Salt okuma. */
 const sahaKodTemizle = (s) => String(s || "").trim().toUpperCase();
 const likeKacis = (s) => String(s).replace(/[\\%_]/g, (c) => "\\" + c);
 function sahaAramaKapsami(req) {
@@ -5738,6 +5739,7 @@ function sahaAramaKapsami(req) {
   return { tur: "tum" };
 }
 async function sahaOneriAra(req, qHam, limitHam) {
+  const fskHazir = await fskTablolariHazir();
   const q = sahaKodTemizle(qHam);
   const limit = Math.min(Math.max(parseInt(limitHam, 10) || 20, 1), 50);
   if (q.length < 2) return { q, rows: [] };
@@ -5755,6 +5757,12 @@ async function sahaOneriAra(req, qHam, limitHam) {
       FROM rollout_progress r WHERE UPPER(TRIM(COALESCE(r.site_code,''))) LIKE $1 ESCAPE '\\'
         AND (UPPER(COALESCE(to_jsonb(r)->>'rf_subcon','')) LIKE $5 ESCAPE '\\' OR UPPER(COALESCE(to_jsonb(r)->>'enh_subcon','')) LIKE $5 ESCAPE '\\'
           OR UPPER(COALESCE(to_jsonb(r)->>'trs_subcon','')) LIKE $5 ESCAPE '\\' OR UPPER(COALESCE(to_jsonb(r)->>'power_subcon','')) LIKE $5 ESCAPE '\\')`);
+    // 23.10.2026 (Orhan): markanın KENDİ faturalarının sahaları (invoice_entries.firma = marka) — başka firmanın faturası girmez
+    parcalar.push(`SELECT UPPER(TRIM(i.site_id)), NULLIF(TRIM(i.proje_kodu),''), NULLIF(TRIM(i.bolge),''), NULL::text, 'FATURA'
+      FROM invoice_entries i WHERE UPPER(TRIM(COALESCE(i.site_id,''))) LIKE $1 ESCAPE '\\' AND UPPER(COALESCE(i.firma,'')) = $6`);
+    if (fskHazir) parcalar.push(`SELECT UPPER(TRIM(k.site_code)), NULLIF(TRIM(i.proje_kodu),''), NULLIF(TRIM(i.bolge),''), NULL::text, 'FATURA'
+      FROM fatura_saha_kalem k JOIN invoice_entries i ON i.id = k.fatura_id
+      WHERE UPPER(TRIM(COALESCE(k.site_code,''))) LIKE $1 ESCAPE '\\' AND UPPER(COALESCE(i.firma,'')) = $6`);
   } else {
     parcalar.push(`SELECT UPPER(TRIM(site_code)) AS sc, NULLIF(TRIM(project_code),'') AS pc, NULL::text AS bolge, NULLIF(TRIM(site_type),'') AS st, 'GUNLUK_IS' AS k
       FROM master_works WHERE UPPER(TRIM(COALESCE(site_code,''))) LIKE $1 ESCAPE '\\'`);
@@ -5765,7 +5773,7 @@ async function sahaOneriAra(req, qHam, limitHam) {
   }
   const params = [ici, bas, limit];
   if (k.tur === "taseron") params.push(k.subcon);
-  if (k.tur === "marka") params.push(likeKacis(k.onek) + "\\_%", likeKacis(k.onek) + "%");
+  if (k.tur === "marka") params.push(likeKacis(k.onek) + "\\_%", likeKacis(k.onek) + "%", k.kod);
   const r = await pool.query(
     `WITH kaynak AS (${parcalar.join(" UNION ALL ")})
      SELECT sc AS site_code, MAX(pc) AS project_code, MAX(bolge) AS bolge, MAX(st) AS site_type,
@@ -17802,7 +17810,7 @@ function extractPdfTextPdf2json(buf) {
   });
 }
 
-async function extractPdfText(pdfBuffer, isPDF) {
+async function extractPdfText(pdfBuffer, isPDF, { ocr = true } = {}) {
   // ── 1. Python pdfminer (dijital/e-fatura PDF'leri için en iyi) ────────────
   if (isPDF) {
     try {
@@ -17865,6 +17873,8 @@ async function extractPdfText(pdfBuffer, isPDF) {
   }
 
   // ── 2. OCR.space (taramalı PDF veya resim için fallback) ──────────────────
+  // Yapay zekâ okumasının yedeğinde kapalı (ocr:false): belge herkese açık deneme anahtarıyla dış servise gönderilmez
+  if (!ocr) return "";
   try {
     const apiKey = process.env.OCR_SPACE_KEY || "helloworld";
     const base64 = pdfBuffer.toString("base64");
@@ -17893,16 +17903,48 @@ async function extractPdfText(pdfBuffer, isPDF) {
   }
 }
 
-// POST /invoice-parse — PDF/resim yükle, metin çıkar, fatura alanlarını doldur
+// POST /invoice-parse — fatura PDF'i / fotoğrafı: geçici belge + YAPAY ZEKÂ ile okuma (24.10.2026, Orhan)
+// Kök neden (24.10.2026): okuma yalnız metin katmanı + regex idi (tedarikçi, VKN, ETTN, satırlar çıkmıyordu; taranmış
+// belgede OCR.space deneme anahtarına düşüyordu) ve web, doldurulan alanları React güncelleyicisi içinde saydığı için
+// "0 alan" yazıp yine de yeşil gösteriyordu. Artık: faturaOkuma.js (Claude, tüm sayfalar, JSON şeması, sayısal doğrulama)
+// → okuma {durum: HAZIR | KISMI | BASARISIZ, alanlar, satırlar, doğrulama}. Yapay zekâ kullanılamazsa (anahtar yok,
+// sağlayıcı hatası, zaman aşımı) hata AŞAMASIYLA bildirilir; varsa kural tabanlı temel alanlar "KISMI" olarak eklenir —
+// boş sonuç başarı gibi gösterilmez. Okuma hiçbir kaydı oluşturmaz/değiştirmez; kayıt kullanıcı Kaydet'e basınca olur.
+const faturaAi = require("./faturaOkuma");
 const uploadInvoiceParse = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+function regexOkumaDonustur(p) {
+  // Eski kural tabanlı ayrıştırıcı sonucu → okuma biçimi (yalnız bulunan alanlar; satır/VKN/ETTN yok)
+  const sayi = (v) => (v === "" || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
+  const f = {
+    belge_fatura_mi: true, belge_turu: null, fatura_tipi: null, fatura_no: p.fatura_no || null, ettn: null,
+    fatura_tarihi: p.fatura_tarihi || null, fatura_saati: null, para_birimi: null,
+    tedarikci: { unvan: p.tedarikci || null, vkn_tckn: null, vergi_dairesi: null }, alici: { unvan: null, vkn_tckn: null, vergi_dairesi: null },
+    toplamlar: { mal_hizmet_toplami: null, toplam_iskonto: null, vergi_haric_tutar: sayi(p.tutar), kdv_toplam: sayi(p.kdv),
+      vergiler_dahil_toplam: sayi(p.tevkifat) ? null : sayi(p.toplam_tutar), tevkifat_tutari: sayi(p.tevkifat), odenecek_tutar: sayi(p.toplam_tutar) },
+    kdv_dokumu: [], diger_vergiler: [], satirlar: [], sayfa_sayisi: null, okunan_sayfalar: [], alan_kaynaklari: [],
+    belirsiz_alanlar: [{ alan: "tümü", neden: "Kural tabanlı yedek okuma — tedarikçi/alıcı VKN, ETTN ve satırlar okunmadı; belgeden kontrol edin" }],
+  };
+  const kontroller = faturaAi._test.dogrula(f, null);
+  const sin = faturaAi._test.sinifla(f, kontroller);
+  return { ...f, dogrulama: kontroller, ...sin, durum: sin.alan_sayisi ? "KISMI" : "BASARISIZ", model: null, kaynak: "kural" };
+}
+app.post("/invoice-parse", faturaYazma, uploadInvoiceParse.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, asama: "yukleme", error: "Dosya gelmedi" });
   const ext = path.extname(utf8Name(req.file.originalname)).toLowerCase();
   const isPDF = ext === ".pdf" || req.file.mimetype === "application/pdf";
+  const sharp = require("sharp");
+
+  // Yapay zekâ girdisi: PDF olduğu gibi (tüm sayfalar); fotoğraf JPEG'e normalize (HEIC vb. dahil, uzun kenar ≤ 2400 px)
+  let aiBuffer = req.file.buffer, aiMime = "application/pdf", gorselHata = null;
+  if (!isPDF) {
+    try { aiBuffer = await sharp(req.file.buffer).rotate().resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer(); aiMime = "image/jpeg"; }
+    catch (e) { gorselHata = e.message; }
+  }
+  if (gorselHata) return res.status(415).json({ ok: false, asama: "dosya_turu", error: "Görsel okunamadı — PDF, JPG, PNG veya WEBP yükleyin" });
 
   let pdfBuffer = req.file.buffer;
   if (!isPDF) {
-    // Resmi PDF'e dönüştür
+    // Belge arşivi için resmi PDF'e dönüştür (fatura belgesi her zaman PDF saklanır)
     const PDFDocument = require("pdfkit");
     pdfBuffer = await new Promise((resolve, reject) => {
       const doc = new PDFDocument({ autoFirstPage: false, margin: 20 });
@@ -17911,36 +17953,46 @@ app.post("/invoice-parse", authMiddleware, uploadInvoiceParse.single("file"), as
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
       try {
-        const img = doc.openImage(req.file.buffer);
+        const img = doc.openImage(aiBuffer);
         const maxW = 555, maxH = 802;
         const ratio = Math.min(maxW / img.width, maxH / img.height);
         doc.addPage({ size: [img.width * ratio + 40, img.height * ratio + 40] });
-        doc.image(req.file.buffer, 20, 20, { width: img.width * ratio });
+        doc.image(aiBuffer, 20, 20, { width: img.width * ratio });
         doc.end();
       } catch (e) { reject(e); }
     });
   }
 
-  // Supabase'e geçici yükle — temp_key olarak gerçek storage yolunu dön
+  // Supabase'e geçici yükle — temp_key olarak gerçek storage yolunu dön (kayıtta faturaya bağlanır)
   let tempUrl = null, tempKey = null;
   try {
     const { url, filePath } = await uploadToStorage("fatura-belgeler", `tmp-${Date.now()}.pdf`, pdfBuffer, "application/pdf");
     tempUrl = url;
-    tempKey = filePath; // "fatura-belgeler/TIMESTAMP-tmp-xxx.pdf" — invoice-add'de bu yol kullanılacak
+    tempKey = filePath;
   } catch (e) {
     console.error("[invoice-parse] storage error:", e.message);
   }
 
-  const pdfText = await extractPdfText(pdfBuffer, isPDF);
-  const parsed  = parseTurkishInvoice(pdfText);
-  // İş Kalemi tahmini: fatura metninden kategori yakala (chip seçicide otomatik seçilir)
+  let okuma, hata = null;
   try {
-    const low = String(pdfText || "").toLocaleLowerCase("tr");
-    if (/konaklama|otel\b|oda\/room|hotel/.test(low)) parsed.is_kalemi = "KONAKLAMA";
-    else if (/vin[çc]\b|vin[çc] hizmet|mobil vin[çc]/.test(low)) parsed.is_kalemi = "VINC";
-    else if (/nakliye|lojistik|ta[şs][ıi]mac[ıi]l[ıi]k/.test(low)) parsed.is_kalemi = "NAKLIYE";
-  } catch {}
-  res.json({ ok: true, parsed, temp_key: tempKey, temp_url: tempUrl });
+    okuma = await faturaAi.faturaOku({ buffer: aiBuffer, mimeType: aiMime });
+  } catch (e) {
+    const asama = e.asama || "bilinmeyen";
+    hata = { asama, mesaj: e.message };
+    console.error("[invoice-parse] yapay zekâ okuma hatası —", asama + ":", e.message);
+    // Yedek: kural tabanlı temel alanlar (yalnız PDF metin katmanı; OCR yok) — açıkça "kısmi" ve hata nedeniyle
+    try { okuma = isPDF ? regexOkumaDonustur(parseTurkishInvoice(await extractPdfText(pdfBuffer, true, { ocr: false }))) : null; }
+    catch (e2) { console.error("[invoice-parse] yedek okuma hatası:", e2.message); okuma = null; }
+    if (!okuma || !okuma.alan_sayisi) return res.status(e.http || 502).json({ ok: false, asama, error: e.message, temp_key: tempKey, temp_url: tempUrl });
+  }
+  // Eski istemciler için düz alanlar (ödenen tutar YAZILMAZ — "ödenecek tutar" ödeme yapıldığını göstermez)
+  const T = okuma.toplamlar || {};
+  const parsed = {
+    fatura_no: okuma.fatura_no || "", fatura_tarihi: okuma.fatura_tarihi || "", tedarikci: okuma.tedarikci?.unvan || "",
+    tutar: T.vergi_haric_tutar ?? (T.mal_hizmet_toplami != null ? Math.round((T.mal_hizmet_toplami - (T.toplam_iskonto || 0)) * 100) / 100 : ""), kdv: T.kdv_toplam ?? "", toplam_tutar: (T.tevkifat_tutari ? T.odenecek_tutar : (T.vergiler_dahil_toplam ?? T.odenecek_tutar)) ?? "",
+    tevkifat: T.tevkifat_tutari ?? "",
+  };
+  res.json({ ok: true, okuma, hata, parsed, temp_key: tempKey, temp_url: tempUrl });
 });
 
 app.post(

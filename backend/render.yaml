@@ -20,5 +20,7 @@ services:
         sync: false
       - key: OCR_SPACE_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY # fatura okuma (faturaOkuma.js) — yalnız sunucuda
+        sync: false
       - key: NODE_ENV
         value: production

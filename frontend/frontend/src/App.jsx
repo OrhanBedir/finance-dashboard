@@ -6981,12 +6981,109 @@ function useUsdRate() {
    Kaydet tek seferde hepsini gönderir. Satırdaki "Veri Gir" eski
    detay formunu açar (onair/not/kabul gibi alanlar için).
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══ FATURA OKUMA PANELİ (24.10.2026, Orhan) — yapay zekâ ile fatura okuma sonucu ═══════════════════════════
+   Durumlar ayrıdır: Belge yüklendi / Bilgiler okunuyor / Bilgiler hazır / Kısmen okundu / Okuma başarısız. Yeşil yalnız
+   HAZIR'da; sayaç gerçekten forma işlenen fatura alanlarını sayar (belge yüklemesi alan değildir). Okuma kaydetmez —
+   kullanıcı kontrol edip Kaydet'e basar. Elle değiştirilmiş alanların üzerine yazılmaz (çakışma olarak listelenir). */
+const FATURA_ALAN_ADI = { fatura_no: "Fatura No", fatura_tarihi: "Fatura Tarihi", tedarikci: "Tedarikçi", tutar: "Tutar (KDV hariç)", kdv: "KDV",
+  toplam_tutar: "Toplam", currency: "Para Birimi", note: "Not (ETTN / VKN)", saha_kalemler: "Saha / kalem satırları", site_id: "Site ID" };
+const OKUMA_ASAMA_ADI = { yapilandirma: "yapılandırma", zaman_asimi: "zaman aşımı", saglayici: "yapay zekâ sağlayıcısı", saglayici_limit: "sağlayıcı sınırı",
+  saglayici_istek: "belge işlenemedi", saglayici_baglanti: "bağlantı", model_ret: "model reddi", eksik_yanit: "eksik yanıt", gecersiz_json: "geçersiz yanıt",
+  dosya_turu: "dosya türü", yukleme: "yükleme", ag: "ağ", yanit: "sunucu yanıtı" };
+function FaturaOkumaPaneli({ durum, onDosya, onTekrar, onBelgedekiniKullan, kilitli }) {
+  const inputRef = useRef(null);
+  const [acik, setAcik] = useState(true);
+  const d = durum || { durum: "bos" };
+  const o = d.okuma; const T = o?.toplamlar || {}; const cur = o?.para_birimi || "TRY";
+  const para = (n) => (n === null || n === undefined ? "—" : formatMoneyByCurrency(n, cur === "USD" ? "USD" : "TRY"));
+  const RENK = { bos: ["#eff6ff", "#bfdbfe", "#1d4ed8"], okunuyor: ["#eff6ff", "#93c5fd", "#1d4ed8"], HAZIR: ["#f0fdf4", "#86efac", "#166534"],
+    KISMI: ["#fffbeb", "#fcd34d", "#92400e"], BASARISIZ: ["#fef2f2", "#fca5a5", "#991b1b"] };
+  const [bg, brd, fg] = RENK[d.durum] || RENK.bos;
+  const uyg = (d.uygulanan || []).filter((a) => a !== "site_id");
+  const satirN = o?.satirlar?.length || 0, sahaN = new Set((o?.satirlar || []).map((s) => s.site_id).filter(Boolean)).size;
+  const baslik = d.durum === "okunuyor" ? "Belge yüklendi · Bilgiler okunuyor…"
+    : d.durum === "HAZIR" ? `Bilgiler hazır — ${uyg.length} alan forma işlendi · kontrol edip Kaydet'e basın`
+    : d.durum === "KISMI" ? `Kısmen okundu — ${uyg.length} alan forma işlendi · eksik / belirsiz alanları kontrol edin`
+    : d.durum === "BASARISIZ" ? `Okuma başarısız${d.hata ? ` (${OKUMA_ASAMA_ADI[d.hata.asama] || d.hata.asama})` : ""} — bilgileri elle girin`
+    : "Fatura PDF'i veya fotoğrafı yükleyin — bilgiler yapay zekâ ile okunur";
+  const ikon = { okunuyor: "⏳", HAZIR: "✅", KISMI: "⚠️", BASARISIZ: "✖️" }[d.durum] || "📄";
+  const hucre = { padding: "3px 8px", borderBottom: "1px solid #f1f5f9", fontSize: 12 };
+  return (
+    <div style={{ background: bg, borderRadius: 14, padding: "14px 18px", marginBottom: 16, border: `1.5px solid ${brd}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 22 }}>{ikon}</span>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: fg }}>{baslik}</div>
+          {d.dosyaAdi && <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>📎 {d.dosyaAdi}{d.belgeYuklendi ? " · belge yüklendi" : d.durum !== "okunuyor" ? " · belge sunucuya yüklenemedi" : ""}{o?.model ? ` · ${o.kaynak === "kural" ? "kural tabanlı" : "yapay zekâ"}` : ""}</div>}
+          {d.hata && <div style={{ fontSize: 11.5, color: d.durum === "BASARISIZ" ? "#991b1b" : "#92400e", marginTop: 3 }}>
+            {d.durum === "BASARISIZ" ? d.hata.mesaj : `Yapay zekâ okuması yapılamadı: ${d.hata.mesaj} — yalnız temel alanlar kural tabanlı okundu.`}</div>}
+        </div>
+        {d.durum === "okunuyor" && <div style={{ width: 22, height: 22, border: "3px solid #93c5fd", borderTopColor: "#2563eb", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />}
+        {d.dosyaUrl && <a href={d.dosyaUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8" }}>👁 Belgeyi aç</a>}
+        {d.dosyaAdi && d.durum !== "okunuyor" && !kilitli && <button type="button" onClick={onTekrar} style={{ padding: "7px 12px", borderRadius: 8, border: "1.5px solid #1d4ed8", background: "#fff", color: "#1d4ed8", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>🔄 Tekrar oku</button>}
+        {!kilitli && d.durum !== "okunuyor" && (
+          <label style={{ cursor: "pointer", padding: "8px 14px", background: "#2563eb", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
+            {d.dosyaAdi ? "📎 Başka dosya" : "📎 PDF / Fotoğraf seç"}
+            <input ref={inputRef} type="file" accept=".pdf,image/*" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (inputRef.current) inputRef.current.value = ""; if (f) onDosya(f); }} />
+          </label>
+        )}
+        {o && <button type="button" onClick={() => setAcik((x) => !x)} style={{ border: "none", background: "none", color: fg, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{acik ? "▲ Ayrıntıyı gizle" : "▼ Ayrıntı"}</button>}
+      </div>
+      {o && acik && (
+        <div style={{ marginTop: 10, background: "#fff", borderRadius: 10, padding: "10px 12px", border: "1px solid #e2e8f0", fontSize: 12, color: "#334155" }}>
+          {uyg.length > 0 && <div style={{ marginBottom: 6 }}><b>Forma işlenen:</b> {uyg.map((a) => a === "saha_kalemler" ? `${FATURA_ALAN_ADI[a]} (${(o.satirlar || []).filter((s) => s.site_id).length})` : FATURA_ALAN_ADI[a] || a).join(", ")}</div>}
+          {(d.cakisan || []).length > 0 && (
+            <div style={{ marginBottom: 6, padding: "6px 8px", background: "#fffbeb", borderRadius: 8 }}>
+              <b>Elle girdiğiniz değerler korundu:</b>
+              {d.cakisan.map((c) => (
+                <div key={c.alan} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span>{FATURA_ALAN_ADI[c.alan] || c.alan}: formda “{String(c.mevcut).slice(0, 40)}”, belgede “{String(c.okunan).slice(0, 40)}”</span>
+                  {c.alan !== "saha_kalemler" && <button type="button" onClick={() => onBelgedekiniKullan(c.alan, c.okunan)} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, border: "1px solid #b45309", background: "#fff", color: "#b45309", cursor: "pointer" }}>Belgedekini kullan</button>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "4px 16px", marginBottom: 6 }}>
+            <div><b>Tedarikçi:</b> {o.tedarikci?.unvan || "—"}{o.tedarikci?.vkn_tckn ? ` · VKN ${o.tedarikci.vkn_tckn}` : ""}</div>
+            <div><b>Alıcı:</b> {o.alici?.unvan || "—"}{o.alici?.vkn_tckn ? ` · VKN ${o.alici.vkn_tckn}` : ""}</div>
+            <div><b>Fatura:</b> {o.fatura_no || "—"} · {o.fatura_tarihi ? o.fatura_tarihi.split("-").reverse().join(".") : "tarih —"}{o.fatura_saati ? ` ${o.fatura_saati}` : ""}{o.fatura_tipi ? ` · ${o.fatura_tipi}` : ""}</div>
+            <div><b>ETTN:</b> {o.ettn || "—"}</div>
+            <div><b>Sayfa:</b> {o.pdf_sayfa ? `${o.pdf_sayfa} sayfa` : "—"}{o.okunan_sayfalar?.length ? ` · okunan ${o.okunan_sayfalar.join(", ")}` : ""} · <b>Para birimi:</b> {o.para_birimi || "—"}</div>
+            <div><b>Satır:</b> {satirN}{sahaN ? ` · ${sahaN} farklı saha` : ""}</div>
+          </div>
+          <table style={{ borderCollapse: "collapse", marginBottom: 6 }}><tbody>
+            {[["Mal / hizmet toplamı", T.mal_hizmet_toplami], ["Toplam iskonto", T.toplam_iskonto], ["Vergi hariç tutar (matrah)", T.vergi_haric_tutar],
+              ...((o.kdv_dokumu || []).map((k) => [`KDV %${k.oran ?? "?"} (matrah ${para(k.matrah)})`, k.tutar])), ["KDV toplamı", T.kdv_toplam],
+              ...((o.diger_vergiler || []).map((k) => [`${k.ad || "Diğer vergi"}${k.oran !== null ? ` %${k.oran}` : ""}`, k.tutar])),
+              ["Vergiler dahil toplam", T.vergiler_dahil_toplam], ["Tevkifat", T.tevkifat_tutari], ["Ödenecek tutar", T.odenecek_tutar]]
+              .filter(([, v], i) => v !== null && v !== undefined || i < 3)
+              .map(([ad, v]) => <tr key={ad}><td style={hucre}>{ad}</td><td style={{ ...hucre, textAlign: "right", fontWeight: 600 }}>{para(v)}</td></tr>)}
+          </tbody></table>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>“Ödenecek tutar” ödeme yapıldığını göstermez — Ödenen Tutar alanı okumayla doldurulmaz.</div>
+          {(o.dogrulama || []).length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <b>Sayısal kontrol:</b>
+              {o.dogrulama.map((k, i) => (
+                <div key={i} style={{ color: k.ok ? "#15803d" : "#b91c1c" }}>{k.ok ? "✓" : "✗"} {k.kontrol}{!k.ok || typeof k.beklenen === "number" ? ` — belge: ${typeof k.beklenen === "number" ? para(k.beklenen) : k.beklenen}, bulunan: ${typeof k.bulunan === "number" ? para(k.bulunan) : k.bulunan}` : ""}{k.not ? ` (${k.not})` : ""}</div>
+              ))}
+            </div>
+          )}
+          {(o.belirsiz_alanlar || []).length > 0 && (
+            <div style={{ color: "#92400e" }}><b>Belirsiz / okunamayan:</b> {o.belirsiz_alanlar.map((b) => `${b.alan}: ${b.neden}`).join(" · ")} — belgeyi açıp kontrol edin.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══ ORTAK SAHA ARAMA KUTUSU (23.10.2026, Orhan) — Günlük İş Girişi + Fatura Girişi ═══════════════════════
    GET /master/site-suggest (günlük iş + PO + Rollout, kapsam sunucuda). Yazılan METİN ile SEÇİLEN tam saha ayrı tutulur:
    onChange(metin) her tuşta çağrılır (üst bileşen seçimi bırakır), onSelect(satir) yalnız listeden seçimde ya da metin bir
    sahanın tam koduyla BİREBİR aynıysa çağrılır — kısmi metin hiçbir zaman sessizce bir sahaya bağlanmaz.
    Klavye: ↑/↓ gezinme, Enter seçim (vurgulu yoksa seçmez), Escape kapatır; bayat yanıt yeni yazılanı ezmez. */
-const SAHA_KAYNAK_ADI = { GUNLUK_IS: "Günlük iş", PO: "PO", ROLLOUT: "Rollout" };
+const SAHA_KAYNAK_ADI = { GUNLUK_IS: "Günlük iş", PO: "PO", ROLLOUT: "Rollout", FATURA: "Fatura" };
 function SahaAramaKutusu({ value, onChange, onSelect, placeholder = "Site ID — örn: KA0181", inputStyle = {}, odakRengi = "#3b82f6", ad = "saha", autoFocus = false }) {
   const [liste, setListe] = useState([]);
   const [acik, setAcik] = useState(false);
@@ -7076,7 +7173,7 @@ function SahaAramaKutusu({ value, onChange, onSelect, placeholder = "Site ID —
                   </span>
                   <span style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                     {(r.kaynaklar || []).map((k) => (
-                      <span key={k} style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: k === "PO" ? "#ecfdf5" : k === "ROLLOUT" ? "#f5f3ff" : "#eff6ff", color: k === "PO" ? "#047857" : k === "ROLLOUT" ? "#6d28d9" : "#1d4ed8" }}>{SAHA_KAYNAK_ADI[k] || k}</span>
+                      <span key={k} style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 6, background: k === "PO" ? "#ecfdf5" : k === "ROLLOUT" ? "#f5f3ff" : k === "FATURA" ? "#fffbeb" : "#eff6ff", color: k === "PO" ? "#047857" : k === "ROLLOUT" ? "#6d28d9" : k === "FATURA" ? "#b45309" : "#1d4ed8" }}>{SAHA_KAYNAK_ADI[k] || k}</span>
                     ))}
                   </span>
                 </div>
@@ -7096,7 +7193,7 @@ const FSK_BIRIMLER = ["metre", "adet", "gün", "saat", "sefer", "kg", "ton", "se
 function FaturaSahaKalemEditor({ value = [], onChange, varsayilanSite = "", faturaTutar = 0, currency = "TRY" }) {
   const satirlar = Array.isArray(value) ? value : [];
   // onChange'e güncelleyici fonksiyon verilir: aynı anda gelen iki güncelleme (ör. iki satırın otomatik doğrulaması) birbirini ezmez
-  const guncelle = (i, alan, v) => onChange((onceki) => onceki.map((s, j) => (j === i ? { ...s, [alan]: v, ...(alan === "site_code" ? { _dogrulandi: false } : {}) } : s)));
+  const guncelle = (i, alan, v) => onChange((onceki) => onceki.map((s, j) => (j === i ? { ...s, [alan]: v, ...(alan === "site_code" ? { _dogrulandi: false } : {}) } : s)), { elle: true });
   const sayi = (v) => { const n = Number(String(v ?? "").replace(/\./g, "").replace(",", ".")); return Number.isFinite(n) ? n : 0; };
   const dagitilan = satirlar.reduce((t, s) => t + (String(s.tutar ?? "").trim() === "" ? 0 : sayi(s.tutar)), 0);
   const sahaSayisi = new Set(satirlar.map((s) => String(s.site_code || "").trim().toUpperCase()).filter(Boolean)).size;
@@ -7108,7 +7205,7 @@ function FaturaSahaKalemEditor({ value = [], onChange, varsayilanSite = "", fatu
           <div style={{ fontWeight: 800, fontSize: 13, color: "#0f172a" }}>📍 Saha / kalem satırları</div>
           <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>Malzeme / hizmet hangi sahaya ait? Miktar bilinmiyorsa boş bırakın (belirtilmemiş görünür). Akıllı Kontrol bu satırları sahanın günlük iş ve PR/PO kalemleriyle karşılaştırır.</div>
         </div>
-        <button type="button" onClick={() => onChange((onceki) => [...onceki, { site_code: onceki.length ? "" : String(varsayilanSite || "").toUpperCase(), kalem_adi: "", miktar: "", birim: "", tutar: "", _dogrulandi: false }])}
+        <button type="button" onClick={() => onChange((onceki) => [...onceki, { site_code: onceki.length ? "" : String(varsayilanSite || "").toUpperCase(), kalem_adi: "", miktar: "", birim: "", tutar: "", _dogrulandi: false }], { elle: true })}
           style={{ padding: "7px 12px", borderRadius: 8, border: "1.5px solid #1e3a5f", background: "#fff", color: "#1e3a5f", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>+ Satır ekle</button>
       </div>
       {satirlar.length === 0 ? (
@@ -7134,7 +7231,7 @@ function FaturaSahaKalemEditor({ value = [], onChange, varsayilanSite = "", fatu
                 {s.birim && !FSK_BIRIMLER.includes(s.birim) && <option value={s.birim}>{s.birim}</option>}
               </select>
               <input value={s.tutar ?? ""} onChange={(e) => guncelle(i, "tutar", e.target.value)} placeholder={`Tutar (KDV hariç, ${currency})`} inputMode="decimal" style={hucre} />
-              <button type="button" title="Satırı sil" onClick={() => onChange((onceki) => onceki.filter((_, j) => j !== i))}
+              <button type="button" title="Satırı sil" onClick={() => onChange((onceki) => onceki.filter((_, j) => j !== i), { elle: true })}
                 style={{ height: 34, border: "1.5px solid #fecaca", background: "#fef2f2", color: "#b91c1c", borderRadius: 8, cursor: "pointer", fontWeight: 800 }}>×</button>
             </div>
           ))}
@@ -11833,14 +11930,98 @@ function FinanceDashboard({
   });
 
   // Fatura PDF otomatik doldurma
-  const [pdfParsing, setPdfParsing] = useState(false);
   const [hakedisData, setHakedisData] = useState(null);
   const [hakedisModal, setHakedisModal] = useState(false);
   const [hakedisLoading, setHakedisLoading] = useState(false);
   const [pdfTempKey, setPdfTempKey] = useState("");
-  const [pdfFilled, setPdfFilled] = useState(null); // { count, fields[] }
   const [pdfFileName, setPdfFileName] = useState("");
-  const invoicePdfRef = useRef(null);
+  // 24.10.2026: yapay zekâ ile fatura okuma — durum (bos → okunuyor → HAZIR | KISMI | BASARISIZ) ve koruma kayıtları
+  const [faturaOkumaDurum, setFaturaOkumaDurum] = useState({ durum: "bos" });
+  const faturaOkumaSira = useRef(0);            // son okuma isteği — gecikmiş eski yanıt yeni sonucu ezmez
+  const faturaOkumaDosya = useRef(null);        // { file, url } — "Tekrar oku" ve önizleme
+  const faturaOtoAlanlar = useRef(new Set());   // okumanın forma yazdığı alanlar
+  const faturaElleAlanlar = useRef(new Set());  // kullanıcının elle değiştirdiği alanlar — okuma üzerine yazmaz
+  const invoiceFormRef = useRef(invoiceForm);
+  invoiceFormRef.current = invoiceForm;
+  const faturaOkumaSifirla = () => {
+    faturaOkumaSira.current += 1;
+    if (faturaOkumaDosya.current?.url) URL.revokeObjectURL(faturaOkumaDosya.current.url);
+    faturaOkumaDosya.current = null; faturaOtoAlanlar.current = new Set(); faturaElleAlanlar.current = new Set();
+    setFaturaOkumaDurum({ durum: "bos" });
+  };
+  const faturaBirim = (b) => { const k = String(b || "").trim().toLocaleLowerCase("tr"); return ({ adet: "adet", ad: "adet", m: "metre", mt: "metre", metre: "metre", "gün": "gün", gun: "gün", saat: "saat", kg: "kg", set: "set", sefer: "sefer" })[k] || k; };
+  // Okuma sonucunu forma işler: sayaç ve kararlar güncelleyicinin DIŞINDA hesaplanır (eski hata: liste setInvoiceForm
+  // içinde dolduğu için çoğu zaman 0 sayılıyordu). Ödenen Tutar yazılmaz; elle değiştirilen alan çakışma olarak listelenir.
+  const faturaOkumaUygula = (o) => {
+    const T = o?.toplamlar || {};
+    const aday = {
+      fatura_no: o.fatura_no, fatura_tarihi: o.fatura_tarihi, tedarikci: o.tedarikci?.unvan,
+      // Belgede ayrı "vergi hariç tutar" yoksa matrah = mal/hizmet toplamı − iskonto (belgedeki değerlerden türetilir)
+      tutar: T.vergi_haric_tutar ?? (T.mal_hizmet_toplami !== null && T.mal_hizmet_toplami !== undefined ? Math.round((T.mal_hizmet_toplami - (T.toplam_iskonto || 0)) * 100) / 100 : null),
+      kdv: T.kdv_toplam,
+      toplam_tutar: T.tevkifat_tutari ? T.odenecek_tutar : (T.vergiler_dahil_toplam ?? T.odenecek_tutar),
+      currency: ["TRY", "USD"].includes(o.para_birimi) ? o.para_birimi : null,
+    };
+    const mevcut = invoiceFormRef.current, elle = faturaElleAlanlar.current;
+    const degisiklik = {}, uygulanan = [], cakisan = [];
+    for (const [alan, deger] of Object.entries(aday)) {
+      if (deger === null || deger === undefined || deger === "") continue;
+      const yeni = String(deger);
+      if (elle.has(alan) && String(mevcut[alan] ?? "").trim() && String(mevcut[alan]).trim() !== yeni) { cakisan.push({ alan, mevcut: mevcut[alan], okunan: yeni }); continue; }
+      degisiklik[alan] = yeni; uygulanan.push(alan);
+    }
+    if (degisiklik.toplam_tutar !== undefined) degisiklik.kalan_borc = String(Number(degisiklik.toplam_tutar) - Number(mevcut.odenen_tutar || 0));
+    const notSatiri = [o.ettn && `ETTN ${o.ettn}`, o.tedarikci?.vkn_tckn && `Tedarikçi VKN ${o.tedarikci.vkn_tckn}`,
+      T.tevkifat_tutari && `KDV tevkifatı ₺${Number(T.tevkifat_tutari).toLocaleString("tr-TR")} (toplam = tevkifat düşülmüş ödenecek tutar)`].filter(Boolean).join(" · ");
+    if (notSatiri && !elle.has("note")) {
+      degisiklik.note = [String(mevcut.note || "").split("\n").filter((l) => !l.startsWith("📄 e-Belge:")).join("\n").trim(), `📄 e-Belge: ${notSatiri}`].filter(Boolean).join("\n");
+      uygulanan.push("note");
+    }
+    const saha = (o.satirlar || []).filter((x) => x.site_id);
+    if (saha.length && String(mevcut.is_kalemi || "").toUpperCase() !== "ARAC_KIRA") {
+      if (elle.has("saha_kalemler") && (mevcut.saha_kalemler || []).length) cakisan.push({ alan: "saha_kalemler", mevcut: `${mevcut.saha_kalemler.length} satır`, okunan: `${saha.length} satır` });
+      else {
+        degisiklik.saha_kalemler = saha.map((x) => ({ site_code: x.site_id, kalem_adi: x.aciklama && x.aciklama.toUpperCase().replace(/\s/g, "") !== x.site_id ? x.aciklama : "Fatura satırı",
+          miktar: x.miktar ?? "", birim: faturaBirim(x.birim), tutar: x.tutar ?? "", _dogrulandi: false }));
+        uygulanan.push("saha_kalemler");
+      }
+      const tek = [...new Set(saha.map((x) => x.site_id))];
+      if (tek.length === 1 && !(elle.has("site_id") && mevcut.site_id)) { degisiklik.site_id = tek[0]; uygulanan.push("site_id"); }
+    }
+    uygulanan.forEach((a) => faturaOtoAlanlar.current.add(a));
+    if (Object.keys(degisiklik).length) setInvoiceForm((prev) => ({ ...prev, ...degisiklik }));
+    return { uygulanan, cakisan };
+  };
+  const faturaOkumaBaslat = async (file) => {
+    if (!file) return;
+    const sira = ++faturaOkumaSira.current;
+    // Önceki belgenin otomatik doldurduğu alanlar temizlenir (elle değiştirilenler kalır) — iki fatura karışmaz
+    const temizle = {};
+    for (const a of faturaOtoAlanlar.current) if (!faturaElleAlanlar.current.has(a)) temizle[a] = a === "saha_kalemler" ? [] : "";
+    faturaOtoAlanlar.current = new Set();
+    if (Object.keys(temizle).length) setInvoiceForm((p) => ({ ...p, ...temizle }));
+    if (faturaOkumaDosya.current?.url && faturaOkumaDosya.current.file !== file) URL.revokeObjectURL(faturaOkumaDosya.current.url);
+    const url = faturaOkumaDosya.current?.file === file ? faturaOkumaDosya.current.url : URL.createObjectURL(file);
+    faturaOkumaDosya.current = { file, url };
+    setPdfTempKey(""); setPdfFileName(file.name);
+    setFaturaOkumaDurum({ durum: "okunuyor", dosyaAdi: file.name, dosyaUrl: url });
+    try {
+      const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch(`${API_BASE}/invoice-parse`, { method: "POST", headers: { Authorization: `Bearer ${tkn}` }, body: fd });
+      const data = await r.json().catch(() => ({ ok: false, asama: "yanit", error: `Sunucu yanıtı okunamadı (HTTP ${r.status})` }));
+      if (sira !== faturaOkumaSira.current) return; // bu arada başka dosya yüklendi / panel kapandı
+      if (data.temp_key) setPdfTempKey(data.temp_key);
+      if (!data.ok || !data.okuma) {
+        setFaturaOkumaDurum({ durum: "BASARISIZ", dosyaAdi: file.name, dosyaUrl: url, belgeYuklendi: !!data.temp_key, hata: { asama: data.asama || `http_${r.status}`, mesaj: data.error || "Bilinmeyen hata" } });
+        return;
+      }
+      const { uygulanan, cakisan } = data.okuma.durum === "BASARISIZ" ? { uygulanan: [], cakisan: [] } : faturaOkumaUygula(data.okuma);
+      setFaturaOkumaDurum({ durum: data.okuma.durum, dosyaAdi: file.name, dosyaUrl: url, belgeYuklendi: !!data.temp_key, okuma: data.okuma, hata: data.hata || null, uygulanan, cakisan });
+    } catch (err) {
+      if (sira === faturaOkumaSira.current) setFaturaOkumaDurum({ durum: "BASARISIZ", dosyaAdi: file.name, dosyaUrl: url, hata: { asama: "ag", mesaj: err.message } });
+    }
+  };
 
   const [salaryForm, setSalaryForm] = useState({
     ad_soyad: "",
@@ -12202,9 +12383,17 @@ function FinanceDashboard({
   }, [salaryForm.net_maas, salaryForm.avans]);
 
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+  // Form her açıldığında okuma durumu sıfırlanır; düzenlemede yüklenen dolu alanlar "elle" sayılır (okuma üzerine yazmaz)
+  useEffect(() => {
+    if (!showInvoiceFormPanel) return;
+    faturaOkumaSifirla();
+    if (editingInvoiceId) for (const [k, v] of Object.entries(invoiceFormRef.current || {})) if (v !== "" && v !== null && v !== undefined && !(Array.isArray(v) && !v.length)) faturaElleAlanlar.current.add(k);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInvoiceFormPanel, editingInvoiceId]);
 
   const handleInvoiceFormChange = (e) => {
     const { name, value } = e.target;
+    faturaElleAlanlar.current.add(name); // okuma bu alanın üzerine habersiz yazmaz
 
     setInvoiceForm((prev) => {
       const updated = {
@@ -12517,7 +12706,7 @@ function FinanceDashboard({
           body: JSON.stringify(payload),
         });
       }
-      setPdfTempKey(""); setPdfFilled(null); setPdfFileName("");
+      setPdfTempKey(""); setPdfFileName(""); faturaOkumaSifirla();
       if (_kayitSonuc?.uyarilar?.length) alert(`Kaydedildi. Kontrol edin:\n• ${_kayitSonuc.uyarilar.join("\n• ")}`);
 
       setInvoiceForm({
@@ -13322,73 +13511,15 @@ function FinanceDashboard({
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 24px 24px" }}>
               <form onSubmit={handleSaveManualInvoice}>
 
-                {/* BÖLÜM 0: PDF Otomatik Doldurma */}
-                <div style={{ background: pdfFilled ? "#f0fdf4" : "#eff6ff", borderRadius:"14px", padding:"16px 20px", marginBottom:"16px", boxShadow:"0 1px 4px rgba(0,0,0,0.06)", border: pdfFilled ? "1.5px solid #86efac" : "1.5px dashed #93c5fd" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom: pdfFilled ? 10 : 0 }}>
-                    <span style={{ fontSize:22 }}>{pdfParsing ? "⚙️" : pdfFilled ? "✅" : "📄"}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontWeight:700, fontSize:13, color: pdfFilled ? "#166534" : "#1d4ed8" }}>
-                        {pdfParsing ? "Fatura okunuyor..." : pdfFilled ? `${pdfFilled.count} alan otomatik dolduruldu — kontrol edin` : "PDF Yükle → Otomatik Doldur"}
-                      </div>
-                      {!pdfFilled && !pdfParsing && <div style={{ fontSize:11, color:"#6b7280", marginTop:2 }}>Fatura PDF'ini yükleyin, alanlar otomatik dolsun</div>}
-                      {pdfFilled && <div style={{ fontSize:11, color:"#166534", marginTop:2 }}>📎 {pdfFileName} · Doldurulan: {pdfFilled.fields.join(", ")}</div>}
-                    </div>
-                    {!pdfParsing && (
-                      <label style={{ cursor:"pointer", padding:"8px 16px", background: pdfFilled ? "#16a34a" : "#2563eb", color:"#fff", borderRadius:8, fontSize:12, fontWeight:700, flexShrink:0 }}>
-                        {pdfFilled ? "🔄 Değiştir" : "📎 PDF Seç"}
-                        <input ref={invoicePdfRef} type="file" accept=".pdf,image/*" style={{ display:"none" }}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            setPdfFileName(file.name);
-                            setPdfParsing(true);
-                            setPdfFilled(null);
-                            try {
-                              const tkn = localStorage.getItem("finance_token") || localStorage.getItem("token") || "";
-                              const fd = new FormData();
-                              fd.append("file", file);
-                              const r = await fetch(`${API_BASE}/invoice-parse`, {
-                                method:"POST",
-                                headers: { Authorization:`Bearer ${tkn}` },
-                                body: fd,
-                              });
-                              const data = await r.json();
-                              if (!data.ok) { alert("OCR hatası: " + (data.error||"bilinmeyen")); return; }
-                              const p = data.parsed || {};
-                              setPdfTempKey(data.temp_key || "");
-                              const filled = [];
-                              setInvoiceForm(prev => {
-                                const next = { ...prev };
-                                if (p.fatura_no)    { next.fatura_no = p.fatura_no;         filled.push("Fatura No"); }
-                                if (p.fatura_tarihi){ next.fatura_tarihi = p.fatura_tarihi; filled.push("Tarih"); }
-                                if (p.tedarikci)    { next.tedarikci = p.tedarikci;         filled.push("Tedarikçi"); }
-                                if (p.is_kalemi)    { next.is_kalemi = p.is_kalemi;         filled.push("İş Kalemi"); }
-                                if (p.tutar)        { next.tutar = p.tutar;                 filled.push("Tutar"); }
-                                if (p.kdv)          { next.kdv = p.kdv;                     filled.push("KDV"); }
-                                if (p.toplam_tutar) { next.toplam_tutar = p.toplam_tutar;   filled.push("Toplam"); }
-                                // Tevkifatlı fatura: Toplam = Ödenecek Tutar (tevkifat düşülmüş);
-                                // tevkif edilen KDV nota yazılır (sorumlu sıfatıyla beyan edilecek)
-                                if (p.tevkifat && Number(p.tevkifat) > 0) {
-                                  const tvkNot = `KDV Tevkifatı: ₺${Number(p.tevkifat).toLocaleString("tr-TR")} (sorumlu sıfatıyla vergi dairesine beyan edilir; toplam, tevkifat düşülmüş Ödenecek Tutar'dır)`;
-                                  next.note = [prev.note, tvkNot].filter(Boolean).join("\n");
-                                  filled.push("Tevkifat→Not");
-                                }
-                                return next;
-                              });
-                              setPdfFilled({ count: filled.length || 0, fields: filled.length ? filled : ["Belge yüklendi"] });
-                            } catch (err) {
-                              alert("PDF işleme hatası: " + err.message);
-                            } finally {
-                              setPdfParsing(false);
-                              if (invoicePdfRef.current) invoicePdfRef.current.value = "";
-                            }
-                          }}
-                        />
-                      </label>
-                    )}
-                    {pdfParsing && <div style={{ width:24, height:24, border:"3px solid #93c5fd", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />}
-                  </div>
-                </div>
+                {/* BÖLÜM 0: Yapay zekâ ile fatura okuma (24.10.2026) */}
+                <FaturaOkumaPaneli durum={faturaOkumaDurum} kilitli={false}
+                  onDosya={(f) => faturaOkumaBaslat(f)}
+                  onTekrar={() => faturaOkumaDosya.current?.file && faturaOkumaBaslat(faturaOkumaDosya.current.file)}
+                  onBelgedekiniKullan={(alan, deger) => {
+                    faturaElleAlanlar.current.delete(alan); faturaOtoAlanlar.current.add(alan);
+                    setInvoiceForm((p) => ({ ...p, [alan]: deger, ...(alan === "toplam_tutar" ? { kalan_borc: String(Number(deger) - Number(p.odenen_tutar || 0)) } : {}) }));
+                    setFaturaOkumaDurum((d) => ({ ...d, cakisan: (d.cakisan || []).filter((c) => c.alan !== alan), uygulanan: [...(d.uygulanan || []), alan] }));
+                  }} />
 
                 {/* Fatura Türü */}
                 {!editingInvoiceId && (
@@ -13480,7 +13611,7 @@ function FinanceDashboard({
                       <div key={f.name}>
                         <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>{f.label}</label>
                         <SahaAramaKutusu ad="fatura-site" value={invoiceForm.site_id || ""} placeholder="Site ID — örn: KA0181"
-                          onChange={(v) => { setFaturaSiteSecim(""); setInvoiceForm((p) => ({ ...p, site_id: v })); }}
+                          onChange={(v) => { faturaElleAlanlar.current.add("site_id"); setFaturaSiteSecim(""); setInvoiceForm((p) => ({ ...p, site_id: v })); }}
                           onSelect={(r) => setFaturaSiteSecim(String(r.site_code || "").toUpperCase())}
                           inputStyle={{ padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px" }} />
                         {String(invoiceForm.site_id || "").trim() && (
@@ -13529,7 +13660,7 @@ function FinanceDashboard({
                   {String(invoiceForm.is_kalemi || "").toUpperCase() !== "ARAC_KIRA" && (
                     <FaturaSahaKalemEditor value={invoiceForm.saha_kalemler || []} varsayilanSite={invoiceForm.site_id}
                       faturaTutar={Number(invoiceForm.tutar || 0) || Number(invoiceForm.toplam_tutar || 0)} currency={invoiceForm.currency || "TRY"}
-                      onChange={(f) => setInvoiceForm((pr) => ({ ...pr, saha_kalemler: f(Array.isArray(pr.saha_kalemler) ? pr.saha_kalemler : []) }))} />
+                      onChange={(f, meta) => { if (meta?.elle) faturaElleAlanlar.current.add("saha_kalemler"); setInvoiceForm((pr) => ({ ...pr, saha_kalemler: f(Array.isArray(pr.saha_kalemler) ? pr.saha_kalemler : []) })); }} />
                   )}
                   {String(invoiceForm.is_kalemi || "").toUpperCase() === "ARAC_KIRA" && (
                     <AracKiraKalemEditor value={invoiceForm.arac_kalemler || []} toplam={Number(invoiceForm.toplam_tutar || 0)}
@@ -13609,7 +13740,7 @@ function FinanceDashboard({
                           <div style={{ fontWeight:600, fontSize:13, color:"#166534" }}>Belge Hazır</div>
                           <div style={{ fontSize:11, color:"#9ca3af" }}>{pdfFileName}</div>
                         </div>
-                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFilled(null);setPdfFileName("");}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
+                        <button type="button" onClick={()=>{setPdfTempKey("");setPdfFileName("");faturaOkumaSifirla();}} style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:6, fontSize:11, fontWeight:600, cursor:"pointer" }}>Kaldır</button>
                       </div>
                     ) : (
                       <InvoiceBelgeUploader invoiceId={editingInvoiceId} currentBelge={invoiceForm.belge_path} />
