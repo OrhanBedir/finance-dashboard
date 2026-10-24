@@ -1,5 +1,5 @@
 -- ═══ Fatura saha / kalem satırları + Akıllı Kontrol durumu (23.10.2026, Orhan) ═══
--- CANLIYA OTOMATİK UYGULANMAZ. Supabase SQL Editor'de Orhan'ın onayıyla bir kez çalıştırılır.
+-- CANLIYA OTOMATİK UYGULANMAZ. UYGULANDI: 24.10.2026, Orhan'ın onayıyla (Supabase erc-simsektel, migration fatura_saha_kalem_2026_10_23).
 -- Uygulanana kadar: tek Site ID (invoice_entries.site_id) ve mevcut fatura akışları aynen çalışır;
 -- saha/kalem satırı kaydı "veritabanı güncellemesi bekleniyor" yanıtı verir.
 -- Geri alma: en alttaki DROP komutları (yalnız bu iki tabloyu siler; invoice_entries'e dokunmaz).
@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS akilli_kontrol_durum (
   UNIQUE (kaynak, kaynak_id, site_code)
 );
 CREATE INDEX IF NOT EXISTS akilli_kontrol_durum_site_idx ON akilli_kontrol_durum (UPPER(TRIM(site_code)));
+
+-- Supabase REST (anon/authenticated) erişimine kapalı; backend postgres rolüyle bağlanır (RLS'yi aşar)
+ALTER TABLE fatura_saha_kalem ENABLE ROW LEVEL SECURITY;
+ALTER TABLE akilli_kontrol_durum ENABLE ROW LEVEL SECURITY;
 
 COMMIT;
 
