@@ -17,37 +17,40 @@ class FaturaOkumaHatasi extends Error {
   constructor(asama, mesaj, http = 502, ek = {}) { super(mesaj); this.asama = asama; this.http = http; this.ek = ek; }
 }
 
-const ns = (t) => ({ anyOf: [{ type: t }, { type: "null" }] });
+// API, birleşik tipli (anyOf / nullable) alan sayısını 16 ile sınırlıyor (gerçek çağrıda 41 alan → 400, 24.10.2026).
+// Bu yüzden şemada null yok: bulunamayan metin/tutar alanı "" (boş metin), tamsayı 0 döner; normallestir() bunları null yapar.
+// Tutarlar ve oranlar da metin döner ("37500.00"); sayiAl() sayıya çevirir.
+const M = { type: "string" }, SAYI = { type: "string" }, TAM = { type: "integer" };
 const nesne = (props) => ({ type: "object", properties: props, required: Object.keys(props), additionalProperties: false });
-const TARAF = nesne({ unvan: ns("string"), vkn_tckn: ns("string"), vergi_dairesi: ns("string") });
+const TARAF = nesne({ unvan: M, vkn_tckn: M, vergi_dairesi: M });
 const SEMA = nesne({
   belge_fatura_mi: { type: "boolean" },
-  belge_turu: ns("string"),
-  fatura_tipi: ns("string"),
-  fatura_no: ns("string"),
-  ettn: ns("string"),
-  fatura_tarihi: ns("string"),
-  fatura_saati: ns("string"),
-  para_birimi: ns("string"),
+  belge_turu: M,
+  fatura_tipi: M,
+  fatura_no: M,
+  ettn: M,
+  fatura_tarihi: M,
+  fatura_saati: M,
+  para_birimi: M,
   tedarikci: TARAF,
   alici: TARAF,
   toplamlar: nesne({
-    mal_hizmet_toplami: ns("number"), toplam_iskonto: ns("number"), vergi_haric_tutar: ns("number"),
-    kdv_toplam: ns("number"), vergiler_dahil_toplam: ns("number"), tevkifat_tutari: ns("number"), odenecek_tutar: ns("number"),
+    mal_hizmet_toplami: SAYI, toplam_iskonto: SAYI, vergi_haric_tutar: SAYI,
+    kdv_toplam: SAYI, vergiler_dahil_toplam: SAYI, tevkifat_tutari: SAYI, odenecek_tutar: SAYI,
   }),
-  kdv_dokumu: { type: "array", items: nesne({ oran: ns("number"), matrah: ns("number"), tutar: ns("number") }) },
-  diger_vergiler: { type: "array", items: nesne({ ad: ns("string"), oran: ns("number"), tutar: ns("number") }) },
+  kdv_dokumu: { type: "array", items: nesne({ oran: SAYI, matrah: SAYI, tutar: SAYI }) },
+  diger_vergiler: { type: "array", items: nesne({ ad: M, oran: SAYI, tutar: SAYI }) },
   satirlar: {
     type: "array",
     items: nesne({
-      sira_no: ns("integer"), aciklama: ns("string"), miktar: ns("number"), birim: ns("string"), birim_fiyat: ns("number"),
-      iskonto_tutari: ns("number"), kdv_orani: ns("number"), kdv_tutari: ns("number"), tutar: ns("number"),
-      site_id: ns("string"), po_no: ns("string"), sayfa: ns("integer"),
+      sira_no: TAM, aciklama: M, miktar: SAYI, birim: M, birim_fiyat: SAYI,
+      iskonto_tutari: SAYI, kdv_orani: SAYI, kdv_tutari: SAYI, tutar: SAYI,
+      site_id: M, po_no: M, sayfa: TAM,
     }),
   },
-  sayfa_sayisi: ns("integer"),
+  sayfa_sayisi: TAM,
   okunan_sayfalar: { type: "array", items: { type: "integer" } },
-  alan_kaynaklari: { type: "array", items: nesne({ alan: { type: "string" }, sayfa: ns("integer"), kaynak_metin: ns("string") }) },
+  alan_kaynaklari: { type: "array", items: nesne({ alan: { type: "string" }, sayfa: TAM, kaynak_metin: M }) },
   belirsiz_alanlar: { type: "array", items: nesne({ alan: { type: "string" }, neden: { type: "string" } }) },
 });
 
@@ -57,13 +60,14 @@ Kurallar:
 - Belgenin TÜM sayfalarını oku; satır tablosu birden çok sayfaya yayılmışsa bütün satırları sırayla çıkar. okunan_sayfalar'a gerçekten okuduğun sayfa numaralarını, sayfa_sayisi'na belgedeki sayfa sayısını yaz.
 - Tedarikçi = faturayı DÜZENLEYEN/satıcı; alıcı = "SAYIN" başlığı altındaki müşteri. Dosya adını tedarikçi sayma, ikisini karıştırma.
 - VKN/TCKN, fatura no, ETTN ve PO numaralarını belgede yazdığı gibi metin olarak ver; baştaki sıfırları koru.
-- Tarihi YYYY-AA-GG, saati SS:DD biçiminde ver. Tutarları sayı olarak ver (Türkçe 37.500,00 → 37500.00). Oranları yüzde sayı olarak ver (%20 → 20).
+- Tarihi YYYY-AA-GG, saati SS:DD biçiminde ver. Tutarları ve oranları nokta ondalıklı metin olarak ver (Türkçe 37.500,00 → "37500.00"; %20 → "20").
+- Belgede bulunmayan ya da okuyamadığın metin/tutar alanını boş metin "" bırak (0 yazma); bilinmeyen sayfa numarası ve sıra numarası için 0 ver.
 - para_birimi: ISO kodu (TRY, USD, EUR).
 - toplamlar: belgede yazan değerleri olduğu gibi aktar; hesaplayıp uydurma. "Ödenecek Tutar"ı odenecek_tutar'a yaz — bu bir ödeme yapıldığını göstermez.
-- Satırlarda belgede açıkça yazıyorsa tam saha kodunu (ör. MN0261_NR700_AE) site_id'ye, PO numarasını po_no'ya yaz; yoksa null. tutar = satırın KDV hariç mal/hizmet tutarı. sayfa = satırın bulunduğu sayfa.
-- Belgede olmayan proje, bölge, taşeron, PO, saha bilgisini UYDURMA. Okuyamadığın veya emin olmadığın alanı null bırak ve belirsiz_alanlar'a nedeniyle ekle.
+- Satırlarda belgede açıkça yazıyorsa tam saha kodunu (ör. MN0261_NR700_AE) site_id'ye, PO numarasını po_no'ya yaz; yoksa "". tutar = satırın KDV hariç mal/hizmet tutarı. sayfa = satırın bulunduğu sayfa.
+- Belgede olmayan proje, bölge, taşeron, PO, saha bilgisini UYDURMA. Okuyamadığın veya emin olmadığın alanı "" bırak ve belirsiz_alanlar'a nedeniyle ekle.
 - alan_kaynaklari: fatura_no, fatura_tarihi, tedarikci, alici, ettn, odenecek_tutar, vergiler_dahil_toplam için kaynak sayfa ve belgede geçen kısa metni ver.
-- Belge fatura değilse belge_fatura_mi=false yap ve alanları null bırak.`;
+- Belge fatura değilse belge_fatura_mi=false yap ve alanları "" bırak.`;
 
 module.exports._istemciUret = () => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -90,7 +94,7 @@ async function modelCagir(icerik) {
     if (e instanceof APIConnectionTimeoutError) throw new FaturaOkumaHatasi("zaman_asimi", "Yapay zekâ okuması zaman aşımına uğradı", 504);
     if (e instanceof AuthenticationError) throw new FaturaOkumaHatasi("yapilandirma", "Yapay zekâ anahtarı geçersiz (ANTHROPIC_API_KEY)", 503);
     if (e instanceof RateLimitError) throw new FaturaOkumaHatasi("saglayici_limit", "Yapay zekâ sağlayıcısı istek sınırına ulaştı — biraz sonra tekrar deneyin", 503);
-    if (e instanceof BadRequestError) throw new FaturaOkumaHatasi("saglayici_istek", `Belge yapay zekâ tarafından işlenemedi: ${e.message}`, 422);
+    if (e instanceof BadRequestError) throw new FaturaOkumaHatasi("saglayici_istek", `Belge yapay zekâ tarafından işlenemedi: ${e.error?.error?.message || e.message}`, 422);
     if (e instanceof APIConnectionError) throw new FaturaOkumaHatasi("saglayici_baglanti", "Yapay zekâ sağlayıcısına bağlanılamadı", 502);
     if (e instanceof APIError) throw new FaturaOkumaHatasi("saglayici", `Yapay zekâ sağlayıcı hatası (${e.status || "?"})`, 502);
     throw new FaturaOkumaHatasi("saglayici", `Yapay zekâ çağrısı başarısız: ${e.message}`, 502);
@@ -133,9 +137,9 @@ function normallestir(v) {
     let site = metinAl(s.site_id)?.toUpperCase().replace(/\s/g, "") || null;
     if (site && !SITE_RE.test(site)) { belirsiz.push({ alan: `satir_${s.sira_no ?? i + 1}.site_id`, neden: `Saha kodu biçimi tanınmadı: ${site}` }); site = null; }
     return {
-      sira_no: Number.isInteger(s.sira_no) ? s.sira_no : i + 1, aciklama: metinAl(s.aciklama), miktar: sayiAl(s.miktar), birim: metinAl(s.birim),
+      sira_no: Number.isInteger(s.sira_no) && s.sira_no > 0 ? s.sira_no : i + 1, aciklama: metinAl(s.aciklama), miktar: sayiAl(s.miktar), birim: metinAl(s.birim),
       birim_fiyat: sayiAl(s.birim_fiyat), iskonto_tutari: sayiAl(s.iskonto_tutari), kdv_orani: sayiAl(s.kdv_orani), kdv_tutari: sayiAl(s.kdv_tutari),
-      tutar: sayiAl(s.tutar), site_id: site, po_no: metinAl(s.po_no), sayfa: Number.isInteger(s.sayfa) ? s.sayfa : null,
+      tutar: sayiAl(s.tutar), site_id: site, po_no: metinAl(s.po_no), sayfa: Number.isInteger(s.sayfa) && s.sayfa > 0 ? s.sayfa : null,
     };
   });
   const tarih = tarihAl(v.fatura_tarihi);
@@ -153,9 +157,9 @@ function normallestir(v) {
     },
     kdv_dokumu: (v.kdv_dokumu || []).map((k) => ({ oran: sayiAl(k.oran), matrah: sayiAl(k.matrah), tutar: sayiAl(k.tutar) })),
     diger_vergiler: (v.diger_vergiler || []).map((k) => ({ ad: metinAl(k.ad), oran: sayiAl(k.oran), tutar: sayiAl(k.tutar) })),
-    satirlar, sayfa_sayisi: Number.isInteger(v.sayfa_sayisi) ? v.sayfa_sayisi : null,
-    okunan_sayfalar: [...new Set((v.okunan_sayfalar || []).filter(Number.isInteger))].sort((a, b) => a - b),
-    alan_kaynaklari: (v.alan_kaynaklari || []).map((k) => ({ alan: String(k.alan), sayfa: Number.isInteger(k.sayfa) ? k.sayfa : null, kaynak_metin: metinAl(k.kaynak_metin) })),
+    satirlar, sayfa_sayisi: Number.isInteger(v.sayfa_sayisi) && v.sayfa_sayisi > 0 ? v.sayfa_sayisi : null,
+    okunan_sayfalar: [...new Set((v.okunan_sayfalar || []).filter((n) => Number.isInteger(n) && n > 0))].sort((a, b) => a - b),
+    alan_kaynaklari: (v.alan_kaynaklari || []).map((k) => ({ alan: String(k.alan), sayfa: Number.isInteger(k.sayfa) && k.sayfa > 0 ? k.sayfa : null, kaynak_metin: metinAl(k.kaynak_metin) })),
     belirsiz_alanlar: belirsiz,
   };
 }

@@ -560,7 +560,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-24-ai-fatura-okuma", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-24-ai-fatura-sema", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
