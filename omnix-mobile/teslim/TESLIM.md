@@ -44,7 +44,11 @@ görüntüleyici/silme → onaya gönder → kilit) çalıştı. Onaycı ekranı
   telefonda saklandı" yalnız gerçekten taslak saklayan ekranlarda; yetki hatası kilit simgesi ve "görme yetkiniz yok" ile (bağlantı
   hatası gibi değil); boş iş listesi ile yüklenemeyen liste ayrı; puantajda eksik alan 0 yerine "—".
 - **Şirket yönetimi ve taşeron firma deneyimleri:** ayrıntı, yetki tablosu ve testler → `teslim/YONETIM_TASERON.md`.
-- **İş avansında IBAN otomatik dolar (25.10 gece, Orhan'ın isteği; commit yok):** "Kim için" bir personel seçilince banka adı ve IBAN
+- **Teknocenter direktör deneyimi + 1 Kasım onay devri (25.10 gece; commit yok, Orhan onayı bekliyor):** kök neden, tarihli onay
+  devri yapısı (`backend/onayDevri.js`, `onay_devri` tablosu, `/onay/bekleyen`, admin uçları + web paneli bölümü), direktör ana
+  sayfası, kalıcı Onaylar sekmesi (avans / masraf / malzeme / Clean Up), Personel Yönetimi araması ve sekmeli personel detayı,
+  yetki tablosu, testler ve canlıya alma planı → `teslim/DIREKTOR_ONAY_DEVRI.md`; ekranlar 29–36. Telefona **build 8** ile gelir.
+- **İş avansında IBAN otomatik dolar (25.10 gece, Orhan'ın isteği; commit edildi 582c0b9 / 8d9e522):** "Kim için" bir personel seçilince banka adı ve IBAN
   o personelin kayıtlı hesabından gelir; kayıtlı IBAN'ı yoksa alan boşalır ve "kayıtlı IBAN'ı yok" uyarısı çıkar; kullanıcı alana elle
   yazdıysa seçim değişince üzerine yazılmaz. Backend: `GET /hr/personel-secim/:id/odeme-hesabi` (yalnız başkası adına avans açabilen
   yetkili + İK hassas alan kapsamı; taşeron/personel/alt marka 403; yanıt yalnız banka + IBAN). Test: `yetki.test.mjs` 9/9, `npm test` 29/29;

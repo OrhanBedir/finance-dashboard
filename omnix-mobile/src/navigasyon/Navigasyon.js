@@ -10,7 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { renk } from "../tema";
 import { useOturum } from "../oturum/OturumSaglayici";
 import { useVeri } from "../api/veri";
-import { cleanupApi, panoApi } from "../api/uclar";
+import { cleanupApi, onayApi, panoApi } from "../api/uclar";
 import { AnaSayfa, onayciMi } from "../ekranlar/AnaSayfa";
 import { HarcamalarEkrani } from "../ekranlar/HarcamalarEkrani";
 import { MasrafFormEkrani } from "../ekranlar/MasrafFormEkrani";
@@ -21,7 +21,7 @@ import { SahaEkrani } from "../ekranlar/SahaEkrani";
 import { IsDetayEkrani } from "../ekranlar/IsDetayEkrani";
 import { CleanupEkrani } from "../ekranlar/CleanupEkrani";
 import { MalzemeDetayEkrani, MalzemeTalepEkrani } from "../ekranlar/MalzemeEkranlari";
-import { OnaylarEkrani } from "../ekranlar/OnaylarEkrani";
+import { OnayMasrafDetayEkrani, OnaylarEkrani } from "../ekranlar/OnaylarEkrani";
 import { ProfilEkrani } from "../ekranlar/ProfilEkrani";
 import { PersonelDetayEkrani, PersonelYonetimiEkrani, YonetimAnaSayfa } from "../ekranlar/YonetimEkranlari";
 import { TaseronAnaSayfa, TaseronBaglantiYokEkrani, TaseronBelgelerEkrani, TaseronFaturaDetayEkrani, TaseronFaturalarEkrani,
@@ -64,11 +64,14 @@ function BagsizSekmeleri() {
 
 function Sekmeler() {
   const { kullanici } = useOturum();
+  // "Onaylar" sekmesi: /auth/me'deki onay özeti (eski onay listeleri + tarihli devir, planlı devir dahil) ilk çizimden
+  // itibaren kalıcıdır — bekleyen kayıt yokken kaybolmaz. Rozet = şu an işlem yapılabilecek kayıt sayısı (+ Clean Up).
+  const onay = useVeri("onayBekleyen", () => onayApi.bekleyen(), { odaktaYenile: false, etkin: deneyimSec(kullanici) !== "taseron" });
   const pano = useVeri("pano", () => panoApi.pano(kullanici), { odaktaYenile: false });
   // Clean Up onaycısı (bölge onaycıları) avans onaycısı olmasa da Onaylar sekmesini görür; yetkiyi backend söyler
   const cleanup = useVeri("cleanupOnay", () => cleanupApi.onayBekleyen(), { odaktaYenile: false });
-  const onayci = onayciMi(pano.veri) || !!cleanup.veri?.yetkili;
-  const onayAdedi = (pano.veri?.onayBekleyenAvanslar?.length || 0) + (pano.veri?.isPM ? pano.veri?.onayBekleyenMalzemeler?.length || 0 : 0)
+  const onayci = !!kullanici?.onay?.onayci || !!onay.veri?.onayci || onayciMi(pano.veri) || !!cleanup.veri?.yetkili;
+  const onayAdedi = (onay.veri?.sayac ?? ((pano.veri?.onayBekleyenAvanslar?.length || 0) + (pano.veri?.isPM ? pano.veri?.onayBekleyenMalzemeler?.length || 0 : 0)))
     + (cleanup.veri?.rows?.length || 0);
   return (
     <Sekme.Navigator screenOptions={sekmeSecenek}>
@@ -102,8 +105,10 @@ export function Navigasyon() {
     <NavigationContainer theme={tema}>
       <Yigin.Navigator key={d} screenOptions={{ headerShown: false }}>
         <Yigin.Screen name="Sekmeler" component={Sekmeler} />
-        <Yigin.Screen name="PersonelYonetimi" component={PersonelYonetimiEkrani} />
+        {/* Personel Yönetimi: iPhone'da alttan açılan geniş sayfa (sheet); personel değiştirmek için geri kaydırılır */}
+        <Yigin.Screen name="PersonelYonetimi" component={PersonelYonetimiEkrani} options={{ presentation: "modal" }} />
         <Yigin.Screen name="PersonelDetay" component={PersonelDetayEkrani} />
+        <Yigin.Screen name="OnayMasrafDetay" component={OnayMasrafDetayEkrani} />
         <Yigin.Screen name="MasrafForm" component={MasrafFormEkrani} />
         <Yigin.Screen name="KalemEkle" component={KalemEkleEkrani} options={{ gestureEnabled: false }} />
         <Yigin.Screen name="AvansTalep" component={AvansTalepEkrani} />

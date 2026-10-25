@@ -60,6 +60,18 @@ export const isApi = {
   bitir: (id, govde) => api.post(`/is-atama/${id}/bitir`, govde),
 };
 
+// Onaylar (25.10.2026): kullanıcının ŞU AN işlem yapabileceği kayıtlar; firma + tarihli onay devri backend'de hesaplanır.
+// Masraf formu işlemleri web ile aynı uçlar; her adımın yetkisi sunucuda yeniden denetlenir.
+export const onayApi = {
+  bekleyen: () => api.get("/onay/bekleyen"),
+  masrafForm: (id) => api.get(`/hr/masraf-form/${id}`),
+  masrafOnayla: (id, adim, not) => api.put(`/hr/masraf-form/${id}/${{ ROLLOUT: "rollout-onayla", MUHASEBE: "muhasebe-onayla", PM: "pm-onayla", DIREKTOR: "direktor-onayla" }[adim]}`,
+    { [{ ROLLOUT: "rollout_not", MUHASEBE: "muhasebe_not", PM: "pm_not", DIREKTOR: "direktor_not" }[adim]]: not || null }),
+  masrafGeriGonder: (id, aciklama, email) => api.put(`/hr/masraf-form/${id}/geri-gonder`, { aciklama, gonderen_email: email }),
+  masrafReddet: (id, adim, aciklama, email) => api.put(`/hr/masraf-form/${id}/${adim === "DIREKTOR" ? "direktor-reddet" : "pm-reddet"}`, { red_aciklama: aciklama, reddeden_email: email }),
+  avansOnayla: (a, firma) => api.put(`/hr/is-avans/${a.id}/${a.uc === "direktor-onayla" ? "direktor-onayla" : "onayla"}`, firma ? { firma } : {}),
+};
+
 // Şirket sahibi / yönetici: kendi firma kapsamı (backend doğrular; maaş ayrı izin, yetkisizse yanıtta hiç yok)
 export const yonetimApi = {
   ozet: () => api.get("/yonetim/ozet"),
