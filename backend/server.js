@@ -21069,6 +21069,34 @@ app.get("/hr/personel-secim", authMiddleware, async (req, res) => {
     res.json({ ok: true, yetkili: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// 25.10.2026 (Orhan): mobil avans formunda "Kim için" seçilince personelin kayıtlı banka/IBAN'ı forma gelir.
+// IBAN hassas veri: yalnız başkası adına avans açabilen yetkili (personel-secim ile aynı kural) ve İK hassas alan
+// kapsamı (ikHassasGorur: alt marka yalnız kendi bordrosu) içindeki personel için; "kendim" → kişinin kendi kaydı.
+// Orhan'ın kişisel kaydı pmKisiselGorur kuralına bağlı. Yanıt yalnız banka_adi + iban (başka alan yok).
+app.get("/hr/personel-secim/:id/odeme-hesabi", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const email = String(req.user?.email || "").toLowerCase().trim();
+    const rol = String(req.user?.role || "").toLowerCase();
+    let p;
+    if (req.params.id === "kendim") {
+      p = await kendiPersonelKaydi(req.user);
+      if (!p) return res.json({ ok: true, banka_adi: null, iban: null, kaynak: "yok" });
+    } else {
+      const yetkili = ["RM", "PM", "PD", "ODE"].some((k) => (AVANS_YETKI[k] || []).includes(email))
+        || ["admin", "platform_admin", "muhasebe", "direktor", "pm", "rollout_mudur", "bolge_mudur"].includes(rol);
+      if (!yetkili || _sayiId(req.params.id) === null) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+      p = (await pool.query(`SELECT id, COALESCE(marka,'ERC') AS marka FROM personel WHERE id=$1 AND aktif = true`, [Number(req.params.id)])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, error: "Personel bulunamadı" });
+      if (!ikHassasGorur(req, p.marka)) return res.status(403).json({ ok: false, error: "Bu personelin ödeme bilgisini görme yetkiniz yok" });
+    }
+    const r = (await pool.query(`SELECT banka_adi, iban, LOWER(TRIM(COALESCE(email,''))) AS email FROM personel WHERE id=$1`, [p.id])).rows[0];
+    if (!r) return res.json({ ok: true, banka_adi: null, iban: null, kaynak: "yok" });
+    if (r.email === PM_KISISEL_EMAIL && !pmKisiselGorur(req) && req.params.id !== "kendim")
+      return res.status(403).json({ ok: false, error: "Bu personelin ödeme bilgisini görme yetkiniz yok" });
+    res.json({ ok: true, banka_adi: r.banka_adi || null, iban: r.iban ? String(r.iban).replace(/\s+/g, "").toUpperCase() : null, kaynak: r.iban ? "personel" : "yok" });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 function avansYetkili(req, adim) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
