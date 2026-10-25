@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+dist/
+ios/
+android/
+teslim/
+test/
+*.ipa
+*.apk
+*.aab
+.env*
