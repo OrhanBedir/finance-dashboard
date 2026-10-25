@@ -37478,6 +37478,92 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
         </div>
       )}
       <AyniIsimUyari veri={ayniIsim} onKapat={() => setAyniIsim(null)} />
+      {["admin", "platform_admin"].includes(String(currentUser?.role || "").toLowerCase()) && !isUsersAdminOnly && (
+        <AdminOnayDevriPanel token={token} users={users} markalar={markalar} />
+      )}
+    </div>
+  );
+}
+
+// 25.10.2026 (Orhan): Tarihli onay devri — bir firmanın onay adımı (ör. Teknocenter direktör onayı) yürürlük tarihinden
+// itibaren seçilen KULLANICIYA (users.id) geçer. Kurallar backend'de (onayDevri.js): devir varsa o adımı yalnız devralan
+// onaylar, önceki adımlar korunur, tarih her istekte o anın saatiyle hesaplanır. İlk kullanım: 01.11.2026 00:00 → İlhami Şahin.
+function AdminOnayDevriPanel({ token, users, markalar }) {
+  const H = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${token || localStorage.getItem("token") || ""}` });
+  const [rows, setRows] = useState([]);
+  const [adimlar, setAdimlar] = useState([]);
+  const [hata, setHata] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ firma: "TEKNO", adim: "AVANS_PD", onayci_user_id: "", baslangic: "2026-11-01T00:00", aciklama: "" });
+  const yukle = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/admin/onay-devri`, { headers: H() }); const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Onay devirleri alınamadı");
+      setRows(d.rows || []); setAdimlar(d.adimlar || []); setHata("");
+    } catch (e) { setHata(e.message); }
+  };
+  useEffect(() => { yukle(); }, []);
+  const firmaAd = (k) => markalar.find((m) => m.kod === String(k || "ERC").toUpperCase())?.ad || k;
+  const DURUM = { yururlukte: ["Yürürlükte", "#166534", "#dcfce7"], planli: ["Planlı", "#1d4ed8", "#dbeafe"], bitti: ["Bitti", "#6b7280", "#f3f4f6"], iptal: ["İptal", "#6b7280", "#f3f4f6"], onayci_pasif: ["Devralan pasif — adım kilitli", "#b91c1c", "#fee2e2"] };
+  const trTarih = (v) => v ? new Date(v).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  const kaydet = async () => {
+    if (!form.onayci_user_id) { setHata("Devralan kullanıcıyı seçin"); return; }
+    if (!window.confirm(`${firmaAd(form.firma)} · ${adimlar.find((a) => a.kod === form.adim)?.ad || form.adim}\n${users.find((u) => String(u.id) === String(form.onayci_user_id))?.name || ""}'e ${trTarih(form.baslangic)} itibarıyla devredilsin mi?\n\nBu tarihten sonra bu adımı (daha önce açılmış bekleyen talepler dahil) yalnız bu kullanıcı onaylar.`)) return;
+    try {
+      setBusy(true);
+      // Tarih alanı yerel saat (Europe/Istanbul) olarak gönderilir
+      const r = await fetch(`${API_BASE}/admin/onay-devri`, { method: "POST", headers: H(), body: JSON.stringify({ ...form, onayci_user_id: Number(form.onayci_user_id), baslangic: `${form.baslangic}:00+03:00` }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Kaydedilemedi");
+      setForm((f) => ({ ...f, aciklama: "" })); await yukle();
+    } catch (e) { setHata(e.message); } finally { setBusy(false); }
+  };
+  const bitir = async (x) => {
+    if (!window.confirm(x.durum === "planli" ? "Planlı devir iptal edilsin mi?" : "Devir şimdi bitirilsin mi? (Geçmiş onaylar değişmez; adım eski kurala döner)")) return;
+    try {
+      setBusy(true);
+      const r = await fetch(`${API_BASE}/admin/onay-devri/${x.id}/bitir`, { method: "PUT", headers: H(), body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "İşlem yapılamadı");
+      await yukle();
+    } catch (e) { setHata(e.message); } finally { setBusy(false); }
+  };
+  const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "13px", background: "#fff" };
+  const lbl = { display: "block", fontSize: "11.5px", fontWeight: 700, color: "#374151", marginBottom: "4px" };
+  const adaylar = users.filter((u) => u.is_active && (u.role || "user") !== "subcon").sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "tr"));
+  return (
+    <div style={{ marginTop: "24px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px 20px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0, fontSize: "15px", color: "#1e3a5f" }}>Onay devri (tarihli)</h3>
+        <span style={{ fontSize: "12px", color: "#6b7280" }}>Bir firmanın onay adımı, yürürlük tarihinden itibaren seçilen kullanıcıya geçer; önceki adımlar ve muhasebe ödemesi değişmez.</span>
+      </div>
+      {hata && <div role="alert" style={{ marginTop: "10px", background: "#fef2f2", color: "#b91c1c", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{hata}</div>}
+      <div style={{ marginTop: "12px", overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+          <thead><tr style={{ textAlign: "left", color: "#6b7280", fontSize: "11.5px" }}>
+            <th style={{ padding: "6px 8px" }}>Firma</th><th style={{ padding: "6px 8px" }}>Adım</th><th style={{ padding: "6px 8px" }}>Devralan</th><th style={{ padding: "6px 8px" }}>Başlangıç</th><th style={{ padding: "6px 8px" }}>Bitiş</th><th style={{ padding: "6px 8px" }}>Durum</th><th />
+          </tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={7} style={{ padding: "10px 8px", color: "#9ca3af" }}>Tanımlı onay devri yok — onaylar mevcut listelerle sürüyor.</td></tr>}
+            {rows.map((x) => { const d = DURUM[x.durum] || [x.durum, "#374151", "#f3f4f6"]; return (
+              <tr key={x.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                <td style={{ padding: "8px" }}>{firmaAd(x.firma)}</td><td style={{ padding: "8px" }}>{x.adim_ad}</td>
+                <td style={{ padding: "8px" }}>{x.onayci_ad || "—"} <span style={{ color: "#9ca3af" }}>({x.onayci_email || `#${x.onayci_user_id}`})</span></td>
+                <td style={{ padding: "8px", whiteSpace: "nowrap" }}>{trTarih(x.baslangic)}</td><td style={{ padding: "8px", whiteSpace: "nowrap" }}>{x.bitis ? trTarih(x.bitis) : "süresiz"}</td>
+                <td style={{ padding: "8px" }}><span style={{ background: d[2], color: d[1], borderRadius: "999px", padding: "2px 10px", fontSize: "11.5px", fontWeight: 700 }}>{d[0]}</span></td>
+                <td style={{ padding: "8px", textAlign: "right" }}>{["yururlukte", "planli", "onayci_pasif"].includes(x.durum) && <button type="button" disabled={busy} onClick={() => bitir(x)} style={{ ...inp, width: "auto", cursor: "pointer", padding: "4px 10px" }}>{x.durum === "planli" ? "İptal et" : "Bitir"}</button>}</td>
+              </tr>); })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", alignItems: "end" }}>
+        <div><label style={lbl}>Firma</label><select value={form.firma} onChange={(e) => setForm({ ...form, firma: e.target.value })} style={inp}>{(markalar.length ? markalar : [{ kod: "ERC", ad: "ERC" }, { kod: "TEKNO", ad: "Teknocenter" }, { kod: "AHY", ad: "AHY" }]).map((m) => <option key={m.kod} value={m.kod}>{m.ad}</option>)}</select></div>
+        <div><label style={lbl}>Onay adımı</label><select value={form.adim} onChange={(e) => setForm({ ...form, adim: e.target.value })} style={inp}>{(adimlar.length ? adimlar : [{ kod: "AVANS_PD", ad: "İş avansı · direktör onayı" }, { kod: "MASRAF_PD", ad: "Masraf formu · direktör onayı" }]).map((a) => <option key={a.kod} value={a.kod}>{a.ad}</option>)}</select></div>
+        <div><label style={lbl}>Devralan kullanıcı</label><select value={form.onayci_user_id} onChange={(e) => setForm({ ...form, onayci_user_id: e.target.value })} style={inp}><option value="">Seçin</option>{adaylar.map((u) => <option key={u.id} value={u.id}>{u.name} · {u.email} · {firmaAd(u.marka)}</option>)}</select></div>
+        <div><label style={lbl}>Yürürlük (Türkiye saati)</label><input type="datetime-local" value={form.baslangic} onChange={(e) => setForm({ ...form, baslangic: e.target.value })} style={inp} /></div>
+        <div><label style={lbl}>Açıklama</label><input value={form.aciklama} onChange={(e) => setForm({ ...form, aciklama: e.target.value })} placeholder="ör. 1 Kasım Teknocenter devri" style={inp} /></div>
+        <div><button type="button" disabled={busy} onClick={kaydet} style={{ ...inp, background: "#1e3a5f", color: "#fff", fontWeight: 700, cursor: "pointer", border: "none" }}>{busy ? "Kaydediliyor…" : "Devri tanımla"}</button></div>
+      </div>
     </div>
   );
 }
