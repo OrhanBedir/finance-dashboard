@@ -557,12 +557,14 @@ const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTe
 const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
+const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
+onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-25-profil", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
+app.get("/health", (req, res) => res.json({ ok: true, status: "running", v: "masraf-zincir-v42", build: "2026-10-26-onay-devri", foto_ofis_sayisi: CLEANUP_FOTO_OFIS.length }));
 
 // Kullanıcı ekleme + şifre belirleme için yeterli yetki: tam admin VEYA
 // users_admin bayrağı olan kısıtlı yönetici.
@@ -649,11 +651,17 @@ function finansYazmaYetkili(u) {
 const masrafRolloutOnayci = (u) => MASRAF_ROLLOUT_MAIL.includes(_eposta(u));
 const masrafMuhasebeOnayci = (u) => !taseronMu(u) && (MASRAF_MUHASEBE_MAIL.includes(_eposta(u)) || _rol(u) === "muhasebe");
 const masrafPmOnayci = (u) => MASRAF_PM_MAIL.includes(_eposta(u));
-const masrafDirektorOnayci = (u) => MASRAF_PD_MAIL.includes(_eposta(u));
-const masrafHerhangiOnayci = (u) => masrafRolloutOnayci(u) || masrafMuhasebeOnayci(u) || masrafPmOnayci(u) || masrafDirektorOnayci(u);
+// 25.10.2026: direktör adımı firmaya göre DEVREDİLEBİLİR (onayDevri): devralan kullanıcı req.devirler ile tanınır;
+// kapı yalnız "onaycı mı"ya bakar, hangi firmanın formu olduğu ilgili uçta (masrafPdYetkisi) denetlenir.
+const masrafDirektorOnayciEski = (u) => MASRAF_PD_MAIL.includes(_eposta(u));
+const devirOnaycisi = (req, adim) => (req?.devirler || []).some((d) => d.adim === adim);
+const masrafDirektorOnayci = (u, req) => masrafDirektorOnayciEski(u) || devirOnaycisi(req, "MASRAF_PD");
+const masrafHerhangiOnayciEski = (u) => masrafRolloutOnayci(u) || masrafMuhasebeOnayci(u) || masrafPmOnayci(u) || masrafDirektorOnayciEski(u);
+const masrafHerhangiOnayci = (u, req) => masrafHerhangiOnayciEski(u) || devirOnaycisi(req, "MASRAF_PD");
 // İş avansı onaycısı (RM/PM/PD/ödeme listeleri + muhasebe / rollout-bölge müdürü rolleri)
-const avansOnayciMi = (u) => !taseronMu(u) && (Object.values(AVANS_YETKI).some((l) => l.includes(_eposta(u)))
+const avansOnayciMiEski = (u) => !taseronMu(u) && (Object.values(AVANS_YETKI).some((l) => l.includes(_eposta(u)))
   || ["muhasebe", "rollout_mudur", "bolge_mudur"].includes(_rol(u)));
+const avansOnayciMi = (u, req) => avansOnayciMiEski(u) || (!taseronMu(u) && devirOnaycisi(req, "AVANS_PD"));
 
 const taseronDegil = rolKapisi((u) => !taseronMu(u), "Taşeron hesabı bu işlemi yapamaz");
 const ikYazma = rolKapisi(ikYazmaYetkili, "İK kayıtlarını değiştirme yetkiniz yok");
@@ -667,7 +675,7 @@ const odemeYazma = rolKapisi((u, req) => !!odemeYetkili(req), "Ödeme işlemi ye
 const avansOnayKapisi = rolKapisi(avansOnayciMi, "Avans onay/red yetkiniz yok");
 const avansTutarDuzelt = rolKapisi((u) => [...AVANS_YETKI.PM, ...AVANS_YETKI.PD].includes(_eposta(u)), "Avans tutarını yalnız PM / Direktör düzeltebilir");
 const masrafAdimKapisi = (izinli) => rolKapisi(izinli, "Bu onay adımı için yetkiniz yok");
-const masrafRedKapisi = rolKapisi((u) => masrafPmOnayci(u) || masrafDirektorOnayci(u), "Red yetkisi PM ve Direktör'de");
+const masrafRedKapisi = rolKapisi((u, req) => masrafPmOnayci(u) || masrafDirektorOnayci(u, req), "Red yetkisi PM ve Direktör'de");
 
 // Kayıt sahibi (talep eden / bağlı personel e-postası) VEYA izinli rol. Kayıt yoksa işleyici
 // kendi 404/boş cevabını verir. kimlikAl: req → kayıt id'si.
@@ -697,12 +705,12 @@ const masrafFormSilme = sahipVeyaKapisi(MASRAF_FORM_SAHIP_SQL, (req) => _sayiId(
 const masrafKalemEkleme = sahipVeyaKapisi(MASRAF_FORM_SAHIP_SQL, (req) => _sayiId(req.body?.form_id), (u, req) => masrafTamGorus(req));
 const masrafCezaAtama = sahipVeyaKapisi(`SELECT mf.talep_eden_email, p.email AS personel_email FROM masraf_kalem mk
   JOIN masraf_form mf ON mf.id = mk.form_id LEFT JOIN personel p ON p.id = mf.personel_id WHERE mk.id = $1`,
-  (req) => _sayiId(req.params.id), (u) => masrafPmOnayci(u) || masrafDirektorOnayci(u), "Ceza personelini yalnız form sahibi, PM veya Direktör atayabilir");
+  (req) => _sayiId(req.params.id), (u, req) => masrafPmOnayci(u) || masrafDirektorOnayci(u, req), "Ceza personelini yalnız form sahibi, PM veya Direktör atayabilir");
 const avansSahibiVeyaTam = sahipVeyaKapisi(AVANS_SAHIP_SQL, (req) => _sayiId(req.params.id), (u, req) => avansTamGorus(req));
 // 25.10.2026 (Orhan, gizlilik): masraf formu detayı / Excel / PDF yalnız form sahibine (talep eden ya da bağlı personel)
 // ve tam görüşe (yönetim, muhasebe, onay zinciri) açık. Eskiden form numarasını bilen her giriş yapmış kullanıcı
 // başkasının formunu, fişlerini, Excel/PDF'ini alabiliyordu. Token başlıktan veya ?t= ile (Excel/PDF linkleri).
-const masrafTamVeyaOnayci = (u, req) => !taseronMu(u) && (masrafTamGorus(req) || masrafHerhangiOnayci(u));
+const masrafTamVeyaOnayci = (u, req) => !taseronMu(u) && (masrafTamGorus(req) || masrafHerhangiOnayci(u, req));
 async function masrafFormOkuma(req, res, next) {
   try {
     const u = optionalAuth(req);
@@ -1010,6 +1018,10 @@ app.use((req, res, next) => {
 // İSG kaydı değiştirme, puantaj değiştirme, Rollout yazma izinleri ayrı anahtarlar olarak burada durur (false);
 // ileride açılacaksa yalnız bu tablo değişir. Kapı aşağıda: İZİN LİSTESİ dışında kalan her istek 403 döner.
 const ROL_IZINLERI = {
+  // 25.10.2026 (İlhami Şahin vakası): "Proje direktörü" rolü yalnız unvan etiketiydi; mobil deneyim ve Personel Yönetimi
+  // yalnız users.yonetim_profili'ne bakıyordu. Direktör rolü kendi firma kapsamında personel yönetimi görür; maaş
+  // AYRI izindir (şirket sahibi profili ya da kişiye özel maas_goruntule), bu rolle açılmaz.
+  direktor: { personel_yonetimi: true },
   isg: {
     isg_goruntule: true, isg_duzenle: false, isg_sil: false, isg_onayla: false,
     puantaj_goruntule: true, puantaj_duzenle: false,
@@ -1156,6 +1168,8 @@ app.use(async (req, res, next) => {
     if (kr && ROL_IZINLERI[String(kr).toLowerCase()]) u.role = kr;
     req.izinler = etkinIzinHesapla(u, ayar);
   } catch { req.izinler = etkinIzinHesapla(u, null); }
+  // Şu an bu kullanıcıya devredilmiş onay adımları (firma + adım); yürürlük her istekte o anın saatiyle hesaplanır
+  try { req.devirler = (u.user_id || u.id) ? await onayPanel.kullaniciDevirleri(u.user_id || u.id) : []; } catch { req.devirler = []; }
   next();
 });
 // Düzenleme kilidi: etkin izinde isg_duzenle / puantaj_duzenle AÇIKÇA false ise o alanda yazma yok — rolü İK yazma
@@ -2294,6 +2308,7 @@ app.post("/auth/login", async (req, res) => {
         hw_yukleme: hwYukleme,
         ...markaProfilAlanlari,
         ...((() => { const iz = etkinIzinHesapla({ ...user, yonetim_profili: _profil.yonetim_profili }, user.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()), // rol + kullanıcı yetki ayarı
+        onay: await onayPanel.onayOzeti({ user: { user_id: user.id, email: user.email, role: user.role } }).catch(() => null),
       },
     });
   } catch (err) {
@@ -2348,6 +2363,8 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
       ...(await (async () => { const pr = await omnixProfil.profilOku(pool, u.id).catch(() => ({}));
         const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
+      // Onay yetkisi özeti (eski listeler + tarihli devirler): mobil "Onaylar" sekmesi ilk çizimden itibaren doğru olsun
+      onay: await onayPanel.onayOzeti({ user: { user_id: u.id, email: u.email, role: u.role } }).catch(() => null),
     }});
   } catch (e) {
     console.error("AUTH ME ERROR:", e.message);
@@ -12353,6 +12370,17 @@ const omnixPanel = omnixProfil.kur(app, {
   pool, authMiddleware, markaProfil, altMarkaKullanicisi, islemGecmisiYaz, isAtamaYetkiliMi, personelHesapEkstresi, pmKisiselEmailGorur,
   get PM_KISISEL_EMAIL() { return PM_KISISEL_EMAIL; },
 });
+// Tarihli onay devri + mobil "Onaylar" listesi (/onay/bekleyen) + admin devir tanımları. Eski e-posta listeleri
+// (AVANS_YETKI, MASRAF_*_MAIL) dosyanın ilerisinde tanımlıdır; yalnız istek anında okunur.
+const onayPanel = onayDevri.kur(app, {
+  pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi,
+  eskiAvansYetkisi: (req, adim) => avansYetkiliEski(req, adim),
+  eskiMasrafPdYetkisi: (u) => masrafDirektorOnayciEski(u),
+  masrafAdimYetkileri: (u) => ({ ROLLOUT_BEKLE: masrafRolloutOnayci(u), MUHASEBE_BEKLE: masrafMuhasebeOnayci(u), PM_BEKLE: masrafPmOnayci(u) }),
+  malzemePmMi: (u) => _eposta(u) === "orhan.bedir@simsektel.com", // mobile-dashboard PM_EMAIL_CONST ile aynı
+  pmKisiselEmailGorur: (e, r) => pmKisiselEmailGorur(e, r),
+  pmAvansSahibiSql: (t, p) => pmAvansSahibiSql(t, p),
+});
 app.get("/is-atama/kategoriler", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
@@ -20424,16 +20452,17 @@ async function islemGecmisiYaz(req, modul, kayitId, tip, eski, yeni, aciklama) {
 const avansOzet = (t) => t ? ({ tutar: t.tutar, tarih: ymdYerel(t.tarih), gider_turu: t.gider_turu, bolge: t.bolge, proje: t.proje, plaka: t.plaka, firma: t.firma, aciklama: t.aciklama, not_aciklama: t.not_aciklama, personel_id: t.personel_id }) : null;
 const maasOzet = (m) => m ? ({ donem: m.donem, bankadan: m.bankadan, elden: m.elden, tarih: ymdYerel(m.tarih), aciklama: m.aciklama, odeyen: m.odeyen, personel_id: m.personel_id }) : null;
 const kalemOzet = (k) => k ? ({ kalem_id: k.id, kategori: k.kategori, tarih: ymdYerel(k.tarih), tutar: k.tutar, aciklama: k.aciklama, belge_no: k.belge_no, belge_aciklama: k.belge_aciklama, plaka: k.plaka, fis_var: k.fis_var }) : null;
-async function avansOnayBitir(req, res, onceki, yeni) {
+async function avansOnayBitir(req, res, onceki, yeni, ek) {
   const tip = yeni.durum === "TAMAMLANDI" ? "ODEME" : "ONAY";
-  await islemGecmisiYaz(req, "avans", yeni.id, tip, { durum: onceki.durum, firma: onceki.firma || null }, { durum: yeni.durum, firma: yeni.firma || null }, null);
+  // ek: adım (ROLLOUT/PM/DIREKTOR/ODEME) ve onayın kaynağı (eski liste / tarihli devir) — denetim izi (25.10.2026)
+  await islemGecmisiYaz(req, "avans", yeni.id, tip, { durum: onceki.durum, firma: onceki.firma || null }, { durum: yeni.durum, firma: yeni.firma || null, ...(ek || {}) }, null);
   res.json(yeni);
 }
 const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü onayı", PM_ONAY: "PM onayı", DIREKTOR_ONAY: "Direktör onayı", TAMAMLANDI: "Tamamlandı", REDDEDILDI: "Reddedildi",
   TASLAK: "Taslak", ROLLOUT_BEKLE: "Rollout onayı bekliyor", MUHASEBE_BEKLE: "Muhasebe onayı bekliyor", PM_BEKLE: "PM onayı bekliyor", DIREKTOR_BEKLE: "Direktör onayı bekliyor", ARSIVLENDI: "Arşivlendi" };
 const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
   donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
-  form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", kalem: "Kalem",
+  form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", onay_kaynagi: "Onay yetkisi", talep_firma: "Talebin firması", kalem: "Kalem",
   name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not",
   ekip_turu: "Ekip türü", bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", ad: "Ad" };
 const GECMIS_ROL_TR = { isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
@@ -20452,7 +20481,7 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi" })[v] || v : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -20472,7 +20501,7 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
       const t = (await pool.query(`SELECT t.*, p.ad_soyad, COALESCE(p.marka,'ERC') AS personel_marka FROM is_avans_talep t LEFT JOIN personel p ON p.id=t.personel_id WHERE t.id=$1`, [id])).rows[0];
       if (!t) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
       const sahip = !!email && String(t.talep_eden_email || "").toLowerCase().trim() === email;
-      const yetkili = sahip || avansTamGorus(req) || ["RM", "PM", "PD", "ODE"].some(a => avansYetkili(req, a)) || ["admin", "platform_admin", "direktor", "muhasebe", "pm", "rollout_mudur", "bolge_mudur", "genel_mudur"].includes(rol);
+      const yetkili = sahip || avansTamGorus(req) || ["RM", "PM", "PD", "ODE"].some(a => avansYetkiliEski(req, a)) || devirOnaycisi(req, "AVANS_PD") || ["admin", "platform_admin", "direktor", "muhasebe", "pm", "rollout_mudur", "bolge_mudur", "genel_mudur"].includes(rol);
       if (!yetkili || !avansKapsamda(kap, t)) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
       kayit = { id: t.id, baslik: `Avans talebi #${t.id}`, alt: `${t.talep_eden_ad || t.ad_soyad || t.talep_eden_email || "—"} · ${para(t.tutar)} · ${tr(t.tarih)} · ${GECMIS_DURUM_TR[t.durum] || t.durum}` };
       if (!logVar("OLUSTURMA")) olaylar.push({ zaman: t.created_at, tip: "OLUSTURMA", baslik: "Talep oluşturuldu", kaynak: "kayit", kim: K(null),
@@ -21097,12 +21126,23 @@ app.get("/hr/personel-secim/:id/odeme-hesabi", authMiddleware, async (req, res) 
     res.json({ ok: true, banka_adi: r.banka_adi || null, iban: r.iban ? String(r.iban).replace(/\s+/g, "").toUpperCase() : null, kaynak: r.iban ? "personel" : "yok" });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-function avansYetkili(req, adim) {
+function avansYetkiliEski(req, adim) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
   if (adim === "ODE" && rol === "muhasebe") return true;
   return (AVANS_YETKI[adim] || []).includes(email);
 }
+// 25.10.2026: PD (direktör) adımı firmaya göre devredilebilir (onayDevri). Talep verilirse firması bulunur; devir varsa
+// yalnız devralan onaylar ve yalnız PM_ONAY aşamasında (RM / PM adımları atlanmaz). Yapılandırma hatası req.onayHatasi'na yazılır.
+async function avansYetkili(req, adim, talep) {
+  if (adim !== "PD") return avansYetkiliEski(req, adim);
+  if (!talep) return avansYetkiliEski(req, adim) || devirOnaycisi(req, "AVANS_PD");
+  const y = await onayPanel.avansPdYetkisi(req, await onayPanel.talepFirmasiAvans(talep));
+  req.onayHatasi = y.hata || null; req.onayKaynagi = y.kaynak;
+  if (y.kaynak === "devir" && y.izin && talep.durum !== "PM_ONAY") return false;
+  return y.izin;
+}
+const onayCakismasi = (res) => res.status(409).json({ error: "Bu kayıt az önce başka bir onaycı tarafından işlendi. Liste yenilendi." });
 
 app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
   try {
@@ -21112,8 +21152,8 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
     const ADIM = { TALEP: "RM", ROLLOUT_MUDUR_ONAY: "PM", PM_ONAY: "PD", DIREKTOR_ONAY: "ODE" }[talep.durum];
-    if (ADIM && !avansYetkili(req, ADIM)) {
-      return res.status(403).json({ error: "Bu onay adımı için yetkiniz yok" });
+    if (ADIM && !(await avansYetkili(req, ADIM, talep))) {
+      return res.status(403).json({ error: req.onayHatasi || (req.onayKaynagi === "devir" && ADIM === "PD" ? "Bu firmanın direktör onayı başka bir kullanıcıya devredildi" : "Bu onay adımı için yetkiniz yok") });
     }
     if (firmaSecim) {
       await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2", [firmaSecim, id]);
@@ -21127,41 +21167,45 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     // yettiği en ileri adıma kadar tek seferde ilerletilir. Her adım hâlâ kendi
     // yetki listesine bağlı — 28.07 kilidi korunur.
     if (talep.durum === "TALEP" || talep.durum === "ROLLOUT_MUDUR_ONAY") {
-      const pmYetki = avansYetkili(req, "PM");
-      const pdYetki = avansYetkili(req, "PD");
+      const pmYetki = await avansYetkili(req, "PM", talep);
+      // Devralan direktör (onay devri) yalnız PM_ONAY'da onaylar; burada pdYetki yalnız eski liste için doğru döner
+      const pdYetki = await avansYetkili(req, "PD", { ...talep, durum: "PM_ONAY" }) && req.onayKaynagi !== "devir";
       if (pmYetki && pdYetki) {
         const updated = await pool.query(
           `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
              rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
              pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1
-           WHERE id=$2 RETURNING *`, [today, id]);
-        return avansOnayBitir(req, res, talep, updated.rows[0]);
+           WHERE id=$2 AND durum=$3 RETURNING *`, [today, id, talep.durum]);
+        if (!updated.rows[0]) return onayCakismasi(res);
+        return avansOnayBitir(req, res, talep, updated.rows[0], { adim: "DIREKTOR" });
       }
       if (pmYetki) {
         const updated = await pool.query(
           `UPDATE is_avans_talep SET durum='PM_ONAY',
              rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1
-           WHERE id=$2 RETURNING *`, [today, id]);
-        return avansOnayBitir(req, res, talep, updated.rows[0]);
+           WHERE id=$2 AND durum=$3 RETURNING *`, [today, id, talep.durum]);
+        if (!updated.rows[0]) return onayCakismasi(res);
+        return avansOnayBitir(req, res, talep, updated.rows[0], { adim: "PM" });
       }
     }
 
     if (talep.durum === "TALEP") {
       // Rollout Manager onaylıyor
-      updateSql = "UPDATE is_avans_talep SET durum='ROLLOUT_MUDUR_ONAY', rollout_mudur_onay_tarihi=$1 WHERE id=$2 RETURNING *";
-      updateParams = [today, id];
+      updateSql = "UPDATE is_avans_talep SET durum='ROLLOUT_MUDUR_ONAY', rollout_mudur_onay_tarihi=$1 WHERE id=$2 AND durum=$3 RETURNING *";
+      updateParams = [today, id, talep.durum];
     } else if (talep.durum === "ROLLOUT_MUDUR_ONAY") {
       // PM onaylıyor
-      updateSql = "UPDATE is_avans_talep SET durum='PM_ONAY', pm_onay_tarihi=$1 WHERE id=$2 RETURNING *";
-      updateParams = [today, id];
+      updateSql = "UPDATE is_avans_talep SET durum='PM_ONAY', pm_onay_tarihi=$1 WHERE id=$2 AND durum=$3 RETURNING *";
+      updateParams = [today, id, talep.durum];
     } else if (talep.durum === "PM_ONAY") {
       // Direktör onaylıyor
-      updateSql = "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', direktor_onay_tarihi=$1 WHERE id=$2 RETURNING *";
-      updateParams = [today, id];
+      updateSql = "UPDATE is_avans_talep SET durum='DIREKTOR_ONAY', direktor_onay_tarihi=$1 WHERE id=$2 AND durum=$3 RETURNING *";
+      updateParams = [today, id, talep.durum];
     } else if (talep.durum === "DIREKTOR_ONAY") {
-      updateSql = "UPDATE is_avans_talep SET durum='TAMAMLANDI', muhasebe_onay_tarihi=$1, odeme_tarihi=$1 WHERE id=$2 RETURNING *";
-      updateParams = [today, id];
+      updateSql = "UPDATE is_avans_talep SET durum='TAMAMLANDI', muhasebe_onay_tarihi=$1, odeme_tarihi=$1 WHERE id=$2 AND durum=$3 RETURNING *";
+      updateParams = [today, id, talep.durum];
       const updated = await pool.query(updateSql, updateParams);
+      if (!updated.rows[0]) return onayCakismasi(res); // çift dokunma / eş zamanlı ödeme: ikinci istek avans satırı üretmez
       // Insert into avans table
       if (talep.personel_id) {
         await pool.query(
@@ -21170,13 +21214,14 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
           [talep.personel_id, talep.tarih, talep.tutar, talep.aciklama || "İş Avansı", today]
         );
       }
-      return avansOnayBitir(req, res, talep, updated.rows[0]);
+      return avansOnayBitir(req, res, talep, updated.rows[0], { adim: "ODEME" });
     } else {
       return res.status(400).json({ error: "Bu durumda onay yapılamaz" });
     }
 
     const updated = await pool.query(updateSql, updateParams);
-    avansOnayBitir(req, res, talep, updated.rows[0]);
+    if (!updated.rows[0]) return onayCakismasi(res);
+    avansOnayBitir(req, res, talep, updated.rows[0], { adim: { RM: "ROLLOUT", PM: "PM", PD: "DIREKTOR" }[ADIM] || ADIM, onay_kaynagi: ADIM === "PD" ? req.onayKaynagi : undefined });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -21196,10 +21241,11 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
     const updated = await pool.query(
-      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *",
-      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
+      "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 AND durum=$5 RETURNING *",
+      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC", talep.durum]
     );
-    avansOnayBitir(req, res, talep, updated.rows[0]);
+    if (!updated.rows[0]) return onayCakismasi(res);
+    avansOnayBitir(req, res, talep, updated.rows[0], { adim: "PM" });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -21207,16 +21253,23 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
 app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!avansYetkili(req, "PD")) {
+    if (!avansYetkiliEski(req, "PD") && !devirOnaycisi(req, "AVANS_PD")) {
       return res.status(403).json({ error: "Direktör onayı için yetkiniz yok" });
     }
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
     // Mobil pano direktöre TALEP/ROLLOUT/PM_ONAY'ı listeler (mobile-dashboard);
-    // direktör yetkisi PM ve RM adımlarını da kapsadığından hepsi kabul edilir.
+    // direktör yetkisi PM ve RM adımlarını da kapsadığından hepsi kabul edilir. (Zaten işlenmiş talep: 409)
     if (!["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(talep.durum)) {
-      return res.status(400).json({ error: "Bu durumda direktör onayı yapılamaz" });
+      return res.status(["DIREKTOR_ONAY", "TAMAMLANDI", "REDDEDILDI"].includes(talep.durum) ? 409 : 400).json({ error: "Bu talep zaten işlenmiş; bu durumda direktör onayı yapılamaz" });
+    }
+    // 25.10.2026: talebin FİRMASINA göre direktör adımı devredilmiş olabilir (onayDevri) — devir varsa yalnız devralan,
+    // eski listedeki kişi (Düzgün / ortak hesap) bu firmanın adımını API'den de veremez. Devralan yalnız PM_ONAY'da onaylar.
+    if (!(await avansYetkili(req, "PD", talep))) {
+      return res.status(403).json({ error: req.onayHatasi || (req.onayKaynagi === "devir"
+        ? (talep.durum === "PM_ONAY" ? "Bu firmanın direktör onayı başka bir kullanıcıya devredildi" : "Direktör onayı için talep önce Rollout Müdürü ve PM adımlarından geçmeli")
+        : "Direktör onayı için yetkiniz yok") });
     }
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
     const today = new Date().toISOString().split("T")[0];
@@ -21224,10 +21277,11 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
       `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
          rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),
          pm_onay_tarihi=COALESCE(pm_onay_tarihi,$1), direktor_onay_tarihi=$1,
-         firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 RETURNING *`,
-      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC"]
+         firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 AND durum=$5 RETURNING *`,
+      [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC", talep.durum]
     );
-    avansOnayBitir(req, res, talep, updated.rows[0]);
+    if (!updated.rows[0]) return onayCakismasi(res);
+    avansOnayBitir(req, res, talep, updated.rows[0], { adim: "DIREKTOR", onay_kaynagi: req.onayKaynagi });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -21251,11 +21305,22 @@ app.put("/hr/is-avans/:id/reddet", avansOnayKapisi, async (req, res) => {
   try {
     const { id } = req.params;
     const { red_aciklama, reddeden_email } = req.body;
-    const onceki = (await pool.query("SELECT durum FROM is_avans_talep WHERE id=$1", [id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum, firma FROM is_avans_talep WHERE id=$1", [id])).rows[0];
+    if (!onceki) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    // 25.10.2026 (onay devri): devralan direktör yalnız kendi firmasının PM_ONAY'daki talebini reddeder; devredilmiş
+    // firmanın direktör adımında eski listedeki direktör (RM/PM yetkisi de yoksa) red veremez
+    if (["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(onceki.durum)) {
+      const pd = await onayPanel.avansPdYetkisi(req, await onayPanel.talepFirmasiAvans(onceki));
+      const devralan = pd.kaynak === "devir" && pd.izin;
+      if (!avansOnayciMiEski(req.user) && !(devralan && onceki.durum === "PM_ONAY")) return res.status(403).json({ error: "Bu talep onay kapsamınızda değil" });
+      if (pd.devir && onceki.durum === "PM_ONAY" && !devralan && !avansYetkiliEski(req, "RM") && !avansYetkiliEski(req, "PM") && _rol(req.user) !== "muhasebe")
+        return res.status(403).json({ error: pd.hata || "Bu firmanın direktör adımı başka bir kullanıcıya devredildi" });
+    }
     const r = await pool.query(
-      "UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *",
-      [red_aciklama, reddeden_email, id]
+      "UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 AND durum=$4 RETURNING *",
+      [red_aciklama, reddeden_email || _eposta(req.user), id, onceki.durum]
     );
+    if (!r.rows[0]) return onayCakismasi(res);
     if (r.rows[0]) await islemGecmisiYaz(req, "avans", id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI" }, red_aciklama || null);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -21722,7 +21787,8 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const DIREKTOR_EMAIL_CONST = 'duzgun.simsek@simsektel.com';
     const userEmailLower = (queryEmail || '').toLowerCase().trim();
     const isPM       = userEmailLower === PM_EMAIL_CONST.toLowerCase();
-    const isDirektor = userEmailLower === DIREKTOR_EMAIL_CONST.toLowerCase();
+    // 25.10.2026: direktör bayrağı tarihli onay devriyle de açılır (devralan kullanıcı; req.devirler oturumdan)
+    const isDirektor = userEmailLower === DIREKTOR_EMAIL_CONST.toLowerCase() || devirOnaycisi(req, "AVANS_PD");
     // Rollout Müdürü aşaması (03.09.2026, Orhan): Nurcan/Serdar/Murat İstek mobilde
     // TALEP durumundaki avansları görüp onaylar (web ile aynı; /onayla TALEP→ROLLOUT_MUDUR_ONAY)
     const isRM = !isPM && !isDirektor && (AVANS_YETKI.RM || []).includes(userEmailLower);
@@ -21738,18 +21804,10 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       // görünmüyordu. Alanlar ayrı gönderilir (yeni mobil build satır satır
       // gösterir); mevcut build için aciklama metnine de özet eklenir
       // (aciklama_ham = kullanıcının yazdığı orijinal metin).
-      const onayRes = await pool.query(
-        `SELECT t.id, t.tutar, t.aciklama, t.not_aciklama, t.gider_turu, t.bolge, t.proje,
-                t.durum, t.tarih, t.created_at, t.talep_eden_ad, t.talep_eden_email,
-                t.plaka, t.arac_km, t.firma, p.ad_soyad AS personel_ad, p.unvan AS personel_unvan
-         FROM is_avans_talep t
-         LEFT JOIN personel p ON p.id = t.personel_id
-         WHERE t.durum = ANY($1)
-           ${pmKisiselEmailGorur(userEmailLower) ? "" : `AND NOT ${pmAvansSahibiSql("t", "p")}`}
-         ORDER BY t.created_at ASC
-         LIMIT 20`,
-        [bekleyenDurumlar]
-      );
+      // 25.10.2026: satırlar firmaya ve tarihli onay devrine göre süzülür (onayDevri.avansBekleyenler): devredilmiş firmanın
+      // direktör adımı eski direktörün listesinden düşer, devralanın listesine girer. Eski alanlar korunur (+ adim / uc / talep_firma).
+      const onayRes = { rows: (await onayPanel.avansBekleyenler({ user: { ..._u, email: userEmailLower }, devirler: req.devirler || [] })).rows
+        .filter(r => bekleyenDurumlar.includes(r.durum)).slice(0, 20) };
       onayBekleyenAvanslar = onayRes.rows.map(r => {
         const parca = [];
         if (r.personel_ad) parca.push(`Kim için: ${r.personel_ad}${r.personel_unvan ? ` (${r.personel_unvan})` : ""}`);
@@ -25090,7 +25148,9 @@ app.put("/hr/masraf-form/:id/geri-gonder", masrafAdimKapisi(masrafHerhangiOnayci
     const { aciklama, gonderen_email } = req.body;
     if (!String(aciklama || "").trim())
       return res.status(400).json({ error: "İade açıklaması zorunlu — personel neyi düzelteceğini bilmeli" });
-    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
+    const devirRed = await masrafDevirEngeli(req, onceki);
+    if (devirRed) return res.status(403).json({ error: devirRed });
     const { rows } = await pool.query(
       `UPDATE masraf_form
        SET durum='TASLAK',
@@ -25111,23 +25171,44 @@ app.put("/hr/masraf-form/:id/direktor-onayla", masrafAdimKapisi(masrafDirektorOn
   try {
     const id = req.params.id;
     const { direktor_not } = req.body;
-    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum, talep_eden_email FROM masraf_form WHERE id=$1", [id])).rows[0];
+    if (!onceki) return res.status(404).json({ error: "Form bulunamadı" });
+    // 25.10.2026: formun FİRMASINA göre direktör adımı devredilmiş olabilir — devir varsa yalnız devralan onaylar
+    const firma = await onayPanel.talepFirmasiMasraf(onceki);
+    const y = await onayPanel.masrafPdYetkisi(req, firma);
+    if (!y.izin) return res.status(403).json({ error: y.hata || (y.kaynak === "devir" ? "Bu firmanın direktör onayı başka bir kullanıcıya devredildi" : "Bu onay adımı için yetkiniz yok") });
+    if (onceki.durum !== "DIREKTOR_BEKLE") return res.status(409).json({ error: "Form direktör onayında değil (zaten işlenmiş olabilir). Liste yenilendi." });
     const formRes = await pool.query(
-      `UPDATE masraf_form SET durum='TAMAMLANDI', direktor_not=$1, direktor_onay_tarihi=NOW() WHERE id=$2 RETURNING *`,
+      `UPDATE masraf_form SET durum='TAMAMLANDI', direktor_not=$1, direktor_onay_tarihi=NOW() WHERE id=$2 AND durum='DIREKTOR_BEKLE' RETURNING *`,
       [direktor_not||null, id]
     );
     const form = formRes.rows[0];
-    if (form) islemGecmisiYaz(req, "masraf", id, "ONAY", { durum: onceki?.durum || null }, { durum: "TAMAMLANDI", adim: "DIREKTOR" }, direktor_not || null);
+    if (!form) return res.status(409).json({ error: "Form az önce başka bir onaycı tarafından işlendi. Liste yenilendi." });
+    islemGecmisiYaz(req, "masraf", id, "ONAY", { durum: onceki.durum }, { durum: "TAMAMLANDI", adim: "DIREKTOR", onay_kaynagi: y.kaynak, talep_firma: firma }, direktor_not || null);
     await masrafCezaAvansOlustur(id);
     res.json(form);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 25.10.2026 (onay devri): direktör adımı devredilmiş firmanın DIREKTOR_BEKLE formunu yalnız devralan (ya da PM) iade/red
+// edebilir; devralan ise yalnız kendi firmasının direktör aşamasındaki formuna dokunur. Diğer adımlar eski kuralla sürer.
+async function masrafDevirEngeli(req, form) {
+  if (!form) return null;
+  const eski = masrafHerhangiOnayciEski(req.user);
+  if (form.durum !== "DIREKTOR_BEKLE") return eski ? null : "Bu form onay kapsamınızda değil";
+  const y = await onayPanel.masrafPdYetkisi(req, await onayPanel.talepFirmasiMasraf(form));
+  if (y.kaynak === "devir" && y.izin) return null;
+  if (!eski) return "Bu form onay kapsamınızda değil";
+  if (y.devir && !masrafPmOnayci(req.user)) return y.hata || "Bu firmanın direktör adımı başka bir kullanıcıya devredildi";
+  return null;
+}
 // PUT Direktör reddet
 app.put("/hr/masraf-form/:id/direktor-reddet", masrafRedKapisi, async (req, res) => {
   try {
     const { red_aciklama, reddeden_email } = req.body;
-    const onceki = (await pool.query("SELECT durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum FROM masraf_form WHERE id=$1", [req.params.id])).rows[0];
+    const devirRed = await masrafDevirEngeli(req, onceki);
+    if (devirRed) return res.status(403).json({ error: devirRed });
     const { rows } = await pool.query(
       `UPDATE masraf_form SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 RETURNING *`,
       [red_aciklama, reddeden_email, req.params.id]

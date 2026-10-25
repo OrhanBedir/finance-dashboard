@@ -405,8 +405,12 @@ function kur(app, c) {
       const r = await pool.query(`SELECT durum, COUNT(*)::int AS gun, COALESCE(SUM(fazla_mesai_saat),0) AS fazla_mesai_saat FROM puantaj
         WHERE personel_id = $1 AND TO_CHAR(tarih, 'YYYY-MM') = $2 GROUP BY durum`, [p.id, donem]);
       const g = (d) => r.rows.filter((x) => d.includes(x.durum)).reduce((t, x) => t + x.gun, 0);
+      // Günlük kayıtlar (mobil Puantaj sekmesi): aynı personel, aynı dönem; mevcut puantaj satırları olduğu gibi
+      const gunler = (await pool.query(`SELECT tarih, durum, COALESCE(fazla_mesai_saat,0) AS fazla_mesai_saat, to_jsonb(puantaj)->>'aciklama' AS aciklama FROM puantaj
+        WHERE personel_id = $1 AND TO_CHAR(tarih, 'YYYY-MM') = $2 ORDER BY tarih`, [p.id, donem]).catch(() => ({ rows: [] }))).rows;
       return { donem, kayit_var: r.rows.length > 0, calisilan: g(["CALISDI"]), izin: g(["IZINLI", "IZIN", "YILLIK_IZIN", "RAPORLU", "DINLENME"]),
-        devamsizlik: g(["GELMEDI"]), fazla_mesai_saat: Number(r.rows.reduce((t, x) => t + Number(x.fazla_mesai_saat), 0)), dagilim: r.rows };
+        devamsizlik: g(["GELMEDI"]), fazla_mesai_saat: Number(r.rows.reduce((t, x) => t + Number(x.fazla_mesai_saat), 0)), dagilim: r.rows,
+        gunler: gunler.map((x) => ({ ...x, fazla_mesai_saat: Number(x.fazla_mesai_saat) })) };
     });
     sonuc.isler = !p.email ? { durum: "ok", veri: { atanan: [], not: "Personelin e-postası tanımlı değil" } } : await bolum(async () => {
       const r = await pool.query(`SELECT a.id, a.kategori, kt.ad AS kategori_ad, a.site_codes, a.durum, a.plan_tarihi, a.bitis_ts,
