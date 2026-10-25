@@ -37017,6 +37017,9 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
   const [sifre, setSifre] = useState(null);      // { u, p1, p2, hata, busy }
   const [detay, setDetay] = useState(null);      // kullanıcı id (İşlem Geçmişi paneli)
   const [panel, setPanel] = useState(null);      // { mod: "yeni"|"duzenle", u, form, hatalar, busy, genel }
+  // 25.10.2026: taşeron firma kullanıcısı listeden seçilen taşerona (subcons.id) bağlanır; şirket içi kullanıcıya profil + personel kaydı
+  const [taseronlar, setTaseronlar] = useState([]);
+  const [personelSecim, setPersonelSecim] = useState(null);
   const [ayniIsim, setAyniIsim] = useState(null);
   const [dar, setDar] = useState(typeof window !== "undefined" && window.innerWidth < 768);
   useEffect(() => { const f = () => setDar(window.innerWidth < 768); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
@@ -37035,6 +37038,7 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
       if (!r.ok || d.ok === false) throw new Error(d.error || "Kullanıcılar alınamadı");
       setUsers(d.users || []);
       try { const mr = await fetch(`${API_BASE}/admin/markalar`, { headers: H() }); const md = await mr.json().catch(() => ({})); if (mr.ok && md.markalar) setMarkalar(md.markalar); } catch {}
+      try { const tr = await fetch(`${API_BASE}/admin/taseronlar`, { headers: H() }); const td = await tr.json().catch(() => ({})); if (tr.ok && td.rows) setTaseronlar(td.rows); } catch {}
     } catch (e) { setHata(e.message || "Kullanıcılar alınamadı"); }
     finally { setYukleniyor(false); }
   };
@@ -37110,8 +37114,13 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
     } catch (e) { setSifre(x => x ? { ...x, busy: false, hata: e.message } : x); }
   };
   const panelAc = (u) => {
-    const f = u ? { name: u.name || "", email: u.email || "", password: "", role: u.role || "user", subcon_name: u.subcon_name || "", marka: String(u.marka || "ERC").toUpperCase() }
-      : { name: "", email: "", password: "", role: "user", subcon_name: "", marka: markalar[0]?.kod || "ERC" };
+    const maasAyar = u?.yetki_ayar && "maas_goruntule" in u.yetki_ayar ? (u.yetki_ayar.maas_goruntule ? "acik" : "kapali") : "";
+    const f = u ? { name: u.name || "", email: u.email || "", password: "", role: u.role || "user", subcon_name: u.subcon_name || "", marka: String(u.marka || "ERC").toUpperCase(),
+        kullanici_tipi: u.kullanici_tipi || "", taseron_id: u.taseron_id ? String(u.taseron_id) : "", yonetim_profili: u.yonetim_profili || "", personel_id: u.personel_id ? String(u.personel_id) : "", maas: maasAyar }
+      : { name: "", email: "", password: "", role: "user", subcon_name: "", marka: markalar[0]?.kod || "ERC", kullanici_tipi: "IC", taseron_id: "", yonetim_profili: "PERSONEL", personel_id: "", maas: "" };
+    if (personelSecim === null) {
+      fetch(`${API_BASE}/hr/personel`, { headers: H() }).then(r => r.ok ? r.json() : []).then(d => setPersonelSecim(Array.isArray(d) ? d : (d.rows || []))).catch(() => setPersonelSecim([]));
+    }
     setPanel({ mod: u ? "duzenle" : "yeni", u: u || null, form: f, hatalar: {}, busy: false, genel: "" });
     setMenu(null);
   };
@@ -37122,10 +37131,14 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
     if (!String(f.name || "").trim()) h.name = "Ad soyad zorunlu";
     if (!String(f.email || "").trim()) h.email = "E-posta / kullanıcı adı zorunlu";
     if (p.mod === "yeni" && (!f.password || f.password.length < 6)) h.password = "Şifre en az 6 karakter olmalı";
-    if (f.role === "subcon" && !String(f.subcon_name || "").trim()) h.subcon_name = "Taşeron rolü için taşeron adı zorunlu";
+    if (f.kullanici_tipi === "TASERON" && !f.taseron_id) h.taseron_id = "Taşeron firma seçimi zorunlu";
+    if (f.kullanici_tipi !== "TASERON" && f.role === "subcon" && !String(f.subcon_name || "").trim()) h.subcon_name = "Taşeron rolü için taşeron adı zorunlu";
     if (Object.keys(h).length) { setPanel({ ...p, hatalar: h }); return; }
     setPanel({ ...p, busy: true, genel: "" });
     try {
+      const tas = f.kullanici_tipi === "TASERON";
+      const secTas = tas ? taseronlar.find(t => String(t.id) === String(f.taseron_id)) : null;
+      if (tas) { f.role = "subcon"; f.subcon_name = secTas?.subcon_name || f.subcon_name; }
       const ad = f.role === "subcon" || !String(f.email).includes("@") ? String(f.name).replace(/\s+/g, " ").trim() : adSoyadStandart(f.name);
       let r, d;
       if (p.mod === "yeni") {
@@ -37147,6 +37160,24 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
         const alan = d.alan; const msg = d.error || `Sunucu hatası (${r.status})`;
         setPanel(x => x ? { ...x, busy: false, hatalar: alan ? { ...x.hatalar, [alan]: msg } : x.hatalar, genel: alan ? "" : msg } : x);
         return;
+      }
+      // Kullanıcı tipi / taşeron / profil / personel kaydı (sunucu kalıcı kimlikle doğrular) + maaş izni
+      const uid = p.mod === "yeni" ? d.user?.id : p.u.id;
+      if (uid && f.kullanici_tipi) {
+        const r2 = await fetch(`${API_BASE}/admin/users/${uid}`, { method: "PUT", headers: H(), body: JSON.stringify({
+          kullanici_tipi: f.kullanici_tipi, marka: f.marka,
+          ...(tas ? { taseron_id: Number(f.taseron_id) } : { taseron_id: null, yonetim_profili: f.yonetim_profili || "PERSONEL", personel_id: f.personel_id ? Number(f.personel_id) : null }) }) });
+        const d2 = await r2.json().catch(() => ({}));
+        if (!r2.ok || d2.ok === false) {
+          const alan = d2.alan; const msg = d2.error || `Sunucu hatası (${r2.status})`;
+          setPanel(x => x ? { ...x, busy: false, mod: "duzenle", u: x.u || d.user, hatalar: alan ? { ...x.hatalar, [alan]: msg } : x.hatalar, genel: alan ? "" : `Kullanıcı kaydedildi ama bağlantı kaydedilemedi: ${msg}` } : x);
+          return;
+        }
+      }
+      const eskiMaas = p.u?.yetki_ayar && "maas_goruntule" in p.u.yetki_ayar ? (p.u.yetki_ayar.maas_goruntule ? "acik" : "kapali") : "";
+      if (uid && !tas && (f.maas || "") !== eskiMaas) {
+        await fetch(`${API_BASE}/admin/users/${uid}/yetkiler`, { method: "PUT", headers: H(),
+          body: JSON.stringify({ yetki_ayar: { maas_goruntule: f.maas === "acik" ? true : f.maas === "kapali" ? false : null } }) }).catch(() => {});
       }
       setPanel(null); await degisti();
       bildir("ok", p.mod === "yeni" ? `${ad} eklendi.${d.personel?.islem === "OLUSTURULDU" ? ` İK profili açıldı (${d.personel.ad_soyad}).` : ""}` : `${ad} güncellendi.`);
@@ -37173,7 +37204,8 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
   const firmaHucre = (u) => (
     <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: "13px", color: "#111827", fontWeight: 600 }}>{firmaAdi(u)}</div>
-      {u.subcon_name && <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px", overflowWrap: "anywhere" }}>{u.role === "subcon" ? "Taşeron" : "Bağlı firma"}: {u.subcon_name}</div>}
+      {u.subcon_name && <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px", overflowWrap: "anywhere" }}>{u.role === "subcon" ? "Taşeron" : "Bağlı firma"}: {u.subcon_name}{u.role === "subcon" && u.kullanici_tipi !== "TASERON" ? " · bağlantı eski tip (listeden taşeron seçilmeli)" : ""}</div>}
+      {(u.yonetim_profili === "SAHIP" || u.yonetim_profili === "YONETICI") && <div style={{ fontSize: "12px", color: "#1e3a5f", fontWeight: 700, marginTop: "2px" }}>{u.yonetim_profili === "SAHIP" ? "Şirket sahibi" : "Yönetici"}</div>}
       {u.tenant && u.tenant !== "erc" && <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "2px" }}>Firma alanı: {u.tenant}</div>}
     </div>);
   // ⋯ menüsü: klavye ve dokunmatikte çalışır (düğme + Esc + dışarı tık)
@@ -37368,12 +37400,57 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
               </fieldset>
               <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "12px" }}>
                 <legend style={{ fontSize: "11.5px", fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>Rol ve firma bağlantıları</legend>
-                <div><label htmlFor="adm-role" style={etiket}>Erişim rolü</label>
+                <div role="radiogroup" aria-label="Kullanıcı tipi"><div style={etiket}>Kullanıcı tipi</div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {[["IC", "Şirket içi kullanıcı"], ["TASERON", "Taşeron firma kullanıcısı"]].map(([k, ad]) => (
+                      <button key={k} type="button" role="radio" aria-checked={panel.form.kullanici_tipi === k} className="adm-focus"
+                        onClick={() => { panelForm("kullanici_tipi", k); if (k === "TASERON") panelForm("role", "subcon"); else if (panel.form.role === "subcon") panelForm("role", "user"); }}
+                        style={btn(panel.form.kullanici_tipi === k ? "birincil" : "ikincil", { flex: 1 })}>{ad}</button>
+                    ))}
+                  </div>
+                  {!panel.form.kullanici_tipi && <div style={{ fontSize: "11.5px", color: "#b45309", marginTop: "4px" }}>Bu hesabın tipi henüz belirlenmemiş (eski kayıt). Tip seçilmezse mevcut davranış korunur.</div>}
+                </div>
+                {panel.form.kullanici_tipi === "TASERON" ? (
+                  <div><label htmlFor="adm-taseron" style={etiket}>Taşeron firma</label>
+                    <select id="adm-taseron" className="adm-focus" value={panel.form.taseron_id} onChange={e => panelForm("taseron_id", e.target.value)} style={inp(!!panel.hatalar.taseron_id)}>
+                      <option value="">Taşeron seçin…</option>
+                      {taseronlar.filter(t => t.aktif && (!t.ana_firma || String(t.ana_firma).toUpperCase() === panel.form.marka)).map(t => <option key={t.id} value={t.id}>{t.unvan ? `${t.unvan} (${t.subcon_name})` : t.subcon_name}{t.kullanici_sayisi ? ` · ${t.kullanici_sayisi} kullanıcı` : ""}</option>)}
+                    </select>
+                    <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Listede olmayan taşeron serbest metinle eklenmez. Kullanıcı yalnız bu taşeronun (seçilen ana firma kapsamındaki) işlerini, fiyatlarını ve faturalarını görür.</div>
+                    {panel.hatalar.taseron_id && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.taseron_id}</div>}</div>
+                ) : null}
+                {panel.form.kullanici_tipi === "IC" ? (
+                  <>
+                    <div><label htmlFor="adm-profil" style={etiket}>Profil</label>
+                      <select id="adm-profil" className="adm-focus" value={panel.form.yonetim_profili || "PERSONEL"} onChange={e => panelForm("yonetim_profili", e.target.value)} style={inp(!!panel.hatalar.yonetim_profili)}>
+                        <option value="PERSONEL">Personel</option>
+                        <option value="YONETICI">Yönetici (kendi firması; maaş ayrı izin)</option>
+                        <option value="SAHIP">Şirket sahibi (kendi firması; maaşlar dahil)</option>
+                      </select>
+                      <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Yönetici ve şirket sahibi yalnız seçili firmanın personelini yönetir; platform yönetimi vermez. Bu profilleri yalnız merkez yönetici atayabilir.</div>
+                      {panel.hatalar.yonetim_profili && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.yonetim_profili}</div>}</div>
+                    <div><label htmlFor="adm-personel" style={etiket}>Personel kaydı</label>
+                      <select id="adm-personel" className="adm-focus" value={panel.form.personel_id} onChange={e => panelForm("personel_id", e.target.value)} style={inp(!!panel.hatalar.personel_id)}>
+                        <option value="">{personelSecim === null ? "Yükleniyor…" : "Bağlı personel kaydı yok"}</option>
+                        {(personelSecim || []).filter(x => String(x.marka || "ERC").toUpperCase() === panel.form.marka || String(x.id) === panel.form.personel_id).map(x => (
+                          <option key={x.id} value={x.id} disabled={!!x.user_id && String(x.user_id) !== String(panel.u?.id || "")}>{x.ad_soyad}{x.unvan ? ` · ${x.unvan}` : ""}{x.aktif === false ? " · pasif" : ""}{x.user_id && String(x.user_id) !== String(panel.u?.id || "") ? " · başka hesaba bağlı" : ""}</option>))}
+                      </select>
+                      <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Şirket sahibi için personel kaydı zorunlu değildir; kayıt yoksa puantaj kartı gösterilmez, otomatik kayıt açılmaz.</div>
+                      {panel.hatalar.personel_id && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.personel_id}</div>}</div>
+                    <div><label htmlFor="adm-maas" style={etiket}>Maaş görme izni</label>
+                      <select id="adm-maas" className="adm-focus" value={panel.form.maas} onChange={e => panelForm("maas", e.target.value)} style={inp(false)}>
+                        <option value="">Profil kuralı (şirket sahibi: açık · diğerleri: kapalı)</option>
+                        <option value="acik">Açık (yalnız kendi firma kapsamı)</option>
+                        <option value="kapali">Kapalı</option>
+                      </select></div>
+                  </>
+                ) : null}
+                {panel.form.kullanici_tipi !== "TASERON" && <div><label htmlFor="adm-role" style={etiket}>Erişim rolü</label>
                   <select id="adm-role" className="adm-focus" value={panel.form.role} onChange={e => panelForm("role", e.target.value)} style={inp(!!panel.hatalar.role)}>
-                    {[...ADM_ROL_SECENEK, ...(!ADM_ROL_SECENEK.includes(panel.form.role) ? [panel.form.role] : [])].map(r => <option key={r} value={r}>{ADM_ROL_TR[r] || r}</option>)}
+                    {[...ADM_ROL_SECENEK, ...(!ADM_ROL_SECENEK.includes(panel.form.role) ? [panel.form.role] : [])].filter(r => panel.form.kullanici_tipi !== "IC" || r !== "subcon").map(r => <option key={r} value={r}>{ADM_ROL_TR[r] || r}</option>)}
                   </select>
-                  {panel.hatalar.role && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.role}</div>}</div>
-                {panel.form.role === "subcon" && (
+                  {panel.hatalar.role && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.role}</div>}</div>}
+                {panel.form.role === "subcon" && panel.form.kullanici_tipi !== "TASERON" && (
                   <div><label htmlFor="adm-subcon" style={etiket}>Taşeron adı</label><input id="adm-subcon" className="adm-focus" placeholder="ör. FERRUMX" value={panel.form.subcon_name} onChange={e => panelForm("subcon_name", e.target.value.toUpperCase())} style={inp(!!panel.hatalar.subcon_name)} />
                     <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Kullanıcı yalnız bu taşerona ait işleri görür.</div>
                     {panel.hatalar.subcon_name && <div role="alert" style={{ color: "#b91c1c", fontSize: "12px", fontWeight: 700, marginTop: "4px" }}>{panel.hatalar.subcon_name}</div>}</div>
@@ -37383,7 +37460,7 @@ function AdminKullanicilarPanel({ token, currentUser, isUsersAdminOnly = false, 
                     <div style={{ fontSize: "11.5px", color: "#9ca3af", marginTop: "4px" }}>Kayıtta tutulan firma bağlantısı; boş bırakılırsa kaldırılır.</div></div>
                 )}
                 {(markalar.length > 1) && (!panel.u || (panel.u.tenant || "erc") === "erc") && (
-                  <div><label htmlFor="adm-marka" style={etiket}>Firma</label>
+                  <div><label htmlFor="adm-marka" style={etiket}>{panel.form.kullanici_tipi === "TASERON" ? "Ana firma (hangi firma kapsamında çalışır)" : "Bağlı firma"}</label>
                     <select id="adm-marka" className="adm-focus" value={panel.form.marka} onChange={e => panelForm("marka", e.target.value)} style={inp(!!panel.hatalar.marka)}>
                       {markalar.map(m => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
                     </select>
@@ -38441,7 +38518,13 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   const [mesaj, setMesaj] = useState("");
 
   const yarin = () => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); };
-  const [form, setForm] = useState({ kategori: baslangic?.kategori || "", alt_tip: baslangic?.alt_tip || "", site_codes: baslangic?.site_codes || [], personeller: [], plan_tarihi: yarin(), atayan_not: baslangic?.atayan_not || "" });
+  const [form, setForm] = useState({ kategori: baslangic?.kategori || "", alt_tip: baslangic?.alt_tip || "", site_codes: baslangic?.site_codes || [], personeller: [], plan_tarihi: yarin(), atayan_not: baslangic?.atayan_not || "",
+    taseron_id: "", fiyat: { para_birimi: "TRY", kdv_esasi: "HARIC", kalemler: [] } });
+  // 25.10.2026: dış taşerona atama + taşeronun göreceği anlaşılmış fiyat (sürüm 1). Huawei fiyatı / kâr burada yok.
+  const [taseronListesi, setTaseronListesi] = useState([]);
+  const [fiyatOneri, setFiyatOneri] = useState([]);
+  const fiyatKalem = (i, k, v) => setForm((f) => ({ ...f, fiyat: { ...f.fiyat, kalemler: f.fiyat.kalemler.map((x, j) => (j === i ? { ...x, [k]: v } : x)) } }));
+  const fiyatToplam = (form.fiyat?.kalemler || []).reduce((t, k) => t + (Number(String(k.miktar).replace(",", ".")) || 0) * (Number(String(k.birim_fiyat).replace(",", ".")) || 0), 0);
   const [sahaAra, setSahaAra] = useState("");
   const [personelAra, setPersonelAra] = useState("");
   const kat = kategoriler.find((k) => k.kod === form.kategori) || null;
@@ -38493,6 +38576,7 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   useEffect(() => {
     fetch(`${API_BASE}/is-atama/kategoriler`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setKategoriler(d.rows || []); }).catch(() => {});
     fetch(`${API_BASE}/is-atama/personel-listesi`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setPersonelListesi(d.rows || []); }).catch(() => {});
+    fetch(`${API_BASE}/is-atama/taseronlar`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setTaseronListesi(d.rows || []); }).catch(() => {});
   }, []); // eslint-disable-line
   useEffect(() => { listeYukle(); }, [listeFiltre]); // eslint-disable-line
 
@@ -38547,19 +38631,30 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
   const ata = async () => {
     if (!form.kategori) return alert("İş kategorisi seçin");
     if (!form.site_codes.length) return alert("En az bir saha seçin");
-    if (!form.personeller.length) return alert("En az bir personel seçin");
+    if (!form.personeller.length && !form.taseron_id) return alert("En az bir personel ya da taşeron seçin");
+    const fiyatVar = form.taseron_id && (form.fiyat?.kalemler || []).length > 0;
+    if (form.taseron_id && fiyatVar) {
+      for (const k of form.fiyat.kalemler) {
+        if (!String(k.aciklama || "").trim()) return alert("Her fiyat kaleminin açıklaması olmalı");
+        if (!(Number(String(k.miktar).replace(",", ".")) > 0)) return alert(`"${k.aciklama}" için miktar girin`);
+        if (!(Number(String(k.birim_fiyat).replace(",", ".")) > 0)) return alert(`"${k.aciklama}" için anlaşılan birim fiyatı girin (sıfır olamaz)`);
+      }
+    }
+    if (form.taseron_id && !fiyatVar && !window.confirm("Taşeron fiyatı girilmedi. Taşeron bu işi \"fiyat belirlenmedi\" olarak görecek; fiyat daha sonra eklenebilir. Devam edilsin mi?")) return;
     if (kat?.alt_tipler?.length && !form.alt_tip) return alert(`${kat.ad} için tip seçin (${kat.alt_tipler.join(", ")})`);
     setYukleniyor(true);
     try {
       // Tek sahalık kategoride birden çok saha seçildiyse (iş kolu liste modundan toplu atama) saha başına ayrı iş açılır
-      const paketler = kat?.tekil_site && form.site_codes.length > 1 ? form.site_codes.map((sc) => ({ ...form, site_codes: [sc] })) : [form];
+      const govde = { ...form, taseron_id: form.taseron_id ? Number(form.taseron_id) : null, fiyat: form.taseron_id && (form.fiyat?.kalemler || []).length ? form.fiyat : null };
+      const paketler = kat?.tekil_site && form.site_codes.length > 1 ? form.site_codes.map((sc) => ({ ...govde, site_codes: [sc] })) : [govde];
       let d = null;
       for (const body of paketler) {
         d = await fetch(`${API_BASE}/is-atama`, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
         if (!d?.ok) throw new Error(d?.error || "Atama yapılamadı");
       }
-      setMesaj(`✅ ${kat?.ad} · ${form.site_codes.join(", ")} → ${form.personeller.map((p) => p.ad).join(", ")} atandı`);
-      setForm({ kategori: form.kategori, alt_tip: "", site_codes: [], personeller: [], plan_tarihi: form.plan_tarihi, atayan_not: "" });
+      const tasAd = taseronListesi.find((t) => String(t.id) === String(form.taseron_id))?.ad;
+      setMesaj(`✅ ${kat?.ad} · ${form.site_codes.join(", ")} → ${[...form.personeller.map((p) => p.ad), ...(tasAd ? [`Taşeron: ${tasAd}`] : [])].join(", ")} atandı`);
+      setForm({ kategori: form.kategori, alt_tip: "", site_codes: [], personeller: [], plan_tarihi: form.plan_tarihi, atayan_not: "", taseron_id: "", fiyat: { para_birimi: "TRY", kdv_esasi: "HARIC", kalemler: [] } });
       listeYukle(); onChanged && onChanged();
       setTimeout(() => setMesaj(""), 6000);
     } catch (e) { alert("Hata: " + e.message); }
@@ -38700,6 +38795,48 @@ function IsAtamaPanel({ rolloutRows, onClose, onChanged, baslangic }) {
                 <div style={{ display:"grid", gridTemplateColumns:"180px 1fr", gap:"12px" }}>
                   <div><label style={lblSt}>4 · Plan tarihi</label><input type="date" style={inSt} value={form.plan_tarihi} onChange={(e) => setForm((p) => ({ ...p, plan_tarihi: e.target.value }))} /></div>
                   <div><label style={lblSt}>5 · Atayan notu</label><textarea style={{ ...inSt, minHeight:"64px", resize:"vertical" }} value={form.atayan_not} onChange={(e) => setForm((p) => ({ ...p, atayan_not: e.target.value }))} placeholder="Örn: Kafes kule, vinç yok. 3 sektör 20 cm offset götürün." /></div>
+                </div>
+                <div style={{ border:"1px solid #e2e8f0", borderRadius:"10px", padding:"10px 12px", background:"#f8fafc" }}>
+                  <label style={lblSt}>6 · Taşerona ata (isteğe bağlı)</label>
+                  <select style={inSt} value={form.taseron_id} onChange={(e) => {
+                    const v = e.target.value;
+                    setForm((p) => ({ ...p, taseron_id: v }));
+                    setFiyatOneri([]);
+                    if (v) fetch(`${API_BASE}/is-atama/fiyat-oneri?taseron_id=${v}`, { headers }).then((r) => r.json()).then((d) => { if (d?.ok) setFiyatOneri(d.rows || []); }).catch(() => {});
+                  }}>
+                    <option value="">Taşeron yok (yalnız personel)</option>
+                    {taseronListesi.map((t) => <option key={t.id} value={t.id}>{t.ad}{t.ad !== t.kod ? ` (${t.kod})` : ""}</option>)}
+                  </select>
+                  {form.taseron_id && (
+                    <div style={{ marginTop:"8px" }}>
+                      <div style={{ fontSize:"11.5px", color:"#64748b", marginBottom:"6px" }}>Taşeronun göreceği <b>anlaşılmış</b> fiyat. Atama anında saklanır; sonradan değişiklik yalnız gerekçeli revizyonla yapılır. Huawei fiyatı ve şirket kârı taşerona gösterilmez.</div>
+                      <div style={{ display:"flex", gap:"8px", marginBottom:"6px" }}>
+                        <select style={{ ...inSt, width:"110px" }} value={form.fiyat.para_birimi} onChange={(e) => setForm((p) => ({ ...p, fiyat: { ...p.fiyat, para_birimi: e.target.value } }))}>{["TRY", "USD", "EUR"].map((x) => <option key={x}>{x}</option>)}</select>
+                        <select style={{ ...inSt, width:"150px" }} value={form.fiyat.kdv_esasi} onChange={(e) => setForm((p) => ({ ...p, fiyat: { ...p.fiyat, kdv_esasi: e.target.value } }))}><option value="HARIC">KDV hariç</option><option value="DAHIL">KDV dahil</option></select>
+                      </div>
+                      {form.fiyat.kalemler.map((k, i) => (
+                        <div key={i} style={{ display:"grid", gridTemplateColumns:"1.6fr .9fr .6fr .7fr .9fr 24px", gap:"6px", marginBottom:"6px" }}>
+                          <input style={inSt} placeholder="İş kalemi / kapsam" value={k.aciklama} onChange={(e) => fiyatKalem(i, "aciklama", e.target.value)} />
+                          <input style={inSt} placeholder="Kalem kodu" value={k.kalem_kodu} onChange={(e) => fiyatKalem(i, "kalem_kodu", e.target.value)} />
+                          <input style={inSt} placeholder="Miktar" inputMode="decimal" value={k.miktar} onChange={(e) => fiyatKalem(i, "miktar", e.target.value)} />
+                          <input style={inSt} placeholder="Birim" value={k.birim} onChange={(e) => fiyatKalem(i, "birim", e.target.value)} />
+                          <input style={inSt} placeholder="Birim fiyat" inputMode="decimal" value={k.birim_fiyat} onChange={(e) => fiyatKalem(i, "birim_fiyat", e.target.value)} />
+                          <span onClick={() => setForm((p) => ({ ...p, fiyat: { ...p.fiyat, kalemler: p.fiyat.kalemler.filter((_, j) => j !== i) } }))} style={{ cursor:"pointer", alignSelf:"center", color:"#b91c1c", fontWeight:800 }} title="Kalemi sil">×</span>
+                        </div>
+                      ))}
+                      <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                        <button type="button" onClick={() => setForm((p) => ({ ...p, fiyat: { ...p.fiyat, kalemler: [...p.fiyat.kalemler, { aciklama: "", kalem_kodu: "", miktar: "1", birim: "Adet", birim_fiyat: "" }] } }))}
+                          style={{ border:"1px solid #cbd5e1", background:"#fff", borderRadius:"8px", padding:"6px 10px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>+ Kalem ekle</button>
+                        {fiyatOneri.slice(0, 6).map((o, i) => (
+                          <button key={i} type="button" title={`Bu taşeronla son anlaşılan: ${o.birim_fiyat} ${o.para_birimi}`} onClick={() => setForm((p) => ({ ...p, fiyat: { ...p.fiyat, para_birimi: o.para_birimi, kdv_esasi: o.kdv_esasi,
+                            kalemler: [...p.fiyat.kalemler, { aciklama: o.aciklama || "", kalem_kodu: o.kalem_kodu || "", miktar: "1", birim: o.birim || "Adet", birim_fiyat: String(o.birim_fiyat) }] } }))}
+                            style={{ border:"1px dashed #93c5fd", background:"#eff6ff", color:"#1d4ed8", borderRadius:"8px", padding:"6px 10px", fontSize:"11.5px", cursor:"pointer" }}>↺ {o.aciklama || o.kalem_kodu} · {o.birim_fiyat} {o.para_birimi}</button>
+                        ))}
+                        <span style={{ marginLeft:"auto", fontSize:"12.5px", fontWeight:800, color:"#0f172a" }}>Toplam: {fiyatToplam.toLocaleString("tr-TR", { minimumFractionDigits: 2 })} {form.fiyat.para_birimi} {form.fiyat.kdv_esasi === "HARIC" ? "+ KDV" : "(KDV dahil)"}</span>
+                      </div>
+                      {!form.fiyat.kalemler.length && <div style={{ fontSize:"11.5px", color:"#b45309", marginTop:"6px" }}>Bu taşeron için kayıtlı anlaşma yoksa fiyatı açıkça girin; eksik fiyat sıfır sayılmaz.</div>}
+                    </div>
+                  )}
                 </div>
                 <button type="button" onClick={ata} disabled={yukleniyor}
                   style={{ background:"#1d4ed8", color:"#fff", border:"none", borderRadius:"12px", padding:"14px", fontWeight:800, fontSize:"15px", cursor:"pointer", opacity: yukleniyor ? .6 : 1 }}>

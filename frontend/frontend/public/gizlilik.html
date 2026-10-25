@@ -12,36 +12,69 @@
 </head>
 <body>
 <h1>Gizlilik Politikası</h1>
-<p class="muted">Omnix platformu ve mobil uygulamaları · Son güncelleme: 12 Ağustos 2026</p>
+<p class="muted">Omnix platformu ve mobil uygulaması (Omnix Field Operation) · Son güncelleme: 25 Ekim 2026</p>
 
 <p>Omnix, Efelis Tarım Ticaret Limited Şirketi ("Platform Sağlayıcı") tarafından geliştirilen ve
-işletilen, kurumsal müşterilere hizmet veren bir saha operasyon ve hakediş takip platformudur.
-Uygulama halka açık bir hizmet değildir; yalnızca platforma abone müşteri firmaların ("Müşteri
-Firma") kendi çalışanları ve iş ortakları için tanımladığı hesaplarla kullanılabilir.</p>
+işletilen, telekom ve altyapı saha operasyonu yürüten kurumsal müşterilere hizmet veren çok firmalı bir
+saha operasyon ve hakediş takip platformudur. Uygulamada açık kayıt yoktur; yalnızca platforma abone
+müşteri firmaların ("Müşteri Firma") kendi çalışanları, yöneticileri ve çalıştıkları taşeron firmalar
+için tanımladığı hesaplarla kullanılabilir.</p>
 
 <h2>Roller (KVKK)</h2>
 <p>Platformdaki operasyonel verilerin <b>veri sorumlusu</b>, kullanıcı hesabını tanımlayan Müşteri
-Firma'dır (ör. çalışanı olduğunuz şirket). Efelis Tarım Ticaret Ltd. Şti., bu verileri Müşteri Firma
-adına <b>veri işleyen</b> sıfatıyla barındırır ve işler.</p>
+Firma'dır (ör. çalışanı olduğunuz ya da taşeron olarak çalıştığınız şirket). Efelis Tarım Ticaret Ltd. Şti.,
+bu verileri Müşteri Firma adına <b>veri işleyen</b> sıfatıyla barındırır ve işler.</p>
 
 <h2>Toplanan veriler</h2>
 <ul>
-  <li><b>Hesap bilgileri:</b> ad soyad, kurumsal e-posta adresi, şifre (yalnızca özetlenmiş/hash'lenmiş olarak saklanır).</li>
-  <li><b>İş kayıtları:</b> kullanıcının uygulama üzerinden girdiği iş avansı talepleri, masraf formları,
-  malzeme kayıtları, araç plakası ve kilometre bilgisi gibi operasyonel veriler.</li>
-  <li><b>Belgeler:</b> kullanıcının kendi yüklediği fiş/fatura görselleri.</li>
+  <li><b>Hesap bilgileri:</b> ad soyad, kurumsal e-posta adresi ya da kullanıcı adı, şifre (yalnızca
+  özetlenmiş/hash'lenmiş olarak saklanır), rol ve bağlı olunan firma.</li>
+  <li><b>İş kayıtları:</b> iş avansı talepleri, masraf formları, malzeme talepleri ve zimmet kayıtları,
+  saha işi başlangıç/bitiş kayıtları, araç plakası ve kilometre bilgisi gibi operasyonel veriler.</li>
+  <li><b>Fotoğraf ve belgeler:</b> kullanıcının kendi çektiği ya da seçtiği fiş/fatura görselleri ve saha
+  (Clean Up) önce/sonra fotoğrafları; saha teknik belgeleri (TSSR, proje, çizim).</li>
+  <li><b>Ödeme bilgisi (isteğe bağlı):</b> iş avansı talebinde kullanıcının kendisinin girdiği IBAN ve banka adı.
+  Uygulama kart bilgisi almaz ve para transferi yapmaz.</li>
+  <li><b>Personel bilgileri:</b> Müşteri Firma'nın yetkilendirdiği yöneticiler, kendi firmalarının personeline
+  ait hesap hareketlerini, puantajı, saha işlerini ve zimmeti görebilir. Maaş ve hakediş bilgileri yalnızca
+  ayrıca yetkilendirilmiş kullanıcılara gösterilir.</li>
+  <li><b>Taşeron bilgileri:</b> taşeron firma kullanıcıları yalnızca kendi firmalarına atanan işleri,
+  anlaşılmış fiyatları, hakediş, fatura ve ödeme bilgilerini görür.</li>
 </ul>
-<p>Uygulama konum takibi yapmaz, rehbere ve mesajlara erişmez, reklam veya üçüncü taraf analitik/izleme
-aracı içermez.</p>
+
+<h2>Kamera ve fotoğraf izni</h2>
+<p>Kamera ve fotoğraf arşivi yalnızca kullanıcı fiş ya da saha fotoğrafı eklemek için "Kamera" veya
+"Galeri"ye dokunduğunda kullanılır. Uygulama konum takibi yapmaz; rehbere, mikrofona ve mesajlara erişmez;
+reklam ya da üçüncü taraf analitik/izleme aracı içermez.</p>
 
 <h2>Verilerin kullanımı</h2>
-<p>Veriler yalnızca ilgili Müşteri Firma'nın operasyon, muhasebe ve insan kaynakları süreçlerinin
-yürütülmesi için kullanılır. Müşteri firmaların verileri birbirinden izole tutulur; üçüncü taraflara
-satılmaz, pazarlama amacıyla paylaşılmaz.</p>
+<p>Veriler yalnızca ilgili Müşteri Firma'nın saha operasyonu, muhasebe, insan kaynakları ve taşeron
+hakediş süreçlerinin yürütülmesi için kullanılır. Müşteri firmaların verileri birbirinden ayrı tutulur ve
+her kullanıcı yalnızca yetkili olduğu kayıtları görür. Veriler üçüncü taraflara satılmaz, pazarlama amacıyla
+paylaşılmaz.</p>
+
+<h2>Hizmet sağlayıcılar ve yurt dışına aktarım</h2>
+<ul>
+  <li><b>Veritabanı ve dosya depolama:</b> Supabase — Avrupa Birliği (İrlanda) veri merkezi.</li>
+  <li><b>Uygulama sunucusu:</b> Render — sözleşmeli bulut altyapısı.</li>
+  <li><b>Yapay zekâ ile belge işleme:</b> fiş fotoğrafının otomatik kırpılması ve fatura bilgilerinin okunması
+  için yalnızca ilgili belge görseli Anthropic PBC'nin (ABD) Claude API hizmetine gönderilir. Bu gönderimde
+  hesap ya da iletişim bilgisi bulunmaz; görsel yalnızca bu işlem için kullanılır.</li>
+</ul>
+<p>Bu hizmetler yalnızca platformun çalışması için ve Müşteri Firma adına kullanılır. Yurt dışındaki hizmet
+sağlayıcıya yapılan aktarım, 6698 sayılı Kanun'un yurt dışına aktarım hükümleri çerçevesinde
+gerçekleştirilir.</p>
 
 <h2>Saklama ve güvenlik</h2>
-<p>Veriler sözleşmeli bulut altyapısında (Avrupa bölgesi veri merkezleri) saklanır; aktarım HTTPS ile
-şifrelenir. Erişim, rol bazlı yetkilendirme ile sınırlıdır.</p>
+<p>Aktarım HTTPS ile şifrelenir. Erişim, rol bazlı yetkilendirme ile sınırlıdır; mobil uygulamada oturum anahtarı cihazın
+güvenli anahtar deposunda (iOS Anahtar Zinciri) tutulur. Kayıtlar Müşteri Firma ile yapılan sözleşme süresince ve yasal saklama
+yükümlülükleri boyunca saklanır.</p>
+
+<h2>Hesap ve veri silme</h2>
+<p>Hesaplar Müşteri Firma'nın yöneticisi tarafından açılır, kapatılır ve silinir; kullanıcılar uygulamada
+kendi hesaplarını oluşturamaz. Hesabınızın ya da verilerinizin silinmesini istiyorsanız firmanızın
+yöneticisine başvurun ya da aşağıdaki iletişim adresine yazın. Talebiniz firmanızla birlikte değerlendirilir;
+yasal saklama yükümlülüğü bulunan kayıtlar dışındaki verileriniz silinir.</p>
 
 <h2>KVKK kapsamındaki haklarınız</h2>
 <p>6698 sayılı Kişisel Verilerin Korunması Kanunu uyarınca verilerinize erişme, düzeltme ve silme
@@ -51,7 +84,7 @@ aşağıdaki adrese iletebilirsiniz.</p>
 <h2>İletişim</h2>
 <p>Efelis Tarım Ticaret Limited Şirketi (Omnix)<br>
 İstiklal Mah. Dülger Sk. No:6 İç Kapı No:1, Gürsu / Bursa<br>
-E-posta: orhan.bedir@gmail.com</p>
+E-posta: info@efelis.com</p>
 
 <p class="muted">Bu politika güncellendiğinde bu sayfada yayımlanır.</p>
 </body>
