@@ -18434,7 +18434,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // info@ahyelektrik.com kendi markasını ek şifreyle (ahy2026gsm) görür.
   // MAAŞ GÖRME YETKİSİ: Orhan Bedir, Düzgün Şimşek, Erencan Şimşek (şifresiz)
   // + info@ahyelektrik (Haşım Bey — YALNIZ ekstra şifreyle: ahy2026gsm).
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com" || _hrEmail === "teknocenter";
+  // 26.10.2026 (Orhan): sunucunun hesapladığı etkin izin de yetki verir — şirket sahibi profili (yonetim_profili=SAHIP,
+  // ör. İlhami Şahin / Teknocenter) ya da Admin → Yetkiler'de maaş görme açılan kişi; asıl kontrol sunucuda (maasGizliMi).
+  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com" || _hrEmail === "teknocenter"
+    || currentUser?.izinler?.maas_goruntule === true;
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
