@@ -1420,6 +1420,9 @@ app.use(async (req, res, next) => {
           if (Array.isArray(c)) c = tut(c); else if (c && Array.isArray(c.rows)) c = { ...c, rows: tut(c.rows) };
         } else if (yol === "/finance/cashflow-odeme" && c && Array.isArray(c.odemeler)) {
           c = { ...c, odemeler: c.odemeler.map((r) => gz.ids.has(Number(r.arac_id)) ? { ...r, tutar: null, kira_gizli: true } : r) };
+        } else if (yol === "/finance/marka-odeme" && c && Array.isArray(c.odemeler)) {
+          c = { ...c, odemeler: c.odemeler.map((r) => gz.ids.has(Number(r.arac_id)) ? { ...r, tutar: null, kira_gizli: true } : r),
+            araclar: Array.isArray(c.araclar) ? c.araclar.map((a) => gz.ids.has(Number(a.id)) ? kiraBos(a) : a) : c.araclar };
         }
       }
       // Serbest metinli gider listesi: maaş satırları / gizli aracın plakası geçen satırların tutarı boş
@@ -1497,6 +1500,7 @@ const MARKA_KAYIT_SAHIBI = [
   [/^\/finance\/marka-borc\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_borc WHERE id=$1`],
   [/^\/finance\/marka-taseron-fatura\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(firma,'')) AS m FROM invoice_entries WHERE id=$1`],
   [/^\/finance\/marka-taseron-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_taseron_odeme WHERE id=$1`],
+  [/^\/finance\/marka-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'ERC')) AS m FROM cashflow_odeme WHERE id=$1`],
 ];
 app.use(async (req, res, next) => {
   try {
@@ -17258,27 +17262,28 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
-  try {
-    await ensureCashflowOdemeTable();
-    const { kategori, tarih, tutar, donem, aciklama, marka, arac_id, zorla } = req.body;
-    if (!kategori || !tarih || !tutar)
-      return res.status(400).json({ ok: false, error: "kategori, tarih, tutar zorunlu" });
-    const markaVal = aktifAltMarkaKodu(marka, tarih) || "ERC";
-    const tutarN = parseFinanceNumber(tutar);
+// Manuel (gerçekleşen) ödeme kaydı — Şimşek Nakit Akışı "Ödeme Ekle" ve marka paneli "Ödeme Ekle" aynı kuralı kullanır
+// (26.10.2026, Orhan). Dönüş: { http, json }. aracKapsam verilirse seçilen araç o kapsamda olmalı.
+async function cashflowOdemeKaydet(body, markaVal, aracKapsam) {
+  await ensureCashflowOdemeTable();
+  const { kategori, tarih, tutar, donem, aciklama, arac_id, zorla } = body || {};
+  if (!kategori || !tarih || !tutar)
+    return { http: 400, json: { ok: false, error: "kategori, tarih, tutar zorunlu" } };
+  const tutarN = parseFinanceNumber(tutar);
     // 16.10.2026: araç kirası / depozito → araç seçimi zorunlu; aynı ödeme Kira Öde'den de girilmişse iki kez sayılmasın
     let aracId = null, acik = aciklama || null;
     if (["ARAC", "ARAC_DEPOZITO"].includes(String(kategori).toUpperCase())) {
-      const ar = arac_id ? await pool.query(`SELECT id, plaka, depozito_tutar, to_char(depozito_tarihi,'YYYY-MM-DD') AS depozito_tarihi FROM araclar WHERE id=$1`, [arac_id]) : { rows: [] };
-      if (!ar.rows[0]) return res.status(400).json({ ok: false, error: "Araç kirası / depozito girişinde araç (plaka) seçimi zorunlu" });
+      const ar = arac_id ? await pool.query(`SELECT id, plaka, firma, depozito_tutar, to_char(depozito_tarihi,'YYYY-MM-DD') AS depozito_tarihi FROM araclar WHERE id=$1`, [arac_id]) : { rows: [] };
+      if (!ar.rows[0]) return { http: 400, json: { ok: false, error: "Araç kirası / depozito girişinde araç (plaka) seçimi zorunlu" } };
+      if (aracKapsam && !aracKapsamda(aracKapsam, ar.rows[0].firma)) return { http: 403, json: { ok: false, error: "Bu araç firmanızın kapsamında değil" } };
       aracId = ar.rows[0].id;
       if (!zorla) {
         if (String(kategori).toUpperCase() === "ARAC" && donem) {
           const k = await pool.query(`SELECT id, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih FROM arac_kira_odemeler WHERE arac_id=$1 AND donem=$2`, [aracId, donem]);
-          if (k.rows[0]) return res.status(409).json({ ok: false, cakisma: true, error: `${ar.rows[0].plaka} · ${donem} kirası "Kira Öde" ile zaten kayıtlı (₺${Number(k.rows[0].tutar).toLocaleString("tr-TR")}, ${k.rows[0].tarih}). Aynı ödeme ise tekrar girmeyin; farklı bir ödemeyse onaylayarak kaydedin.` });
+          if (k.rows[0]) return { http: 409, json: { ok: false, cakisma: true, error: `${ar.rows[0].plaka} · ${donem} kirası "Kira Öde" ile zaten kayıtlı (₺${Number(k.rows[0].tutar).toLocaleString("tr-TR")}, ${k.rows[0].tarih}). Aynı ödeme ise tekrar girmeyin; farklı bir ödemeyse onaylayarak kaydedin.` } };
         }
         if (String(kategori).toUpperCase() === "ARAC_DEPOZITO" && Number(ar.rows[0].depozito_tutar || 0) > 0) {
-          return res.status(409).json({ ok: false, cakisma: true, error: `${ar.rows[0].plaka} için araç kartında ₺${Number(ar.rows[0].depozito_tutar).toLocaleString("tr-TR")} depozito (${ar.rows[0].depozito_tarihi || "tarihsiz"}) zaten kayıtlı ve nakit akışına düşüyor. Aynı depozitoysa tekrar girmeyin; farklıysa onaylayarak kaydedin.` });
+          return { http: 409, json: { ok: false, cakisma: true, error: `${ar.rows[0].plaka} için araç kartında ₺${Number(ar.rows[0].depozito_tutar).toLocaleString("tr-TR")} depozito (${ar.rows[0].depozito_tarihi || "tarihsiz"}) zaten kayıtlı ve nakit akışına düşüyor. Aynı depozitoysa tekrar girmeyin; farklıysa onaylayarak kaydedin.` } };
         }
       }
     }
@@ -17286,7 +17291,78 @@ app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
       `INSERT INTO cashflow_odeme (kategori,tarih,tutar,donem,aciklama,marka,arac_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [kategori, tarih, tutarN, donem || null, acik, markaVal, aracId]);
-    res.json({ ok: true, row: r.rows[0] });
+  return { http: 200, json: { ok: true, row: r.rows[0] } };
+}
+app.post("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
+  try {
+    const sonuc = await cashflowOdemeKaydet(req.body, aktifAltMarkaKodu(req.body?.marka, req.body?.tarih) || "ERC", null);
+    res.status(sonuc.http).json(sonuc.json);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══ MARKA PANELİ — MANUEL ÖDEME (26.10.2026, Orhan) ════════════════════════════════════════════
+// Alt marka (ör. Teknocenter) kendi Nakit Akışı panelinden Şimşek'teki "Ödeme Ekle" ile aynı kurala göre gerçekleşen
+// ödeme (araç kirası, depozito, ticket, diğer) girer. Marka, MARKA PANELİ FİRMA KAPSAMI katmanında oturumdan zorlanır;
+// kayıt cashflow_odeme'ye marka etiketiyle yazılır → marka nakit akışı ve proje kasası (çıkış) aynı kaynaktan görür.
+// Şimşek (ERC) girişleri bu uçlardan görülmez/eklenmez/silinmez. Başka modüllerin otomatik yazdığı satırlar
+// (çek/senet, yemek kartı hareketi) buradan silinemez.
+const MARKA_ODEME_KATEGORI = ["ARAC", "ARAC_DEPOZITO", "TICKET", "DIGER"];
+const markaOdemeBagliSql = `(EXISTS (SELECT 1 FROM cek_senet cs WHERE cs.cashflow_id = c.id)
+  OR EXISTS (SELECT 1 FROM yemek_odeme_hareket yh WHERE yh.cashflow_id = c.id))`;
+// Panelin markası olduğu gibi kullanılır (devir eşlemesi YOK: devredilmiş AHY paneli TEKNO kayıtlarını görmez/yazmaz)
+function markaOdemeMarkasi(req) {
+  return altMarkaKoduNormalize(req.body?.marka ?? req.query?.marka);
+}
+// Araç seçimi markanın bordro kümesiyle sınırlı (alt marka oturumu da Şimşek yöneticisi de aynı listeyi görür)
+const markaOdemeAracKapsam = (req, marka) => altMarkaKapsam(req) || { bordro: markaProfil(marka).bordro };
+app.get("/finance/marka-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await ensureCashflowOdemeTable();
+    const marka = markaOdemeMarkasi(req);
+    if (!marka) return res.status(400).json({ ok: false, error: "Geçerli bir alt marka belirtilmeli" });
+    const yil = Number(req.query.yil), ay = Number(req.query.ay);
+    if (!yil || !ay) return res.status(400).json({ ok: false, error: "yil ve ay gerekli" });
+    const r = await pool.query(
+      `SELECT c.id, c.kategori, TO_CHAR(c.tarih,'YYYY-MM-DD') AS tarih, c.tutar, c.donem, c.aciklama, c.arac_id, ar.plaka,
+              NOT ${markaOdemeBagliSql} AS silinebilir
+         FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
+        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1 AND UPPER(c.kategori) = ANY($2::text[])
+          AND EXTRACT(YEAR FROM c.tarih) = $3 AND EXTRACT(MONTH FROM c.tarih) = $4
+        ORDER BY c.tarih, c.id`, [marka, MARKA_ODEME_KATEGORI, yil, ay]);
+    const kap = markaOdemeAracKapsam(req, marka);
+    const ar = await pool.query(`SELECT id, plaka, marka, model, surucu, durum, aylik_kira, firma FROM araclar ORDER BY plaka`).catch(() => ({ rows: [] }));
+    const araclar = ar.rows.filter((a) => aracKapsamda(kap, a.firma)).map(({ firma, ...a }) => a)
+      .sort((x, y) => (x.durum === "AKTİF" ? 0 : 1) - (y.durum === "AKTİF" ? 0 : 1) || String(x.plaka).localeCompare(String(y.plaka)));
+    res.json({ ok: true, marka, odemeler: r.rows, araclar });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/finance/marka-odeme", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = markaOdemeMarkasi(req);
+    if (!marka) return res.status(400).json({ ok: false, error: "Geçerli bir alt marka belirtilmeli (Şimşek ödemeleri Nakit Akışı panelinden girilir)" });
+    if (req.body?.tarih && aktifAltMarkaKodu(marka, req.body.tarih) !== marka)
+      return res.status(400).json({ ok: false, error: `${marka} bu tarihte aktif değil — ödeme devralan firmanın panelinden girilmeli` });
+    if (!MARKA_ODEME_KATEGORI.includes(String(req.body?.kategori || "").toUpperCase()))
+      return res.status(400).json({ ok: false, error: "Kategori araç kirası, araç depozitosu, ticket ya da diğer olmalı" });
+    if (!(parseFinanceNumber(req.body?.tutar) > 0)) return res.status(400).json({ ok: false, error: "Tutar sıfırdan büyük olmalı" });
+    const sonuc = await cashflowOdemeKaydet({ ...req.body, kategori: String(req.body.kategori).toUpperCase() }, marka, markaOdemeAracKapsam(req, marka));
+    res.status(sonuc.http).json(sonuc.json);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.delete("/finance/marka-odeme/:id", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const k = await pool.query(
+      `SELECT c.id, UPPER(COALESCE(c.marka,'ERC')) AS marka, UPPER(c.kategori) AS kategori, ${markaOdemeBagliSql} AS bagli
+         FROM cashflow_odeme c WHERE c.id = $1`, [req.params.id]);
+    const o = k.rows[0];
+    if (!o || o.marka === "ERC" || !altMarkaMi(o.marka)) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    if (!MARKA_ODEME_KATEGORI.includes(o.kategori) || o.bagli)
+      return res.status(400).json({ ok: false, error: "Bu ödeme başka bir modülden otomatik oluştu — buradan silinemez" });
+    await pool.query(`DELETE FROM cashflow_odeme WHERE id = $1`, [o.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
