@@ -2255,7 +2255,21 @@ function MarkaNakitPanel({ currentUser }) {
                   title={eksi ? "Negatif bakiye: ödemeler gelen parayı aştı" : "Proje başlangıcından bugüne: toplam gelen − toplam ödenen"}>
                   {eksi ? "−" : ""}₺{fk(Math.abs(kalan))}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "14px", fontSize: "11px", color: "#374151", marginTop: "2px" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: "4px 14px", fontSize: "11px", color: "#374151", marginTop: "2px" }}>
+                  {(() => {
+                    // 26.10.2026 (Orhan): gelen paranın kaynağı — açıklaması "TEKNO Ödeme" ile başlayan kasa girişleri
+                    // markanın kendi hesabından yaptığı ödemelerdir (Şimşek hesabına gelmedi); kalanı Şimşek kasasına girendir.
+                    // İkisinin toplamı her zaman "Toplam gelen"e eşittir.
+                    const markaOdemeMi = (k) => /^tekno\s*ödeme/i.test(String(k.aciklama || "").trim().toLocaleLowerCase("tr"));
+                    const markaOdeme = (pk ? (pk.hareketler || []).filter(x => x.dahil && x.yon === "GIRIS") : (kasa.rows || [])).filter(markaOdemeMi);
+                    const markaOdemeT = markaOdeme.reduce((s, k) => s + Number(k.tutar || 0), 0);
+                    const simsekT = gelen - markaOdemeT;
+                    if (!markaOdeme.length && String(marka || "").toUpperCase() !== "TEKNO") return null;
+                    return (<>
+                      <span title="Şimşek hesabına/kasasına gelen tutar = Toplam gelen − TEKNO Ödeme">Şimşek kasasına giren <b style={{ color: "#1e3a5f" }}>₺{fk(simsekT)}</b></span>
+                      <span title={markaOdeme.length ? markaOdeme.map(k => `${k.tarih} · ₺${fk(k.tutar)} · ${k.aciklama}`).join("\n") : `Açıklaması "TEKNO Ödeme" ile başlayan kasa girişi yok`}>TEKNO Ödeme <b style={{ color: "#9a3412" }}>₺{fk(markaOdemeT)}</b></span>
+                    </>);
+                  })()}
                   <span>Toplam gelen <b style={{ color: "#15803d" }}>₺{fk(gelen)}</b></span>
                   <span>Toplam ödenen <b style={{ color: "#b91c1c" }}>₺{fk(odenen)}</b></span>
                 </div>
