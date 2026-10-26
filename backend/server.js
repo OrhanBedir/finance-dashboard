@@ -910,6 +910,7 @@ const KIMLIKSIZ_UCLAR = new Set([
   "POST /auth/reset-password",         // e-postadaki ?reset= linkiyle yeni şifre (tek kullanımlık reset_token)
   "GET /mobil",                        // APK indirme sayfası (app.omnix.global/mobil yönlendirmesi)
   "GET /mobil/apk",
+  "GET /mobil/omnix.apk",              // Omnix Field Operation personel APK'sı (26.10.2026)
 ]);
 function kapiTokeni(req) {
   const h = String(req.headers.authorization || "");
@@ -3512,12 +3513,22 @@ const MOBIL_APK = {
   ad: "ERC_Operasyon_v30.apk",
   url: "https://expo.dev/artifacts/eas/8Agqd7pS63LyRYSSdeh4Ai5OlJOvihypFQJfCeoM_HU.apk",
 };
-app.get("/mobil/apk", async (req, res) => {
+/* Omnix Field Operation (yeni uygulama, paket global.omnix.app) — 26.10.2026.
+   Play Store sürümü Google anahtarıyla, bu APK yükleme anahtarıyla imzalıdır: aynı telefonda
+   biri diğerinin üstüne kurulmaz; personel tek kaynaktan kurmalı. Yeni build çıkınca
+   OMNIX_APK.surum/kod/url güncellenir (EAS profili personel-apk). */
+const OMNIX_APK = {
+  surum: "1.0.0",
+  kod: 2,
+  ad: "Omnix_Field_Operation_v1.0.0_2.apk",
+  url: "https://expo.dev/artifacts/eas/aqmJZnpj22UczNbEA4vkBghBdKQEAr0QmdEFPB4lhek.apk",
+};
+async function apkAkit(res, apk) {
   try {
-    const r = await fetch(MOBIL_APK.url, { redirect: "follow" });
+    const r = await fetch(apk.url, { redirect: "follow" });
     if (!r.ok || !r.body) return res.status(502).send("APK alınamadı (" + r.status + ")");
     res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Disposition", `attachment; filename="${MOBIL_APK.ad}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${apk.ad}"`);
     res.setHeader("Cache-Control", "no-store");
     const len = r.headers.get("content-length");
     if (len) res.setHeader("Content-Length", len);
@@ -3527,18 +3538,28 @@ app.get("/mobil/apk", async (req, res) => {
     console.error("MOBIL APK ERROR:", e.message);
     if (!res.headersSent) res.status(500).send("APK indirilemedi: " + e.message);
   }
-});
+}
+app.get("/mobil/apk", (req, res) => apkAkit(res, MOBIL_APK));
+app.get("/mobil/omnix.apk", (req, res) => apkAkit(res, OMNIX_APK));
 app.get("/mobil", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ERC Operasyon — Android</title>
+  res.send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Omnix — Android</title>
 <style>body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#0f172a;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
-.k{background:#fff;border-radius:18px;padding:26px 22px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.08);text-align:center}
-h1{font-size:20px;margin:0 0 4px}.s{color:#64748b;font-size:14px;margin-bottom:18px}
-a.b{display:block;background:#16a34a;color:#fff;text-decoration:none;font-weight:800;font-size:17px;padding:16px;border-radius:14px}
-ol{text-align:left;font-size:13.5px;color:#334155;padding-left:20px;margin-top:18px}li{margin:6px 0}</style></head><body><div class="k">
-<div style="font-size:40px">📡</div><h1>ERC Operasyon</h1><div class="s">Android · sürüm ${MOBIL_APK.surum} · ~60 MB</div>
-<a class="b" href="/mobil/apk">⬇️ Uygulamayı İndir</a>
-<ol><li>İndirme bitince bildirime dokunup <b>Yükle</b> deyin.</li><li>"Bilinmeyen uygulama" uyarısı çıkarsa izin verip geri dönün.</li><li>Play Protect uyarısında <b>Daha fazla bilgi → Yine de yükle</b>.</li><li>Eski sürümü silmeden üstüne kurulur; girişiniz korunur.</li></ol>
+.w{max-width:380px;width:100%;display:flex;flex-direction:column;gap:16px}
+.k{background:#fff;border-radius:18px;padding:26px 22px;box-shadow:0 10px 30px rgba(0,0,0,.08);text-align:center}
+.k.eski{padding:18px 22px;opacity:.9}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:0 0 4px}.s{color:#64748b;font-size:14px;margin-bottom:18px}.k.eski .s{margin-bottom:12px}
+.y{display:inline-block;background:#fef3c7;color:#92400e;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;margin-bottom:10px}
+a.b{display:block;background:#1E3A5F;color:#fff;text-decoration:none;font-weight:800;font-size:17px;padding:16px;border-radius:14px}
+a.b.eski{background:#16a34a;font-size:15px;padding:12px}
+ol{text-align:left;font-size:13.5px;color:#334155;padding-left:20px;margin-top:18px}li{margin:6px 0}
+.n{font-size:12.5px;color:#64748b;margin-top:12px;text-align:left}</style></head><body><div class="w">
+<div class="k"><div class="y">YENİ</div><div style="font-size:40px">⬡</div><h1>Omnix Field Operation</h1><div class="s">Android · sürüm ${OMNIX_APK.surum} (${OMNIX_APK.kod}) · ~75 MB</div>
+<a class="b" href="/mobil/omnix.apk">⬇️ Omnix'i İndir</a>
+<ol><li>İndirme bitince bildirime dokunup <b>Yükle</b> deyin.</li><li>"Bilinmeyen uygulama" uyarısı çıkarsa izin verip geri dönün.</li><li>Play Protect uyarısında <b>Daha fazla bilgi → Yine de yükle</b>.</li><li>Şirketinizin size verdiği Omnix hesabıyla giriş yapın.</li></ol>
+<div class="n">Not: Omnix'i Google Play'den kurduysanız bu dosyayı yüklemeyin; güncellemeler Play'den gelir.</div></div>
+<div class="k eski"><h2>ERC Operasyon (eski uygulama)</h2><div class="s">Android · sürüm ${MOBIL_APK.surum} · ~60 MB</div>
+<a class="b eski" href="/mobil/apk">⬇️ ERC Operasyon'u İndir</a></div>
 </div></body></html>`);
 });
 
