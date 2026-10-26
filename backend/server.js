@@ -1140,9 +1140,17 @@ const kayitliProfil = (u) => u?.yonetim_profili || _yetkiOnbellek.get(String(u?.
 const MAAS_YETKILI_ROLLER = ["admin", "platform_admin"];
 const MAAS_YETKILI_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com",
   "eren.simsek@simsektel.com", "erencan.simsek@simsektel.com", "info@ahyelektrik.com", "teknocenter"];
+// 26.10.2026 (Orhan): alt marka (Teknocenter) YÖNETİM hesabı kendi firma kapsamında Rollout'u görüntüler ve Excel alır;
+// düzenleme AYRI izindir (rollout_duzenle, varsayılan kapalı). Kapsam "MARKA ROLLOUT KAPSAMI" katmanında zorlanır.
+const MARKA_ROLLOUT_ROLLER = ["admin", "direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur"];
 function etkinIzinHesapla(u, ayar) {
   const o = { ...(ROL_IZINLERI[_rol(u)] || {}) };
   const rol = _rol(u) || String(kayitliRol(u) || "").toLowerCase();
+  if (altMarkaKullanicisi(u) && (MARKA_ROLLOUT_ROLLER.includes(rol) || ["SAHIP", "YONETICI"].includes(kayitliProfil(u)))) {
+    if (!("rollout_goruntule" in o)) o.rollout_goruntule = true;
+    if (!("rollout_excel" in o)) o.rollout_excel = true;
+    if (!("rollout_duzenle" in o)) o.rollout_duzenle = false;
+  }
   if (!("maas_goruntule" in o) && ikOkumaYetkili(u) && !MAAS_YETKILI_ROLLER.includes(rol) && !MAAS_YETKILI_EMAIL.includes(_eposta(u)))
     o.maas_goruntule = false;
   // 25.10.2026: şirket sahibi profili kendi firma kapsamındaki maaşları görür (kişiye özel ayar false ise kapalı);
@@ -1258,14 +1266,9 @@ app.use(async (req, res, next) => {
         // Araç & Depo yetkisi yoksa yalnız plaka seçimi için gereken alanlar (avans formu)
         res.json = (b) => orig(Array.isArray(b) ? b.map((a) => Object.fromEntries(ISG_ARAC_ALANLARI.filter((k) => k in (a || {})).map((k) => [k, a[k]]))) : b);
       } else if (yol === "/rollout/list") {
-        res.json = (b) => {
-          const c = _isgSatirTemizle(b, ISG_GIZLI_ROLLOUT);
-          if (kap && c && Array.isArray(c.rows)) {
-            const on = String(markaProfil(kap.kod)?.onek || kap.kod || "").toUpperCase();
-            c.rows = c.rows.filter((r) => ["rf_subcon", "enh_subcon", "trs_subcon", "power_subcon"].some((k) => String(r[k] || "").toUpperCase().startsWith(on)));
-          }
-          return orig(c);
-        };
+        // Alt marka İSG kullanıcısının firma kapsamı 26.10.2026'dan beri MARKA ROLLOUT KAPSAMI katmanında SQL'de uygulanır
+        // (sınırlı eşleşme + güvenilir ekip etiketleri); burada yalnız finansal alanlar temizlenir
+        res.json = (b) => orig(_isgSatirTemizle(b, ISG_GIZLI_ROLLOUT));
       }
       return next();
     }
@@ -1594,6 +1597,233 @@ app.use(async (req, res, next) => {
   } catch (e) {
     console.error("[marka-fatura]", e.message);
     res.status(500).json({ ok: false, error: "Fatura kapsamı doğrulanamadı" });
+  }
+});
+// ═══ MARKA ROLLOUT KAPSAMI (26.10.2026, Orhan — Teknocenter "Rollout" ekranı) ═══════════════════════════════════
+// Alt marka (hw_yukleme=false: Teknocenter / AHY) hesabı ERC'nin mevcut Rollout ekranını ve AYNI rollout_progress
+// verisini kullanır; ikinci bir tablo / saha veritabanı yoktur. Kapsam doğrulanmış oturumdan (req.user.marka) gelir,
+// SQL'de uygulanır ve liste / özet / Excel / iş kolu / iş atama listesi / Clean Up listesi için TEK kuraldır:
+//   • Satır kapsamda: herhangi bir iş kolunun taşeron alanı (rf/los/tss/tssr/btk/trs/enh/enh_proje/power/emr/pac/ysb_subcon)
+//     markanın kendisi (TEKNO, TEKNOCENTER), ayraçlı alt ekibi/taşeronu (TEKNO_ENDER, TEKNO_FERRUMX, "TEKNO CENTER") ya da
+//     ekipler tablosunda markaya bağlı (bagli_firma) ekibin iş etiketi / adı ise. Sınır kuralı: TEKNOSA, TEKNOLOJİ eşleşmez.
+//     Site ID önekine (IZ…, KA…, MN…) bakılmaz; devralınan marka (AHY) geçmişi otomatik eklenmez.
+//   • Aynı sahada başka firmaya ait iş kolunun alanları (taşeron, tarihler, not, belge adresi) yanıtta boşaltılır; genel
+//     saha bilgisi (Site ID, proje kodu, bölge, il, saha tipi, malzeme durumu) kalır. Taşeron alanı boş iş kolu ana montaj
+//     (RF) sahibini izler; sahibi belirsiz iş kolu gösterilmez.
+//   • Finansal alanlar (hakediş, perakende tutarı/ödeme, dekont / ödeme / ceza belgesi) alt markaya hiç verilmez.
+//   • Görüntüleme hakkı etkin izinden (rollout_goruntule): yönetim rolleri + şirket sahibi/yönetici profili varsayılan açık
+//     (etkinIzinHesapla), diğer çalışanlar Admin → Yetkiler ile. Excel rollout_excel, yazma rollout_duzenle (varsayılan
+//     KAPALI) izni ister; yazmada kaydın / sahanın kapsamda olması ayrıca doğrulanır.
+//   • Kapsam bulunamazsa "tüm Rollout" varsayılanı YOKTUR: boş küme döner. Şimşek / ERC hesapları bu katmandan etkilenmez;
+//     mobil Clean Up akışı (/rollout/cleanup/…) kendi yetki kurallarıyla aynen çalışır.
+const ROLLOUT_SUBCON_ALANLARI = ["rf_subcon", "los_subcon", "tss_subcon", "tssr_subcon", "btk_subcon", "trs_subcon", "enh_subcon",
+  "enh_proje_subcon", "power_subcon", "emr_subcon", "pac_subcon", "ysb_subcon"];
+// İş kolu → alanları; sahibi (subcon alanı) boşsa izlediği üst iş kolu
+const ROLLOUT_IS_KOLU_ALANLARI = [
+  { kolu: "rf", subcon: "rf_subcon", ust: null, alanlar: ["rf_started_date", "rf_finished_date", "rf_note", "rf_not", "plan_start_date",
+    "inst_plan_start_date", "installation_actual_start_date", "installation_actual_end_date", "onair_date", "qc_durum", "qc_closed_date",
+    "atlas_status", "asbuilt_status", "asbuilt_finished_date", "acceptance_docs", "pac", "montaj_anten", "kabul_dosya_url", "kabul_belge_not",
+    "hasarsizlik_belge_url", "hasarsizlik_tarihi", "memnuniyet_belge_url", "memnuniyet_tarihi", "memnuniyet_ayni_belge", "tamamlanma_tarihi",
+    "plan_week", "install_week", "onair_week"] },
+  { kolu: "los", subcon: "los_subcon", ust: "rf", alanlar: ["los_plan_date", "los_actual_end_date", "los_belge_url", "los_approved_date"] },
+  { kolu: "tss", subcon: "tss_subcon", ust: "rf", alanlar: ["tss_plan_start_date", "tss_actual_end_date", "tss_prepared_date"] },
+  { kolu: "tssr", subcon: "tssr_subcon", ust: "rf", alanlar: ["tssr_plan_start_date", "tssr_actual_end_date", "tssr_belge_url", "tssr_sent_hw_date", "tssr_approved_date"] },
+  { kolu: "btk", subcon: "btk_subcon", ust: "rf", alanlar: ["btk_plan_start_date", "btk_actual_end_date", "btk_approved", "btk_certificate_date",
+    "btk_belge_url", "btk_applied_date", "btk_approved_date", "btk_anten", "gs_status", "survey_note"] },
+  { kolu: "trs", subcon: "trs_subcon", ust: "rf", alanlar: ["trs_plan_start_date", "trs_actual_end_date", "trs_not", "fsc_belge_url"] },
+  { kolu: "enh", subcon: "enh_subcon", ust: "rf", alanlar: ["enh_site_type", "enh_plan_start_date", "enh_actual_end_date", "enh_not", "enh_qc_closed_date",
+    "suzme_date", "abonelik_end_date", "abonelik_actual_end_date", "enh_tesisat_no", "tt_horizon_end_date", "tt_horizon_actual_end_date",
+    "enh_perakende_tarihi", "enh_perakende_not", "enh_perakende_sozlesme_url"] },
+  { kolu: "enh_proje", subcon: "enh_proje_subcon", ust: "enh", alanlar: ["enh_proje_belge_url", "enh_proje_hazir", "enh_proje_not"] },
+  { kolu: "power", subcon: "power_subcon", ust: "enh", alanlar: ["power_plan_start_date", "power_actual_end_date"] },
+  { kolu: "emr", subcon: "emr_subcon", ust: "rf", alanlar: ["emr_plan_start_date", "emr_actual_end_date", "emr_belge_url"] },
+  { kolu: "pac", subcon: "pac_subcon", ust: "rf", alanlar: ["pac_plan_date", "pac_actual_end_date", "pac_end_date", "pac_belge_url"] },
+  { kolu: "ysb", subcon: "ysb_subcon", ust: "rf", alanlar: ["ysb_plan_start_date", "ysb_actual_end_date", "ysb_belge_url"] },
+];
+// Alt markaya hiç verilmeyen finansal / ödeme alanları (ISG_GIZLI_ROLLOUT + dekont / ödeme / ceza belgeleri)
+const ROLLOUT_MARKA_GIZLI = ["hakedis", "enh_perakende_tutar", "enh_perakende_odeme_tarihi", "enh_perakende_dekont_url", "dekont_url", "odeme_belge_url", "ceza_belge_url"];
+// Taşeron adı markaya ait mi — SINIRLI eşleşme: önek ya da ad kelimesi, ardından harf/rakam GELMEYEN karakter ya da son
+//   TEKNO ✓  TEKNO_ENDER ✓  TEKNO-FERRUMX ✓  "TEKNO CENTER" ✓  TEKNOCENTER ✓  |  TEKNOSA ✗  TEKNOLOJİ ✗  AHY ✗
+function markaRolloutDeseni(P) {
+  const kelime = (x) => String(x || "").trim().split(/\s+/)[0].toUpperCase().replace(/[^A-Z0-9ÇĞİÖŞÜ]/g, "");
+  const onek = kelime(P.onek) || kelime(P.kod), ad = kelime(P.ad);
+  const kokler = [...new Set([onek, ad].filter(Boolean))].sort((a, b) => b.length - a.length);
+  return `^(${kokler.join("|")})([^A-Z0-9ÇĞİÖŞÜ]|$)`;
+}
+// Markaya bağlı ekiplerin (ekipler.bagli_firma) iş etiketleri ve adları — sistemde tanımlı güvenilir karşılıklar.
+// Başka bir alt markanın önekini taşıyan etiket (ör. AHY_…) alınmaz. 60 sn önbellek; tablo okunamazsa boş.
+const _rolloutEtiketOnbellek = new Map();
+async function markaRolloutEtiketleri(kod) {
+  const c = _rolloutEtiketOnbellek.get(kod);
+  if (c && Date.now() - c.t < YETKI_TTL_MS) return c.v;
+  const r = await pool.query(`SELECT ad, COALESCE(is_etiketleri, '{}') AS etiketler FROM ekipler
+    WHERE UPPER(TRIM(COALESCE(bagli_firma,''))) = $1`, [kod]).catch(() => ({ rows: [] }));
+  const yabanci = ALT_MARKALAR.filter((m) => m.kod !== kod).map((m) => new RegExp(markaRolloutDeseni(m)));
+  const v = new Set();
+  for (const e of r.rows || []) for (const t of [e.ad, ...(e.etiketler || [])]) {
+    const s = String(t || "").trim().toUpperCase();
+    if (s && !yabanci.some((rx) => rx.test(s))) v.add(s);
+  }
+  const out = [...v];
+  _rolloutEtiketOnbellek.set(kod, { t: Date.now(), v: out });
+  return out;
+}
+// Oturumun Rollout firma kapsamı: alt marka değilse null (ERC / Şimşek: mevcut davranış).
+// Dönen nesne: izin bayrakları + satır eşleştiricisi + SQL parçası ($i: desen, $i+1: etiket dizisi)
+async function markaRolloutKapsami(req) {
+  const u = req?.user || optionalAuth(req);
+  if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return null;
+  const P = markaProfil(u.marka);
+  const iz = req.izinler || {};
+  const desenStr = markaRolloutDeseni(P), desen = new RegExp(desenStr);
+  const etiketler = await markaRolloutEtiketleri(P.kod);
+  const esle = (v) => { const s = String(v || "").trim().toUpperCase(); return !!s && (desen.test(s) || etiketler.includes(s)); };
+  const goruntule = iz.rollout_goruntule === true;
+  return {
+    kod: P.kod, ad: P.ad, goruntule, excel: goruntule && iz.rollout_excel === true, duzenle: goruntule && iz.rollout_duzenle === true,
+    esle, params: [desenStr, etiketler],
+    sql: (alias, i) => "(" + ROLLOUT_SUBCON_ALANLARI.map((k) => {
+      const col = `UPPER(TRIM(COALESCE(to_jsonb(${alias})->>'${k}','')))`;
+      return `${col} ~ $${i} OR ${col} = ANY($${i + 1}::text[])`;
+    }).join(" OR ") + ")",
+  };
+}
+const rolloutKapsam = async (req) => (req.markaRollout !== undefined ? req.markaRollout : await markaRolloutKapsami(req));
+// Kapsamdaki saha kodları (UPPER) — iş atama / Clean Up / iş yükü listelerini süzmek için
+async function markaRolloutSahalar(K) {
+  const r = await pool.query(`SELECT DISTINCT UPPER(TRIM(r.site_code)) AS sc FROM rollout_progress r WHERE ${K.sql("r", 1)}`, K.params);
+  return new Set((r.rows || []).map((x) => x.sc));
+}
+// Satır maskesi: başka firmanın iş kolu alanları boşaltılır, finansal alanlar silinir
+function markaRolloutMaskele(K, rows) {
+  return (rows || []).map((r) => {
+    const c = { ...r };
+    for (const k of ROLLOUT_MARKA_GIZLI) delete c[k];
+    const sahip = {};
+    for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
+      const v = String(r[L.subcon] || "").trim();
+      const kendi = v && v !== "N/A" && v !== "__NA__";
+      sahip[L.kolu] = kendi ? (K.esle(v) ? "BEN" : "DIGER") : (L.ust ? sahip[L.ust] : "YOK");
+    }
+    for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
+      if (sahip[L.kolu] === "BEN") continue;
+      if (L.subcon in c) c[L.subcon] = null;
+      for (const a of L.alanlar) if (a in c) c[a] = null;
+    }
+    return c;
+  });
+}
+// Kapsamlı satırlar (liste / özet / Excel aynı sorgu): bölge süzgeci isteğe bağlı
+async function markaRolloutSatirlari(K, { region, orderBy } = {}) {
+  const params = [...K.params]; let where = K.sql("r", 1);
+  if (region && region !== "ALL" && region !== "Tüm Bölgeler") { params.push(region); where += ` AND LOWER(COALESCE(r.bolge,'')) = LOWER($${params.length})`; }
+  const r = await pool.query(`SELECT r.* FROM rollout_progress r WHERE ${where} ORDER BY ${orderBy || "r.site_type ASC, r.site_code ASC"}`, params);
+  return r.rows || [];
+}
+// Özet sayıları (/rollout/summary ile aynı tanımlar) maskelenmiş satırlardan — po_closed (Huawei PO) alt markaya verilmez
+function rolloutOzetJs(rows) {
+  const has = (v) => v != null && String(v).trim() !== "" && v !== "N/A" && v !== "__NA__";
+  const g = {};
+  for (const r of rows || []) {
+    const st = String(r.site_type || "").toUpperCase() === "STANDALONE" ? "Standalone" : (r.site_type || "UNKNOWN");
+    const o = (g[st] = g[st] || { site_type: st, target: 0, rf_equipment_received: 0, rf_installation_started: 0, rf_installation_finished: 0,
+      qc_closed: 0, acceptance: 0, tssr_plan_start: 0, tssr_actual_end: 0, btk_plan_start: 0, btk_actual_end: 0, btk_approved: 0,
+      btk_certificate_date: 0, power_plan_start: 0, power_actual_end: 0, enh_plan_start: 0, enh_actual_end: 0, enh_qc_closed: 0, suzme: 0,
+      abonelik_end: 0, po_closed: 0 });
+    const qcOk = r.qc_durum === "OK";
+    o.target++;
+    if (has(r.malzeme_status) || qcOk || has(r.installation_actual_start_date) || has(r.installation_actual_end_date) || has(r.onair_date) || has(r.qc_closed_date)) o.rf_equipment_received++;
+    if (has(r.installation_actual_start_date) || has(r.plan_start_date)) o.rf_installation_started++;
+    if (has(r.installation_actual_end_date) || has(r.onair_date) || has(r.qc_closed_date) || qcOk) o.rf_installation_finished++;
+    if (has(r.qc_closed_date) || qcOk) o.qc_closed++;
+    if (has(r.pac_actual_end_date) || has(r.pac_end_date) || has(r.abonelik_actual_end_date) || has(r.abonelik_end_date)) o.acceptance++;
+    if (has(r.tssr_plan_start_date)) o.tssr_plan_start++;
+    if (has(r.tssr_actual_end_date)) o.tssr_actual_end++;
+    if (has(r.btk_plan_start_date)) o.btk_plan_start++;
+    if (has(r.btk_actual_end_date)) o.btk_actual_end++;
+    if (has(r.btk_approved)) o.btk_approved++;
+    if (has(r.btk_certificate_date)) o.btk_certificate_date++;
+    if (has(r.power_plan_start_date)) o.power_plan_start++;
+    if (has(r.power_actual_end_date)) o.power_actual_end++;
+    if (has(r.enh_plan_start_date)) o.enh_plan_start++;
+    if (has(r.enh_actual_end_date)) o.enh_actual_end++;
+    if (has(r.enh_qc_closed_date)) o.enh_qc_closed++;
+    if (String(r.enh_site_type || "").trim().toLowerCase().includes("süzme")) o.suzme++;
+    if (has(r.abonelik_actual_end_date) || has(r.abonelik_end_date)) o.abonelik_end++;
+  }
+  return Object.values(g).sort((a, b) => String(a.site_type).localeCompare(String(b.site_type)));
+}
+// İş kolu satırları: başka firmanın PR kalemine dayanan iş kolu çıkarılır, kalan kalemler yalnız kendi taşeronunun
+function markaIsKoluSuz(K, rows) {
+  return (rows || []).filter((r) => !r.kalem || (r.kalem.taseronlar || []).some((t) => K.esle(t))).map((r) => {
+    if (!r.kalem) return r;
+    const kalemler = (r.kalem.kalemler || []).filter((k) => K.esle(k.taseron));
+    const taseronlar = (r.kalem.taseronlar || []).filter((t) => K.esle(t));
+    return { ...r, kalem: { ...r.kalem, taseronlar, taseron: taseronlar.join(", ") || null, kalemler,
+      pr_adet: kalemler.reduce((s, k) => s + Number(k.pr || 0), 0), qc_ok: kalemler.some((k) => k.qc === "OK") } };
+  });
+}
+// Saha / kayıt kapsamda mı (doğrudan API erişimi: Site ID ya da kayıt kimliğiyle başka firmaya ulaşılamaz)
+async function markaRolloutSahaKapsamda(K, site) {
+  const sc = String(site || "").replace(/\s+/g, "").toUpperCase();
+  if (!sc) return false;
+  const r = await pool.query(`SELECT 1 FROM rollout_progress r WHERE UPPER(TRIM(r.site_code)) = $1 AND ${K.sql("r", 2)} LIMIT 1`, [sc, ...K.params]);
+  return r.rows.length > 0;
+}
+async function markaRolloutKayitKapsamda(K, id) {
+  const r = await pool.query(`SELECT 1 FROM rollout_progress r WHERE r.id = $1 AND ${K.sql("r", 2)} LIMIT 1`, [Number(id), ...K.params]);
+  return r.rows.length > 0;
+}
+// Rollout ekranının yazma uçları — alt markada rollout_duzenle izni + kapsam ister. Toplu yükleme / saha ekleme /
+// Smart QC / imzalı yükleme adresi firma hesabına kapalıdır (Şimşek'in Huawei verisi). Clean Up (/rollout/cleanup/…) hariç.
+const MARKA_ROLLOUT_YAZMA = [
+  ["POST", /^\/rollout\/update$/], ["POST", /^\/rollout\/\d+\/(enh-perakende|kabul-belgeleri|belge-url|enh-proje-belge-url)$/],
+  ["DELETE", /^\/rollout\/\d+$/], ["POST", /^\/rollout\/is-kolu$/], ["PUT", /^\/rollout\/is-kolu\/\d+$/],
+];
+const MARKA_ROLLOUT_KAPALI = [
+  ["POST", /^\/rollout\/(add-site|upload|auto-sync-targets|is-kolu\/smartqc)$/], ["POST", /^\/rollout\/cleanup$/],
+  ["GET", /^\/rollout\/((enh-proje\/)?signed-upload-url|mismatch-check|missing-sites|fix-site-types)$/], ["GET", /^\/migrate$/],
+];
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    if (!/^\/(rollout(\/|$)|export\/excel$|is-atama\/(liste|is-yuku)$|migrate$)/.test(yol)) return next();
+    if (/^\/rollout\/cleanup\//.test(yol)) return next(); // mobil Clean Up akışı: foto / onay / atananlarım — kendi kuralları
+    const u = optionalAuth(req);
+    if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return next();
+    const K = await markaRolloutKapsami(req);
+    req.markaRollout = K;
+    const m = req.method === "HEAD" ? "GET" : req.method;
+    const red = (msg) => res.status(403).json({ ok: false, error: msg });
+    if (MARKA_ROLLOUT_KAPALI.some(([mt, rx]) => mt === m && rx.test(yol))) return red("Bu işlem firma hesabına kapalı");
+    if (MARKA_ROLLOUT_YAZMA.some(([mt, rx]) => mt === m && rx.test(yol))) {
+      if (!K.duzenle) return red("Rollout kayıtlarını yalnız görüntüleme yetkiniz var");
+      let mm;
+      if ((mm = yol.match(/^\/rollout\/(\d+)(\/|$)/))) { if (!(await markaRolloutKayitKapsamda(K, mm[1]))) return red("Bu kayıt firmanızın kapsamında değil"); }
+      else if (yol === "/rollout/update") {
+        const sc = String(req.body?.site_code || "").replace(/\s+/g, "").toUpperCase();
+        const var_ = await pool.query(`SELECT 1 FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [sc]);
+        if (var_.rows[0]) { if (!(await markaRolloutSahaKapsamda(K, sc))) return red("Bu saha firmanızın kapsamında değil"); }
+        else if (!ROLLOUT_SUBCON_ALANLARI.some((k) => K.esle(req.body?.[k]))) return red("Yeni saha kaydında en az bir iş kolunun taşeronu firmanız olmalı");
+      } else if (yol === "/rollout/is-kolu") {
+        if (!(await markaRolloutSahaKapsamda(K, req.body?.site_code))) return red("Bu saha firmanızın kapsamında değil");
+      } else if ((mm = yol.match(/^\/rollout\/is-kolu\/(\d+)$/))) {
+        const r = await pool.query(`SELECT site_code FROM rollout_is_kolu WHERE id = $1`, [Number(mm[1])]).catch(() => ({ rows: [] }));
+        if (!r.rows[0] || !(await markaRolloutSahaKapsamda(K, r.rows[0].site_code))) return red("Bu kayıt firmanızın kapsamında değil");
+      }
+      return next();
+    }
+    if (m !== "GET") return next(); // listede olmayan diğer yöntemler uçların kendi kapılarına
+    if (/^\/is-atama\//.test(yol)) return next(); // iş atama listeleri: izin kapısı yok, yalnız satır kapsamı (uçta)
+    if (!K.goruntule) return red("Rollout görüntüleme yetkiniz yok");
+    if (yol === "/export/excel" && !K.excel) return red("Rollout Excel yetkiniz yok");
+    const sm = yol.match(/^\/rollout\/is-kolu\/site\/([^/]+)$/);
+    if (sm && !(await markaRolloutSahaKapsamda(K, decodeURIComponent(sm[1])))) return red("Bu saha firmanızın kapsamında değil");
+    next();
+  } catch (e) {
+    console.error("[marka-rollout]", e.message);
+    res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
   }
 });
 // TÜM KULLANICILARI LİSTELE
@@ -2366,7 +2596,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       ...(await oturumProfilAlanlari(u.id)), // mobil deneyim seçimi (personel / yönetim / taşeron)
       ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
       ...(await (async () => { const pr = await omnixProfil.profilOku(pool, u.id).catch(() => ({}));
-        const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
+        const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili, hw_yukleme: hwYukleme }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
       // Onay yetkisi özeti (eski listeler + tarihli devirler): mobil "Onaylar" sekmesi ilk çizimden itibaren doğru olsun
       onay: await onayPanel.onayOzeti({ user: { user_id: u.id, email: u.email, role: u.role } }).catch(() => null),
     }});
@@ -11728,7 +11958,11 @@ app.get("/export/excel", async (req, res) => {
 
     query += ` ORDER BY bolge ASC, site_type ASC, site_code ASC`;
 
-    const result = await pool.query(query, values);
+    // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki satırları, başka firmanın iş kolu alanları boş olarak alır
+    const K = await rolloutKapsam(req);
+    const result = K
+      ? { rows: markaRolloutMaskele(K, await markaRolloutSatirlari(K, { region, orderBy: "r.bolge ASC, r.site_type ASC, r.site_code ASC" })) }
+      : await pool.query(query, values);
 
     if (result.rows.length === 0) {
       return res.status(404).send("Data yok");
@@ -11805,7 +12039,7 @@ app.get("/export/excel", async (req, res) => {
     const titleRow = worksheet.getRow(1);
     titleRow.height = 28;
     const titleCell = titleRow.getCell(1);
-    titleCell.value = `ROLLOUT DATA RAPORU — ${region && region !== "ALL" ? region : "Tüm Bölgeler"} (${new Date().toLocaleDateString("tr-TR")})`;
+    titleCell.value = `ROLLOUT DATA RAPORU — ${region && region !== "ALL" ? region : "Tüm Bölgeler"}${K ? ` — ${K.ad} kapsamı` : ""} (${new Date().toLocaleDateString("tr-TR")})`;
     titleCell.font  = { bold: true, size: 13, color: { argb: "FFFFFFFF" } };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
     titleCell.fill  = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203864" } };
@@ -11918,13 +12152,19 @@ app.get("/export/excel", async (req, res) => {
 
 app.get("/rollout/list", authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(`
+    // 26.10.2026: alt marka hesabı (Teknocenter) yalnız kendi firma kapsamındaki satırları alır — MARKA ROLLOUT KAPSAMI
+    const K = await rolloutKapsam(req);
+    const result = K
+      ? { rows: await markaRolloutSatirlari(K) }
+      : await pool.query(`
       SELECT *
       FROM rollout_progress
       ORDER BY site_type ASC, site_code ASC
     `);
 
-    const rows = (result.rows || []).map((r) => {
+    // Maske ham satıra uygulanır: başka firmanın iş kolu alanları map'e boş girer (N/A doldurması / hafta türetmeleri dahil)
+    const ham = K ? markaRolloutMaskele(K, result.rows || []) : (result.rows || []);
+    const rows = ham.map((r) => {
       const normalizedSiteType =
         getSiteTypeFromSiteCode(r.site_code) || r.site_type;
 
@@ -11989,6 +12229,7 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
       };
     });
 
+    if (K) return res.json({ ok: true, kapsam: K.kod, rows });
     res.json({ ok: true, rows });
   } catch (err) {
     console.error("ROLLOUT LIST ERROR:", err);
@@ -12015,7 +12256,11 @@ app.get("/rollout/cleanup", authMiddleware, async (req, res) => {
       SELECT c.*, (SELECT rp.bolge FROM rollout_progress rp WHERE UPPER(TRIM(rp.site_code)) = UPPER(TRIM(c.site_code)) LIMIT 1) AS bolge
       FROM rollout_cleanup c ORDER BY c.updated_at DESC`);
     const email = String(req.user?.email || "").toLowerCase().trim();
-    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, onay_yetkim: cleanupOnayYetkiliMi(email, x.bolge) })) });
+    // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki sahaların Clean Up kayıtlarını görür (MARKA ROLLOUT KAPSAMI)
+    const K = await rolloutKapsam(req);
+    let rows = r.rows;
+    if (K) { const S = await markaRolloutSahalar(K); rows = rows.filter((x) => S.has(String(x.site_code || "").replace(/\s+/g, "").toUpperCase())); }
+    res.json({ ok: true, rows: rows.map((x) => ({ ...x, onay_yetkim: cleanupOnayYetkiliMi(email, x.bolge) })) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -12507,7 +12752,11 @@ app.get("/is-atama/liste", authMiddleware, async (req, res) => {
                CASE WHEN a.durum IN ('TAMAMLANDI','IPTAL') THEN a.plan_tarihi END DESC NULLS LAST,
                a.id DESC
       LIMIT 500`, params);
-    res.json({ ok: true, rows: r.rows, yetkili: isAtamaYetkiliMi(req) });
+    // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki sahaların atamalarını görür (MARKA ROLLOUT KAPSAMI)
+    const K = await rolloutKapsam(req);
+    let rows = r.rows;
+    if (K) { const S = await markaRolloutSahalar(K); rows = rows.filter((a) => (a.site_codes || []).some((sc) => S.has(String(sc || "").replace(/\s+/g, "").toUpperCase()))); }
+    res.json({ ok: true, rows, yetkili: isAtamaYetkiliMi(req) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Mobil: bana atanan işler (bekleyen + son 60 günün tamamlananları)
@@ -12870,9 +13119,11 @@ app.post("/rollout/is-kolu/smartqc", authMiddleware, upload.single("file"), asyn
 app.get("/rollout/is-kolu/site/:site", authMiddleware, async (req, res) => {
   try {
     const site = String(req.params.site || "").replace(/\s+/g, "").toUpperCase();
+    const K = await rolloutKapsam(req); // saha kapsam doğrulaması MARKA ROLLOUT KAPSAMI katmanında yapıldı
     await isKoluTuret([site]);
     const r = await pool.query(`SELECT * FROM rollout_is_kolu WHERE site_code = $1 AND aktif ORDER BY id`, [site]);
-    const rows = (await isKoluZengin(r.rows)).sort((x, y) => (x.sira || 9) - (y.sira || 9));
+    let rows = (await isKoluZengin(r.rows)).sort((x, y) => (x.sira || 9) - (y.sira || 9));
+    if (K) rows = markaIsKoluSuz(K, rows);
     res.json({ ok: true, rows, tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -12884,13 +13135,18 @@ app.get("/rollout/is-kolu", authMiddleware, async (req, res) => {
     const params = []; let where = `(site_code ILIKE '%\\_NS\\_%' OR site_type ILIKE 'standalone%')`;
     // Türkçe İ: LOWER('İzmir') 'i̇zmir' verir, eşleşmez — UPPER ile karşılaştır
     if (bolge && bolge !== "ALL") { params.push(bolge); where += ` AND UPPER(TRIM(COALESCE(bolge,''))) = UPPER($${params.length})`; }
+    // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki NS sahalarını alır (MARKA ROLLOUT KAPSAMI)
+    const K = await rolloutKapsam(req);
+    if (K) { where += ` AND ${K.sql("rollout_progress", params.length + 1)}`; params.push(...K.params); }
     const rp = await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS site_code FROM rollout_progress WHERE ${where}`, params);
     const sites = rp.rows.map((x) => x.site_code);
     await isKoluTuret(sites);
     const q = [sites]; let w2 = `site_code = ANY($1::text[]) AND aktif`;
     if (kolu && kolu !== "ALL") { q.push(kolu); w2 += ` AND is_kolu = $2`; }
     const r = await pool.query(`SELECT * FROM rollout_is_kolu WHERE ${w2} ORDER BY site_code`, q);
-    res.json({ ok: true, rows: await isKoluZengin(r.rows), tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI });
+    let rows = await isKoluZengin(r.rows);
+    if (K) rows = markaIsKoluSuz(K, rows);
+    res.json({ ok: true, rows, tanim: IS_KOLU_TANIM, gizleme_tipleri: GIZLEME_TIPLERI });
   } catch (e) { console.error("IS KOLU LISTE:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 app.post("/rollout/is-kolu", authMiddleware, async (req, res) => {
@@ -12930,6 +13186,9 @@ app.get("/is-atama/is-yuku", authMiddleware, async (req, res) => {
     const bolge = String(req.query.bolge || "").trim();
     const params = [gun]; let where = `a.durum <> 'IPTAL' AND (a.durum <> 'TAMAMLANDI' OR a.updated_at > NOW() - ($1::int || ' days')::interval)`;
     if (bolge && bolge !== "ALL") { params.push(bolge); where += ` AND UPPER(TRIM(COALESCE(a.bolge,''))) = UPPER($${params.length})`; }
+    // 26.10.2026: alt marka hesabı — yalnız firma kapsamındaki sahaların işleri (MARKA ROLLOUT KAPSAMI)
+    const K = await rolloutKapsam(req);
+    if (K) { params.push([...(await markaRolloutSahalar(K))]); where += ` AND a.site_codes && $${params.length}::text[]`; }
     const r = await pool.query(`SELECT a.id, a.durum, a.kategori, a.personeller, a.updated_at FROM is_atama a WHERE ${where}`, params);
     const kisi = {};
     r.rows.forEach((a) => (a.personeller || []).forEach((p) => {
@@ -13113,6 +13372,9 @@ app.post("/rollout/cleanup/:id/screenshot", authMiddleware, upload.single("file"
 app.get("/rollout/summary", async (req, res) => {
   try {
     const region = req.query.region || "ALL";
+    // 26.10.2026: alt marka hesabı — aynı kapsam, aynı sayım tanımları (maskelenmiş satırlardan)
+    const K = await rolloutKapsam(req);
+    if (K) return res.json({ ok: true, kapsam: K.kod, rows: rolloutOzetJs(markaRolloutMaskele(K, await markaRolloutSatirlari(K, { region }))) });
 
     const whereRegion =
       region === "ALL" ? "" : "WHERE LOWER(COALESCE(bolge, '')) = LOWER($1)";

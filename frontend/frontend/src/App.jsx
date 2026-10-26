@@ -6152,7 +6152,7 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
   );
 }
 
-function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true }) {
+function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, kapsamEtiketi = null }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
   // İş Atama (Faz 1, 03.09.2026): yetkili görür; açık iş sayısı butonda
@@ -6614,6 +6614,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true })
       <h1 className="rolloutTitle">
         <img src={towerIcon} alt="Baz istasyonu" />
         <span>Rollout Data</span>
+        {kapsamEtiketi && <span title="Yalnız firmanıza ait iş kollarının sahaları listelenir; başka firmanın iş detayı gösterilmez"
+          style={{ fontSize: "12px", fontWeight: 700, color: "#1e3a5f", background: "#e0ecff", border: "1px solid #bfdbfe", borderRadius: "999px", padding: "4px 10px", marginLeft: "10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+          🏢 {kapsamEtiketi} kapsamı</span>}
       </h1>
 
       {errorMessage && (
@@ -6917,7 +6920,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true })
 
           <tbody>
             {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={50} text="Rollout kaydı bulunamadı" />
+              <EmptyRow colSpan={50} text={errorMessage ? "Rollout verisi yüklenemedi — kayıtlar gösterilemiyor, lütfen yenileyin" : loading ? "Yükleniyor…"
+                : kapsamEtiketi ? `${kapsamEtiketi} kapsamında Rollout kaydı bulunamadı` : "Rollout kaydı bulunamadı"} />
             ) : (
               filteredRows.map((row, index) => {
                 const ms_rfRcv   = !!(row.installation_actual_start_date || (String(row.malzeme_status||"").toUpperCase()==="OK"));
@@ -36725,6 +36729,8 @@ function App() {
                   ...(isAltMarka && isAdmin ? [{ ikon:'📈', label:'Kâr / Zarar (P&L)', sub:'Marka bazlı gelir tablosu', aktif: page==='marka_pl', onClick:()=>setPage('marka_pl') }] : []),
                   { ikon:'🗺', label:'Bölge Analizi', sub:'PO açılmamış / eksik işler', aktif: page==='region', onClick:()=>setPage('region') },
                   ...(!isAltMarka ? [{ ikon:'📡', label:'Rollout Data', sub:'Saha ilerleme, belgeler, Clean Up', aktif: page==='executive', onClick:()=>setPage('executive') }] : []),
+                  // 26.10.2026: alt marka (Teknocenter) — aynı Rollout ekranı, firma kapsamı sunucuda (MARKA ROLLOUT KAPSAMI); izin sunucudan gelir
+                  ...(isAltMarka && user?.izinler?.rollout_goruntule === true ? [{ ikon:'📡', label:'Rollout', sub:'Saha ilerleme ve QC takibi', aktif: page==='marka_rollout', onClick:()=>setPage('marka_rollout') }] : []),
                   ...(!isAltMarka ? [{ ikon:'✏️', label:'Günlük İş Girişi', sub:'PR / PO / Akıllı Asistan', aktif: page==='entry', onClick:()=>setPage('entry') }] : []),
                   ...(canSeePuantaj && !(isAdmin || user?.role === "muhasebe" || _userEmail === "nurcan.kus@simsektel.com") ? [{ ikon:'⏱', label:'Puantaj', aktif: page==='puantaj', onClick:()=>setPage('puantaj') }] : []),
                   ...(canOpenAdminPanel && !isAltMarka ? [{ ikon:'👑', label:'Admin Panel', sub:'Kullanıcı ve yetki yönetimi', aktif: page==='admin', onClick:()=>{ setPage('admin'); loadAdminUsers(); } }] : []),
@@ -36896,6 +36902,11 @@ function App() {
             {page === "orgsema" && <OrgSemasiPanel currentUser={user} />}
             {page === "kirilim" && isAdmin && <KirilimRaporuPanel />}
             {page === "executive" && !isAltMarka && <RolloutDashboard currentUser={user} />}
+            {page === "marka_rollout" && isAltMarka && user?.izinler?.rollout_goruntule === true && (
+              <RolloutDashboard key={`marka-rollout-${user?.email || ""}-${user?.marka || ""}`} currentUser={user}
+                saltOkunur={user?.izinler?.rollout_duzenle !== true} excelIzni={user?.izinler?.rollout_excel === true}
+                kapsamEtiketi={user?.marka_ad || user?.marka || "Firma"} />
+            )}
             {page === "region" && (
               <RegionAnalysis
                 isSubconUser={(!isAdmin || (user?.hw_yukleme === false)) && !!user?.subcon_name}
