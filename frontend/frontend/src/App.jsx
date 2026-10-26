@@ -1935,6 +1935,13 @@ function MarkaNakitPanel({ currentUser }) {
   // Şimşek → AHY gönderilen bakiye defteri (Bu Ay Gelen Bakiye kartı — 19.08.2026)
   const [gelenOde, setGelenOde] = useState({ rows: [], toplam: 0, bu_ay: 0 });
   const [gelenOdeModal, setGelenOdeModal] = useState(false);
+  // Manuel (gerçekleşen) ödeme — Şimşek Nakit Akışı "Ödeme Ekle" ile aynı kural, firma oturumdaki marka (26.10.2026, Orhan)
+  const _oncekiAy = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const _bosOdemeForm = () => ({ kategori: "ARAC", tarih: new Date().toISOString().slice(0, 10), tutar: "", donem: _oncekiAy(), aciklama: "", arac_id: "" });
+  const [odemeModal, setOdemeModal] = useState(false);
+  const [odemeForm, setOdemeForm] = useState(_bosOdemeForm);
+  const [odemeVeri, setOdemeVeri] = useState({ odemeler: [], araclar: [], yukleniyor: false, hata: "" });
+  const [odemeKaydediliyor, setOdemeKaydediliyor] = useState(false);
   const loadGelenOde = async () => {
     try {
       const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme?marka=${marka}`, { headers: _auth });
@@ -2001,6 +2008,56 @@ function MarkaNakitPanel({ currentUser }) {
   const marka = String(currentUser?.marka || "AHY").toUpperCase();
   const markaAd = currentUser?.marka_ad || marka;
   const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const loadOdeme = async (ayArg) => {
+    const [y, m] = String(ayArg || ay).split("-").map(Number);
+    setOdemeVeri(v => ({ ...v, yukleniyor: true, hata: "" }));
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-odeme?marka=${marka}&yil=${y}&ay=${m}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || "Ödemeler alınamadı");
+      setOdemeVeri({ odemeler: d.odemeler || [], araclar: d.araclar || [], yukleniyor: false, hata: "" });
+    } catch (e) { setOdemeVeri(v => ({ ...v, yukleniyor: false, hata: e.message })); }
+  };
+  const yenileNakit = async () => {
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-nakit?marka=${marka}`, { headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok !== false) setData(d);
+    } catch {}
+    loadProjeKasa(ay);
+  };
+  const odemeKaydet = async () => {
+    const f = odemeForm;
+    if (!f.tarih || !String(f.tutar).trim()) { alert("Ödeme tarihi ve tutar zorunlu"); return; }
+    if (["ARAC", "ARAC_DEPOZITO"].includes(f.kategori) && !f.arac_id) { alert("Araç kirası / depozito için araç (plaka) seçin"); return; }
+    setOdemeKaydediliyor(true);
+    try {
+      const gonder = (zorla) => fetch(`${API_BASE}/finance/marka-odeme`, {
+        method: "POST", headers: { ..._auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...f, marka, ...(zorla ? { zorla: true } : {}) }),
+      });
+      let r = await gonder(false);
+      let d = await r.json().catch(() => ({}));
+      if (r.status === 409 && d.cakisma) {
+        if (!window.confirm(`${d.error}\n\nYine de kaydedilsin mi?`)) return;
+        r = await gonder(true);
+        d = await r.json().catch(() => ({}));
+      }
+      if (!r.ok || !d.ok) throw new Error(d.error || "Kaydedilemedi");
+      setOdemeForm(_bosOdemeForm());
+      await Promise.all([loadOdeme(ay), yenileNakit()]);
+    } catch (e) { alert(e.message); }
+    finally { setOdemeKaydediliyor(false); }
+  };
+  const odemeSil = async (o) => {
+    if (!window.confirm(`Bu ödeme silinsin mi?\n${o.plaka ? o.plaka + " · " : ""}${o.aciklama || o.kategori} · ₺${Number(o.tutar || 0).toLocaleString("tr-TR")}`)) return;
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-odeme/${o.id}`, { method: "DELETE", headers: _auth });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || "Silinemedi");
+      await Promise.all([loadOdeme(ay), yenileNakit()]);
+    } catch (e) { alert(e.message); }
+  };
   const loadProjeKasa = async (ayArg) => {
     try {
       const r = await fetch(`${API_BASE}/finance/marka-proje-kasa?marka=${marka}&ay=${ayArg || ay}`, { headers: _auth });
@@ -2110,6 +2167,9 @@ function MarkaNakitPanel({ currentUser }) {
             <button onClick={() => ayKaydir(-1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>‹</button>
             <div style={{ fontSize: "15px", fontWeight: 800, color: "#1e3a5f", minWidth: "130px", textAlign: "center" }}>{ayBaslik}</div>
             <button onClick={() => ayKaydir(1)} style={{ padding: "6px 12px", background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer", color: "#374151" }}>›</button>
+            <button onClick={() => { setOdemeForm(_bosOdemeForm()); setOdemeModal(true); loadOdeme(ay); }}
+              title="Araç kirası, depozito, ticket ve diğer gerçekleşen ödemeleri girin"
+              style={{ padding: "6px 14px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Ödeme Ekle</button>
             <button onClick={() => exportStandardExcel({
               title: `${markaAd} — Günlük Nakit Akışı (tüm hareketler)`,
               sheetName: "Nakit Akışı", fileBase: `${marka}_Nakit_Akisi`,
@@ -2582,6 +2642,83 @@ function MarkaNakitPanel({ currentUser }) {
         );
       })()}
       {/* Kasa girişleri modalı — sıralı liste + dekont + Excel (17.08.2026) */}
+      {odemeModal && (() => {
+        const f = odemeForm;
+        const set = (k, v) => setOdemeForm(x => ({ ...x, [k]: v }));
+        const aracli = ["ARAC", "ARAC_DEPOZITO"].includes(f.kategori);
+        const lbl = { fontSize: "12px", fontWeight: 600, color: "#6b7280", display: "block", marginBottom: "4px" };
+        const inp = { width: "100%", padding: "9px 10px", border: "1px solid #d1d5db", borderRadius: "8px", boxSizing: "border-box", background: "#fff" };
+        // Safari'de ay seçici yok — dönem açılır listeden (son 12 ay + gelecek ay)
+        const donemler = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1 - i); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+        const donemAd = (v) => { const [y2, m2] = String(v).split("-").map(Number); return y2 ? new Date(y2, m2 - 1, 1).toLocaleDateString("tr-TR", { month: "long", year: "numeric" }) : v; };
+        const KAT_AD = { ARAC: "🚗 Araç Kirası", ARAC_DEPOZITO: "🔒 Araç Depozitosu", TICKET: "🎫 Ticket / Yemek", DIGER: "📋 Diğer (yemek, konaklama vb.)" };
+        return (
+          <div onClick={() => !odemeKaydediliyor && setOdemeModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "40px 16px", overflowY: "auto" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", padding: "22px", width: "min(560px, 100%)", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
+              <h3 style={{ margin: "0 0 4px", fontSize: "17px" }}>＋ Ödeme Ekle (gerçekleşen)</h3>
+              <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "14px" }}>Firma: <b>{markaAd}</b> · ödeme {markaAd} nakit akışına ve proje kasasına çıkış olarak yazılır</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div style={{ gridColumn: aracli ? "auto" : "1 / -1" }}>
+                  <label style={lbl}>Kategori</label>
+                  <select value={f.kategori} onChange={e => setOdemeForm(x => ({ ...x, kategori: e.target.value, arac_id: ["ARAC", "ARAC_DEPOZITO"].includes(e.target.value) ? x.arac_id : "" }))} style={inp}>
+                    {Object.entries(KAT_AD).map(([k, ad]) => <option key={k} value={k}>{ad}</option>)}
+                  </select>
+                </div>
+                {aracli && (
+                  <div>
+                    <label style={lbl}>Araç (plaka) *</label>
+                    <select value={f.arac_id} onChange={e => { const a = odemeVeri.araclar.find(x => String(x.id) === e.target.value); setOdemeForm(x => ({ ...x, arac_id: e.target.value, tutar: x.tutar || (x.kategori === "ARAC" && a && Number(a.aylik_kira || 0) > 0 ? String(Math.round(Number(a.aylik_kira))) : x.tutar) })); }}
+                      style={{ ...inp, border: `1px solid ${f.arac_id ? "#d1d5db" : "#f59e0b"}` }}>
+                      <option value="">{odemeVeri.yukleniyor ? "Araçlar yükleniyor…" : odemeVeri.araclar.length ? "Araç seçin…" : "Kapsamınızda araç yok"}</option>
+                      {odemeVeri.araclar.map(a => <option key={a.id} value={a.id}>{a.plaka} · {[a.marka, a.model].filter(Boolean).join(" ")}{a.surucu ? ` · ${a.surucu}` : ""}{a.durum !== "AKTİF" ? " (pasif)" : ""}{f.kategori === "ARAC" && Number(a.aylik_kira || 0) > 0 ? ` · ₺${Number(a.aylik_kira).toLocaleString("tr-TR")} KDV dahil` : ""}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label style={lbl}>Ödeme Tarihi</label>
+                  <input type="date" value={f.tarih} onChange={e => set("tarih", e.target.value)} style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Tutar (₺)</label>
+                  <input type="text" inputMode="decimal" value={f.tutar} onChange={e => set("tutar", e.target.value)} placeholder="0,00" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Ait Olduğu Dönem</label>
+                  <select value={f.donem} onChange={e => set("donem", e.target.value)} style={inp}>
+                    {donemler.map(d => <option key={d} value={d}>{donemAd(d)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={lbl}>Açıklama</label>
+                  <input type="text" value={f.aciklama} onChange={e => set("aciklama", e.target.value)} placeholder={aracli ? "Örn. Ekim kirası" : "Örn. Bursa ekip yemeği"} style={inp} />
+                </div>
+              </div>
+              {aracli && <div style={{ fontSize: "11px", color: "#64748b", marginTop: "8px" }}>Plaka nakit akışı detayına ve Excel'e yazılır. Kira tutarı aracın KDV dahil aylık bedeliyle gelir; gerçekte ödenen tutarı girin.</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+                <button type="button" disabled={odemeKaydediliyor} onClick={() => setOdemeModal(false)} style={{ padding: "9px 16px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: "8px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
+                <button type="button" disabled={odemeKaydediliyor} onClick={odemeKaydet} style={{ padding: "9px 18px", background: "#166534", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 800, cursor: odemeKaydediliyor ? "wait" : "pointer", opacity: odemeKaydediliyor ? 0.7 : 1 }}>{odemeKaydediliyor ? "Kaydediliyor…" : "Kaydet"}</button>
+              </div>
+              <div style={{ borderTop: "1px solid #e5e7eb", marginTop: "18px", paddingTop: "12px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "8px" }}>📋 {ayBaslik} — elle girilen ödemeler ({odemeVeri.odemeler.length})</div>
+                {odemeVeri.hata ? <div style={{ fontSize: "12px", color: "#b91c1c" }}>{odemeVeri.hata} <button type="button" onClick={() => loadOdeme(ay)} style={{ marginLeft: "6px", border: "none", background: "none", color: "#1d4ed8", fontWeight: 700, cursor: "pointer" }}>Tekrar dene</button></div>
+                  : odemeVeri.yukleniyor ? <div style={{ fontSize: "12px", color: "#64748b" }}>Yükleniyor…</div>
+                  : odemeVeri.odemeler.length === 0 ? <div style={{ fontSize: "12px", color: "#94a3b8" }}>Bu ay elle girilmiş ödeme yok.</div>
+                  : odemeVeri.odemeler.map(o => (
+                    <div key={o.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "7px 0", borderBottom: "1px dashed #f1f5f9", fontSize: "12px" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <b>{o.tarih}</b> · {KAT_AD[String(o.kategori).toUpperCase()] || o.kategori}{o.plaka ? ` · ${o.plaka}` : ""}{o.donem ? ` · ${donemAd(o.donem)}` : ""}
+                        {o.aciklama ? <div style={{ color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.aciklama}</div> : null}
+                      </div>
+                      <b style={{ whiteSpace: "nowrap" }}>{o.kira_gizli ? "Gizli" : `₺${Number(o.tutar || 0).toLocaleString("tr-TR")}`}</b>
+                      {o.silinebilir ? <button type="button" onClick={() => odemeSil(o)} style={{ background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>🗑 Sil</button>
+                        : <span title="Başka bir modülden otomatik oluştu" style={{ fontSize: "11px", color: "#94a3b8" }}>otomatik</span>}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {kasaModal && (
         <div onClick={() => setKasaModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: "min(680px, 96vw)", maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.35)" }}>
