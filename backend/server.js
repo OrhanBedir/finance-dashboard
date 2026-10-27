@@ -559,8 +559,15 @@ const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron pr
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
+// 27.10.2026 (Orhan): sürümlü BoQ kataloğu (2025 / 2026), yapay zekâ TSSR incelemesi, TSSR+BoQ PR kontrolü, Tekno_2KX hakediş referansı
+const boqKatalog = require("./boqKatalog");
+const tssrOkuma = require("./tssrOkuma");
+const prKontrol = require("./prKontrol");
+const teknoHakedis = require("./teknoHakedis");
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
+// 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
+app.use("/boq/katalog", express.json({ limit: "25mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -850,6 +857,7 @@ app.use((req, res, next) => {
     "https://finance-dashboard.vercel.app",
     "https://finance-dashboard-3yns.vercel.app",
     "https://app.omnix.global",
+    ...(process.env.CORS_EK_ORIGIN ? [process.env.CORS_EK_ORIGIN] : []), // 27.10.2026: yerel önizleme portu (yalnız env ile)
   ];
 
   if (origin && allowedOrigins.includes(origin)) {
@@ -2494,6 +2502,7 @@ const allowedOrigins = [
   "https://finance-dashboard.vercel.app",
   "https://finance-dashboard-3yns.vercel.app",
   "https://app.omnix.global",
+  ...(process.env.CORS_EK_ORIGIN ? [process.env.CORS_EK_ORIGIN] : []), // 27.10.2026: yerel önizleme portu (yalnız env ile)
 ];
 
 app.use((req, res, next) => {
@@ -3184,6 +3193,227 @@ app.get("/po/eksik-girisler", authMiddleware, async (req, res) => {
     console.error("PO EKSIK GIRISLER ERROR:", e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+/* ═══ SÜRÜMLÜ BoQ + MALZEME GELİŞ TARİHİ + TSSR AI KONTROLÜ (27.10.2026, Orhan — Teknocenter) ═══════════════════
+   Tablolar boqKatalog.tabloHazirla ile açılışta hazırlanır (boq_katalog, boq_secim_log, master_works.boq_* anlık görüntü
+   kolonları, rollout_progress.malzeme_gelis_tarihi / enh_malzeme_gelis_tarihi). Katalog içe alma yalnız admin; önizleme
+   zorunlu (onizleme_anahtari). PR uçları (/master/add, PUT /master/:id, /master/saha-kalemler/kaydet) boq_surum geldiğinde
+   kalemi o sürümde doğrular ve fiyat/açıklama/birim anlık görüntüsünü satıra yazar; tarihe aykırı seçimde gerekçe ister
+   ve boq_secim_log'a (seçim, gerekçe, kullanıcı, zaman) yazar. boq_surum gelmeyen eski istemciler eskisi gibi çalışır. */
+(async () => {
+  // master_works / rollout_progress ana migrasyonda açılır — hazır olana kadar bekle (en çok ~2 dk), sonra kolonları ekle
+  for (let deneme = 0; deneme < 60; deneme++) {
+    try {
+      const r = await pool.query(`SELECT to_regclass('public.master_works') AS a, to_regclass('public.rollout_progress') AS b`);
+      if (r.rows[0]?.a && r.rows[0]?.b) break;
+    } catch {}
+    await new Promise((res) => setTimeout(res, 2000));
+  }
+  try { await boqKatalog.tabloHazirla(pool); await tssrOkuma.tabloHazirla(pool);
+    await pool.query(`CREATE TABLE IF NOT EXISTS pr_kontrol_karar (id SERIAL PRIMARY KEY, site_code TEXT, anahtar TEXT, karar TEXT, gerekce TEXT, kullanici TEXT, zaman TIMESTAMPTZ DEFAULT NOW())`);
+    console.log("✅ BoQ katalog / TSSR analiz tabloları hazır");
+  } catch (e) { console.error("BoQ katalog tablo hatası:", e.message); }
+})();
+const BOQ_ICE_ALMA_ROLLER = ["admin", "platform_admin"];
+// Alt marka (Teknocenter) için saha kapsam kontrolü: MARKA ROLLOUT KAPSAMI katmanıyla aynı kural; ERC/Şimşek hesapları etkilenmez
+async function sahaKapsamKontrol(req, site) {
+  const K = await rolloutKapsam(req);
+  if (!K) return { ok: true, K: null };
+  if (!K.goruntule) return { ok: false, http: 403, error: "Rollout görüntüleme yetkiniz yok" };
+  const sahalar = await markaRolloutSahalar(K);
+  if (!sahalar.has(site)) return { ok: false, http: 403, error: "Bu saha firma kapsamınızda değil" };
+  return { ok: true, K };
+}
+// PR satırı için BoQ seçimi: sürüm doğrulama + anlık görüntü + aykırı seçimde gerekçe zorunluluğu
+async function boqSecimHazirla(req, { surum, kod, site, gerekce, kapsam, surumDegisimOnayi }) {
+  if (!surum) return { ok: true, snapshot: null, log: null };
+  const S = boqKatalog.surumBul(surum);
+  if (!S) return { ok: false, http: 400, hata: `Geçersiz BoQ sürümü: ${surum}` };
+  const bolge = getRegionFromSiteCode(site);
+  const snap = await boqKatalog.prSnapshot(pool, { surum: S.kod, kod, bolge, kapsam });
+  if (!snap.ok) return { ok: false, http: 400, hata: snap.hata };
+  const oneri = await boqKatalog.surumOner(pool, site);
+  const aykiri = !!(oneri.onerilen && oneri.onerilen !== S.kod);
+  const kullanici = String(req.user?.email || optionalAuth(req)?.email || "").toLowerCase();
+  if (aykiri && !String(gerekce || "").trim()) {
+    return { ok: false, http: 400, hata: `Malzeme geliş tarihine göre önerilen sürüm ${boqKatalog.surumBul(oneri.onerilen).kisa}; ${S.kisa} seçimi için gerekçe zorunlu.`, oneri };
+  }
+  if (aykiri && !BOQ_ICE_ALMA_ROLLER.concat(["direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur", "muhasebe"]).includes(String(req.user?.role || "").toLowerCase()))
+    return { ok: false, http: 403, hata: "Tarihe aykırı BoQ sürümü seçme yetkiniz yok — yönetici seçebilir." };
+  const snapshot = snap.snapshot ? { ...snap.snapshot, boq_secim_gerekce: String(gerekce || "").trim() || null, boq_secim_kullanici: kullanici || null, boq_secim_zaman: new Date() }
+    : { boq_surum: S.kod, boq_bolge: null, boq_birim: null, boq_para_birimi: null, boq_birim_fiyat: null, boq_aciklama: null, boq_secim_gerekce: String(gerekce || "").trim() || null, boq_secim_kullanici: kullanici || null, boq_secim_zaman: new Date() };
+  return { ok: true, snapshot, uyari: snap.uyari || (snap.fiyat_yok ? `${kod} için ${S.kisa} kataloğunda fiyat yazmıyor` : ""), aykiri, oneri,
+    log: async (masterId) => { try { await pool.query(`INSERT INTO boq_secim_log (site_code, item_code, master_id, surum, onerilen_surum, oneri_gerekce, aykiri, gerekce, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [site, kod, masterId || null, S.kod, oneri.onerilen, oneri.gerekce, aykiri, String(gerekce || "").trim() || null, kullanici || null]); } catch (e) { console.error("boq_secim_log:", e.message); } } };
+}
+const BOQ_SNAP_KOLON = ["boq_surum", "boq_bolge", "boq_birim", "boq_para_birimi", "boq_birim_fiyat", "boq_aciklama", "boq_secim_gerekce", "boq_secim_kullanici", "boq_secim_zaman"];
+const boqSnapDegerler = (snap) => BOQ_SNAP_KOLON.map((k) => (snap ? snap[k] ?? null : null));
+
+app.get("/boq/surumler", authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, ...(await boqKatalog.surumDurumu(pool)) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/boq/surum-oneri", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
+    const kp = await sahaKapsamKontrol(req, site);
+    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+    res.json({ ok: true, ...(await boqKatalog.surumOner(pool, site)), surumler: boqKatalog.SURUMLER });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/boq/katalog", authMiddleware, async (req, res) => {
+  try {
+    const S = boqKatalog.surumBul(req.query.surum);
+    if (!S) return res.status(400).json({ ok: false, error: "surum zorunlu (BOQ2025 | BOQ2026)" });
+    const bolge = req.query.site ? getRegionFromSiteCode(req.query.site) : req.query.bolge;
+    const kodlar = req.query.kodlar ? String(req.query.kodlar).split(",").map((x) => x.trim()).filter(Boolean) : null;
+    const rows = await boqKatalog.katalogAra(pool, { surum: S.kod, q: req.query.q || "", bolge, limit: req.query.limit || 60, kodlar });
+    res.json({ ok: true, surum: S.kod, bolge: boqKatalog.bolgeNormalize(bolge), hazir: await boqKatalog.katalogVarMi(pool, S.kod), rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Katalog içe alma: önce önizleme (JSON gövde: {surum, kalemler[]}) → sonra aynı gövde + onizleme_anahtari ile içe alma (admin)
+app.post("/boq/katalog/onizle", authMiddleware, express.json({ limit: "25mb" }), async (req, res) => {
+  try {
+    if (!BOQ_ICE_ALMA_ROLLER.includes(String(req.user?.role || "").toLowerCase()) || altMarkaKullanicisi(req.user)) return res.status(403).json({ ok: false, error: "BoQ kataloğu içe alma yetkisi yok" });
+    const { surum, kalemler } = req.body || {};
+    if (!Array.isArray(kalemler) || !kalemler.length) return res.status(400).json({ ok: false, error: "kalemler boş — dosyada okunacak kalem yok" });
+    const o = await boqKatalog.onizleDb(pool, surum, kalemler);
+    const { kalemler: _k, ...ozet } = o;
+    res.json({ ok: o.ok, ...ozet, ornek: _k.slice(0, 15) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/boq/katalog/ice-al", authMiddleware, express.json({ limit: "25mb" }), async (req, res) => {
+  try {
+    if (!BOQ_ICE_ALMA_ROLLER.includes(String(req.user?.role || "").toLowerCase()) || altMarkaKullanicisi(req.user)) return res.status(403).json({ ok: false, error: "BoQ kataloğu içe alma yetkisi yok" });
+    const { surum, kalemler, onizleme_anahtari, onay } = req.body || {};
+    if (onay !== true) return res.status(400).json({ ok: false, error: "İçe alma için onay gerekli (önizlemeyi inceleyip onaylayın)" });
+    const r = await boqKatalog.iceAl(pool, { surum, kalemler, onizleme_anahtari, kullanici: String(req.user?.email || "").toLowerCase() });
+    res.json(r);
+  } catch (e) { res.status(e.http || 500).json({ ok: false, error: e.message }); }
+});
+
+// Excel TSSR (HW şablonu) → satır metni (akıllı asistanla aynı dönüşüm)
+function tssrXlsxMetin(buf) {
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const satirlar = [];
+  for (const ad of wb.SheetNames) {
+    satirlar.push(`=== ${ad} ===`);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[ad], { header: 1, raw: false, defval: "" });
+    for (const r of rows) { const l = r.map((c) => String(c ?? "").trim()).filter(Boolean).join(" "); if (l) satirlar.push(l); }
+  }
+  return satirlar.join("\n");
+}
+// Sahanın TSSR belgelerini yapay zekâ ile incele (önbellekli; ?yenile=1 zorla yeniden okutur). Taşeron hesabı okutamaz.
+app.get("/po/tssr-analiz", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "TSSR incelemesi için yetkiniz yok" });
+    const kp = await sahaKapsamKontrol(req, site);
+    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+    const rp = await pool.query(`SELECT tssr_belge_url FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]);
+    const urls = String(rp.rows[0]?.tssr_belge_url || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    const a = await tssrOkuma.sahaTssrAnaliz(pool, site, { urls, yenile: String(req.query.yenile || "") === "1", kullanici: String(req.user?.email || ""), xlsxOku: tssrXlsxMetin });
+    res.json({ ok: true, ...a });
+  } catch (e) { console.error("TSSR ANALIZ ERROR:", e.message); res.status(e.http || 500).json({ ok: false, error: e.message }); }
+});
+// TSSR + seçilen BoQ + PR/PO + günlük iş girişleri → öneriler ve yanlış/eksik talep uyarıları
+app.get("/po/tssr-boq-kontrol", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const kp = await sahaKapsamKontrol(req, site);
+    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+    const oneri = await boqKatalog.surumOner(pool, site);
+    const S = boqKatalog.surumBul(req.query.surum) || (oneri.onerilen ? boqKatalog.surumBul(oneri.onerilen) : null);
+    const bolge = getRegionFromSiteCode(site);
+    const [rp, mw, po, kr] = await Promise.all([
+      pool.query(`SELECT tssr_belge_url FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]),
+      pool.query(`SELECT TRIM(COALESCE(item_code,'')) AS item_code, MAX(COALESCE(item_description,'')) AS item_description, SUM(COALESCE(done_qty,0)) AS pr_qty,
+                  SUM(COALESCE(tamamlanan_qty, done_qty, 0)) AS done_qty, MAX(boq_surum) AS boq_surum, MAX(boq_secim_gerekce) AS boq_secim_gerekce, MAX(boq_secim_zaman) AS boq_secim_zaman, MIN(created_at) AS created_at
+                  FROM master_works WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> '' GROUP BY 1`, [site]),
+      pool.query(`SELECT TRIM(COALESCE(item_code,'')) AS item_code, SUM(COALESCE(requested_qty,0)) AS requested_qty, MAX(COALESCE(po_no,'')) AS po_no FROM po_rows WHERE UPPER(TRIM(site_code)) = $1 GROUP BY 1`, [site]),
+      pool.query(`SELECT DISTINCT ON (anahtar) anahtar, karar, gerekce, kullanici, zaman FROM pr_kontrol_karar WHERE site_code = $1 ORDER BY anahtar, id DESC`, [site]).catch(() => ({ rows: [] })),
+    ]);
+    const urls = String(rp.rows[0]?.tssr_belge_url || "").split("\n").map((x) => x.trim()).filter(Boolean);
+    let tssr = null, tssrHata = "";
+    try { tssr = await tssrOkuma.sahaTssrAnaliz(pool, site, { urls, yenile: String(req.query.yenile || "") === "1", kullanici: String(req.user?.email || ""), xlsxOku: tssrXlsxMetin }); }
+    catch (e) { tssrHata = e.message; tssr = { belgeler: [], guncel: null, tamamlandi: false, hata: e.message, belge_sayisi: urls.length }; }
+    const katalog = S && (await boqKatalog.katalogVarMi(pool, S.kod)) ? await boqKatalog.katalogAra(pool, { surum: S.kod, bolge, limit: 2000 }) : [];
+    const sonuc = prKontrol.kontrol({ site, tssr, katalog, surum: S ? S.kod : null, surumOneri: oneri, prRows: mw.rows, poRows: po.rows, kararlar: kr.rows });
+    sonuc.katalog_hazir = katalog.length > 0; sonuc.surum_ad = S ? S.ad : null; sonuc.surum_oneri = oneri; sonuc.bolge = boqKatalog.bolgeNormalize(bolge);
+    sonuc.tssr_belgeler = (tssr.belgeler || []).map((b) => ({ dosya: b.dosya_adi, url: b.belge_url, durum: b.durum, hata: b.hata || "", kaynak: b.kaynak, guncel: !!b.guncel, tarih: b.sonuc?.belge_tarihi || null, revizyon: b.sonuc?.revizyon || "", sayfa: b.sonuc?.sayfa_sayisi || null, is_sayisi: b.sonuc?.isler?.length ?? null }));
+    if (tssrHata) sonuc.tssr_hata = tssrHata;
+    res.json({ ok: true, ...sonuc });
+  } catch (e) { console.error("TSSR BOQ KONTROL ERROR:", e.message); res.status(e.http || 500).json({ ok: false, error: e.message }); }
+});
+// Kullanıcı kararı: öneriyi/uyarıyı gerekçeyle dikkate almama (ya da uygulandı işareti) — asistan kendi başına PR değiştirmez
+app.post("/po/tssr-boq-kontrol/karar", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.body?.site || "").replace(/\s+/g, "").toUpperCase();
+    const anahtar = String(req.body?.anahtar || "").trim();
+    const karar = String(req.body?.karar || "").toUpperCase();
+    const gerekce = String(req.body?.gerekce || "").trim();
+    if (!site || !anahtar || !["DIKKATE_ALINMADI", "UYGULANDI", "GERI_AL"].includes(karar)) return res.status(400).json({ ok: false, error: "site, anahtar ve karar zorunlu" });
+    if (karar === "DIKKATE_ALINMADI" && gerekce.length < 5) return res.status(400).json({ ok: false, error: "Dikkate almama için gerekçe zorunlu" });
+    if (taseronMu(req.user) || altMarkaKullanicisi(req.user) && !(await rolloutKapsam(req))?.duzenle) return res.status(403).json({ ok: false, error: "Karar kaydetme yetkiniz yok" });
+    const kp = await sahaKapsamKontrol(req, site);
+    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+    if (karar === "GERI_AL") { await pool.query(`DELETE FROM pr_kontrol_karar WHERE site_code = $1 AND anahtar = $2`, [site, anahtar]); return res.json({ ok: true, geri_alindi: true }); }
+    await pool.query(`INSERT INTO pr_kontrol_karar (site_code, anahtar, karar, gerekce, kullanici) VALUES ($1,$2,$3,$4,$5)`, [site, anahtar, karar, gerekce || null, String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══ TEKNO_2KX HAKEDİŞ — REFERANS KARŞILAŞTIRMASI (27.10.2026) ═══════════════════════════════════════════════
+// Marka paneli yolu (/finance/marka-…, yalnız harf/tire — katman regex'i rakam almaz, bu yüzden "ikikx"): MARKA PANELİ FİRMA
+// KAPSAMI katmanı alt marka oturumunda marka=TEKNO'yu zorlar; AHY oturumu marka=AHY'ye düşer ve 400 alır.
+// Yalnız subcon_name = 'TEKNO_2KX' satırları; AHY kayıtları Teknocenter'a AÇILMAZ (yalnız referans kural tablosu kullanılır).
+app.get("/finance/marka-tekno-ikikx-karsilastirma", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "TEKNO").toUpperCase();
+    if (marka !== "TEKNO") return res.status(400).json({ ok: false, error: "Bu karşılaştırma yalnız TEKNO markası için tanımlı" });
+    let kur = 0; try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
+    const det = await pool.query(`
+      WITH best_boq AS (SELECT DISTINCT ON (s_bom_code) * FROM boq_items WHERE COALESCE(TRIM(s_bom_code),'') <> '' ORDER BY s_bom_code, created_at DESC),
+      po AS (SELECT DISTINCT ON (UPPER(TRIM(site_code)), TRIM(item_code)) UPPER(TRIM(site_code)) AS site, TRIM(item_code) AS item, unit_price, currency FROM po_rows ORDER BY UPPER(TRIM(site_code)), TRIM(item_code), id DESC)
+      SELECT UPPER(TRIM(m.subcon_name)) AS subcon, UPPER(TRIM(COALESCE(m.site_code,''))) AS site, TRIM(COALESCE(m.item_code,'')) AS item,
+        COALESCE(NULLIF(TRIM(m.item_description),''), best_boq.boq_items_en, COALESCE(m.item_code,'')) AS kalem,
+        GREATEST(0, CASE WHEN m.tamamlanan_qty IS NOT NULL THEN m.tamamlanan_qty ELSE COALESCE(m.done_qty,0) END) AS fq,
+        (UPPER(TRIM(COALESCE(m.qc_durum,'NOK'))) = 'OK') AS qc_ok, COALESCE(po.unit_price,0) AS po_price, COALESCE(po.currency,'TRY') AS po_cur
+      FROM master_works m
+      LEFT JOIN best_boq ON TRIM(COALESCE(best_boq.s_bom_code,'')) = TRIM(COALESCE(m.item_code,''))
+      LEFT JOIN po ON po.site = UPPER(TRIM(COALESCE(m.site_code,''))) AND po.item = TRIM(COALESCE(m.item_code,''))
+      WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) = $1
+      ORDER BY 2, 3`, [teknoHakedis.TASERON]);
+    const rows = det.rows.map((r) => ({ ...r, fq: Number(r.fq || 0), po_price: Number(r.po_price || 0) }));
+    const mevcut = ahyTaseronBedel(rows.map((r) => ({ subcon: teknoHakedis.TASERON, site: r.site, kalem: r.kalem, fq: r.fq, qc_ok: r.qc_ok })));
+    const seed = await pool.query(`SELECT rule_key, item_code, unit_price FROM taseron_2kx_pricing`).catch(() => ({ rows: [] }));
+    const k = teknoHakedis.karsilastir({ rows, mevcutHesap: mevcut, seed: seed.rows, usdKur: kur });
+    res.json({ ok: true, marka, satir_sayisi: rows.length, saha_sayisi: new Set(rows.map((r) => r.site)).size, ...k });
+  } catch (e) { console.error("TEKNO 2KX KARSILASTIRMA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Geçmiş düzeltmeyi uygulama: yalnız admin + açık onay; taseron_hakedis'e izlenebilir saha bazlı satır yazar (fatura/ödeme/QC'ye dokunmaz)
+app.post("/finance/marka-tekno-ikikx-karsilastirma/uygula", authMiddleware, async (req, res) => {
+  try {
+    if (!BOQ_ICE_ALMA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yalnız admin uygulayabilir" });
+    if (req.body?.onay !== true || !Array.isArray(req.body?.satirlar) || !req.body.satirlar.length) return res.status(400).json({ ok: false, error: "onay=true ve önizleme satırları zorunlu" });
+    const kullanici = String(req.user?.email || "").toLowerCase();
+    let n = 0;
+    for (const d of req.body.satirlar) {
+      const site = String(d.site_code || "").toUpperCase().trim(); const bedel = Number(d.hakedis_bedeli);
+      if (!site || !Number.isFinite(bedel)) continue;
+      await pool.query(`DELETE FROM taseron_hakedis WHERE UPPER(site_code)=$1 AND COALESCE(item_code,'')='' AND LOWER(TRIM(taseron_adi))=LOWER($2)`, [site, teknoHakedis.TASERON]);
+      await pool.query(`INSERT INTO taseron_hakedis (taseron_adi, site_code, item_code, item_description, hakedis_bedeli) VALUES ($1,$2,'',$3,$4)`,
+        [teknoHakedis.TASERON, site, `${String(d.item_description || "TEKNO_2KX referans düzeltmesi")} · uygulayan ${kullanici} ${new Date().toISOString().slice(0, 10)}`, bedel]);
+      n++;
+    }
+    res.json({ ok: true, uygulanan: n });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Saha bazlı akıllı kontrol (20.08.2026 Orhan talebi): Günlük İş Girişi'nde
@@ -6190,6 +6420,15 @@ app.get("/lookup/project-codes", async (req, res) => {
 app.get("/lookup/items", async (req, res) => {
   try {
     const { search = "" } = req.query;
+    // 27.10.2026: ?surum=BOQ2025|BOQ2026 → sürümlü katalogdan (kod, açıklama, birim, fiyat aynı sürümden); katalog boşsa eski liste
+    const surumKodu = boqKatalog.surumBul(req.query.surum)?.kod || null;
+    if (surumKodu && (await boqKatalog.katalogVarMi(pool, surumKodu))) {
+      const bolge = req.query.site ? getRegionFromSiteCode(req.query.site) : (req.query.bolge || null);
+      const liste = await boqKatalog.katalogAra(pool, { surum: surumKodu, q: search, bolge, limit: 2000 });
+      return res.json({ ok: true, surum: surumKodu, bolge: boqKatalog.bolgeNormalize(bolge), rows: liste.map((k) => ({
+        item_code: k.kod, item_description: k.aciklama_en || k.aciklama_tr || "", currency: normalizeCurrency(k.para_birimi), unit_price: k.birim_fiyat === null ? null : Number(k.birim_fiyat),
+        unit: k.birim, bolge: k.bolge, kapsam: k.kapsam, odeme_kosulu: k.odeme_kosulu, kaynak: `${k.kaynak_dosya || ""} ${k.kaynak_sayfa || ""} ${k.kaynak_satir || ""}`.trim(), surum: k.surum })) });
+    }
 
     const result = await pool.query(
       `
@@ -6618,7 +6857,13 @@ app.get("/master/saha-kalemler", async (req, res) => {
           SUM(COALESCE(tamamlanan_qty, done_qty, 0))   AS done_qty,
           MAX(COALESCE(subcon_name,''))        AS subcon_name,
           MAX(COALESCE(qc_durum,''))           AS qc_durum,
-          MAX(COALESCE(note,''))               AS note
+          MAX(COALESCE(note,''))               AS note,
+          -- 27.10.2026: PR'a yazılmış BoQ sürümü ve o anki fiyat/birim (anlık görüntü)
+          MAX(COALESCE(boq_surum,''))          AS boq_surum,
+          MAX(boq_birim_fiyat)                 AS boq_birim_fiyat,
+          MAX(COALESCE(boq_para_birimi,''))    AS boq_para_birimi,
+          MAX(COALESCE(boq_birim,''))          AS boq_birim,
+          MAX(COALESCE(boq_secim_gerekce,''))  AS boq_secim_gerekce
         FROM master_works
         WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> ''
         GROUP BY 1
@@ -6650,6 +6895,11 @@ app.get("/master/saha-kalemler", async (req, res) => {
         COALESCE(mw.subcon_name,'')          AS subcon_name,
         COALESCE(mw.qc_durum,'')             AS qc_durum,
         COALESCE(mw.note,'')                 AS note,
+        COALESCE(mw.boq_surum,'')            AS boq_surum,
+        mw.boq_birim_fiyat                   AS boq_birim_fiyat,
+        COALESCE(mw.boq_para_birimi,'')      AS boq_para_birimi,
+        COALESCE(mw.boq_birim,'')            AS boq_birim,
+        COALESCE(mw.boq_secim_gerekce,'')    AS boq_secim_gerekce,
         COALESCE(po.requested_qty, 0)        AS requested_qty,
         COALESCE(po.billed_qty, 0)           AS billed_qty,
         COALESCE(po.due_qty, 0)              AS due_qty,
@@ -6699,6 +6949,8 @@ app.get("/master/saha-kalemler", async (req, res) => {
     const poProje = rows.find((r) => r.po_var && r.project_code)?.project_code || "";
     if (poProje) meta.project_code = poProje;
     else if (!meta.project_code) meta.project_code = rows.find((r) => r.project_code)?.project_code || "";
+    // 27.10.2026: malzeme geliş tarihine göre BoQ sürüm önerisi + katalog hazırlık durumu (grid sürüm kartı)
+    try { meta.boq_oneri = await boqKatalog.surumOner(pool, site); meta.boq_surumler = (await boqKatalog.surumDurumu(pool)).surumler; } catch (e) { meta.boq_oneri = { durum: "DOGRULANAMADI", gerekce: "Sürüm önerisi hesaplanamadı: " + e.message }; }
 
     res.json({ ok: true, site, rows, meta });
   } catch (err) {
@@ -6746,6 +6998,28 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
     if (!site) return res.status(400).json({ ok: false, error: "Saha kodu zorunlu" });
     if (!kalemler.length) return res.json({ ok: true, guncellenen: 0, eklenen: 0 });
 
+    // 27.10.2026: grid kaydında BoQ sürümü (gövde: boq_surum, boq_secim_gerekce, surum_degisim_onayi). Satırda farklı sürüm
+    // kayıtlıysa sessizce taşınmaz: surum_degisim_onayi yoksa 409 + karşılaştırma döner.
+    const boqSurum = boqKatalog.surumBul(req.body.boq_surum)?.kod || null;
+    const boqGerekce = String(req.body.boq_secim_gerekce || "").trim();
+    const surumDegisimOnayi = req.body.surum_degisim_onayi === true;
+    const snapMap = {}; let boqUyari = ""; let boqLoglar = [];
+    if (boqSurum) {
+      const catisanlar = [];
+      for (const k of kalemler) {
+        const itemCode = String(k.item_code || "").trim();
+        if (!itemCode) continue;
+        const sec = await boqSecimHazirla(req, { surum: boqSurum, kod: itemCode, site, gerekce: boqGerekce, kapsam: k.boq_kapsam });
+        if (!sec.ok) return res.status(sec.http || 400).json({ ok: false, error: `${itemCode}: ${sec.hata}`, boq_oneri: sec.oneri || null });
+        snapMap[itemCode] = sec; if (sec.uyari) boqUyari = sec.uyari;
+        const m = await pool.query(`SELECT id, boq_surum, boq_birim_fiyat, boq_para_birimi, boq_aciklama FROM master_works WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) = $2 ORDER BY id LIMIT 1`, [site, itemCode]);
+        const mv = m.rows[0];
+        if (mv && mv.boq_surum && mv.boq_surum !== boqSurum) catisanlar.push({ item_code: itemCode, kayitli: { surum: mv.boq_surum, fiyat: mv.boq_birim_fiyat, para: mv.boq_para_birimi, aciklama: mv.boq_aciklama },
+          yeni: { surum: boqSurum, fiyat: sec.snapshot?.boq_birim_fiyat ?? null, para: sec.snapshot?.boq_para_birimi ?? null, aciklama: sec.snapshot?.boq_aciklama ?? null } });
+      }
+      if (catisanlar.length && !surumDegisimOnayi) return res.status(409).json({ ok: false, error: "Kalemler farklı bir BoQ sürümüyle kayıtlı — karşılaştırmayı onaylayın", surum_catisma: catisanlar });
+    }
+
     await client.query("BEGIN");
     let guncellenen = 0;
     let eklenen = 0;
@@ -6754,6 +7028,7 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
       const itemCode = String(k.item_code || "").trim();
       if (!itemCode) continue;
       const projectCode = String(k.project_code || "").trim();
+      const snap = snapMap[itemCode]?.snapshot || null; const snapV = boqSnapDegerler(snap);
       // Boş bırakılan hücre "değiştirme" demek → COALESCE ile mevcut değer korunur
       const prQty = k.pr_qty === "" || k.pr_qty === undefined || k.pr_qty === null ? null : parseNumber(k.pr_qty);
       const doneQty = k.done_qty === "" || k.done_qty === undefined || k.done_qty === null ? null : parseNumber(k.done_qty);
@@ -6770,17 +7045,23 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
         await client.query(
           `UPDATE master_works
              SET done_qty       = COALESCE($1, done_qty),
-                 tamamlanan_qty = COALESCE($2, tamamlanan_qty)
+                 tamamlanan_qty = COALESCE($2, tamamlanan_qty),
+                 boq_surum = COALESCE($4, boq_surum), boq_bolge = COALESCE($5, boq_bolge), boq_birim = COALESCE($6, boq_birim),
+                 boq_para_birimi = COALESCE($7, boq_para_birimi), boq_birim_fiyat = CASE WHEN $4 IS NOT NULL THEN $8 ELSE boq_birim_fiyat END,
+                 boq_aciklama = COALESCE($9, boq_aciklama), boq_secim_gerekce = COALESCE($10, boq_secim_gerekce),
+                 boq_secim_kullanici = COALESCE($11, boq_secim_kullanici), boq_secim_zaman = COALESCE($12, boq_secim_zaman)
            WHERE id = $3`,
-          [prQty, doneQty, mevcut.rows[0].id],
+          [prQty, doneQty, mevcut.rows[0].id, ...snapV],
         );
+        if (snapMap[itemCode]?.log) boqLoglar.push([snapMap[itemCode].log, mevcut.rows[0].id]);
         guncellenen++;
       } else {
-        await client.query(
+        const ins = await client.query(
           `INSERT INTO master_works
              (site_type, project_code, site_code, item_code, item_description,
-              done_qty, tamamlanan_qty, subcon_name, qc_durum, kabul_durum, note)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'NOK','NOK',$9)`,
+              done_qty, tamamlanan_qty, subcon_name, qc_durum, kabul_durum, note,
+              boq_surum, boq_bolge, boq_birim, boq_para_birimi, boq_birim_fiyat, boq_aciklama, boq_secim_gerekce, boq_secim_kullanici, boq_secim_zaman)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'NOK','NOK',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
           [
             String(k.site_type || "").trim() || null,
             projectCode,
@@ -6791,14 +7072,17 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
             doneQty,
             String(k.subcon_name || "").trim() || null,
             "Saha kalem gridinden girildi",
+            ...snapV,
           ],
         );
+        if (snapMap[itemCode]?.log) boqLoglar.push([snapMap[itemCode].log, ins.rows[0]?.id]);
         eklenen++;
       }
     }
 
     await client.query("COMMIT");
-    res.json({ ok: true, guncellenen, eklenen });
+    for (const [fn, id] of boqLoglar) await fn(id);
+    res.json({ ok: true, guncellenen, eklenen, boq_surum: boqSurum, boq_uyari: boqUyari });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("SAHA KALEM KAYDET ERROR:", err.message);
@@ -11395,11 +11679,22 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
           pac_end_date: parseDateSafe(
             get(row, "pac_end_date", "PAC Actual End Date"),
           ),
+          // 27.10.2026: gerçek malzeme geliş tarihi (yükleme tarihi değil); kolon yoksa mevcut kayıt korunur
+          malzeme_gelis_tarihi: parseDateSafe(get(row, "malzeme_gelis_tarihi", "Malzeme Geliş Tarihi", "Material Arrival Date", "Material Delivery Date")),
+          enh_malzeme_gelis_tarihi: parseDateSafe(get(row, "enh_malzeme_gelis_tarihi", "ENH Malzeme Geliş Tarihi", "ENH Material Arrival Date")),
         });
       });
     });
 
     const regions = [...new Set(allRows.map((r) => r.bolge).filter(Boolean))];
+    // Malzeme geliş tarihleri Excel'de yoksa silme/yeniden yazma sırasında kaybolmasın
+    try {
+      const eski = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, malzeme_gelis_tarihi, enh_malzeme_gelis_tarihi FROM rollout_progress
+        WHERE malzeme_gelis_tarihi IS NOT NULL OR enh_malzeme_gelis_tarihi IS NOT NULL`);
+      const eskiMap = {}; eski.rows.forEach((x) => { eskiMap[x.sc] = x; });
+      allRows.forEach((r) => { const e = eskiMap[String(r.site_code || "").toUpperCase().trim()]; if (!e) return;
+        if (!r.malzeme_gelis_tarihi) r.malzeme_gelis_tarihi = e.malzeme_gelis_tarihi; if (!r.enh_malzeme_gelis_tarihi) r.enh_malzeme_gelis_tarihi = e.enh_malzeme_gelis_tarihi; });
+    } catch (e) { console.warn("malzeme geliş tarihi yedeği alınamadı:", e.message); }
 
     if (!regions.length) {
       console.log("⚠️ Bölge bulunamadı, delete yapılmadı");
@@ -11431,7 +11726,8 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
           trs_subcon, trs_plan_start_date, trs_actual_end_date, trs_not,
           enh_subcon, enh_plan_start_date, enh_actual_end_date, enh_not,
           power_subcon, power_plan_start_date, power_actual_end_date,
-          abonelik_end_date, tt_horizon_end_date, pac_end_date
+          abonelik_end_date, tt_horizon_end_date, pac_end_date,
+          malzeme_gelis_tarihi, enh_malzeme_gelis_tarihi
         ) VALUES(
           $1,$2,$3,$4,$5,$6,
           $7,$8,$9,$10,$11,$12,
@@ -11445,7 +11741,8 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
           $33,$34,$35,$36,
           $37,$38,$39,$40,
           $41,$42,$43,
-          $44,$45,$46
+          $44,$45,$46,
+          $47,$48
        )
        ON CONFLICT (site_code)
        DO UPDATE SET
@@ -11492,7 +11789,9 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
           power_actual_end_date = EXCLUDED.power_actual_end_date,
           abonelik_end_date = EXCLUDED.abonelik_end_date,
           tt_horizon_end_date = EXCLUDED.tt_horizon_end_date,
-          pac_end_date = EXCLUDED.pac_end_date
+          pac_end_date = EXCLUDED.pac_end_date,
+          malzeme_gelis_tarihi = COALESCE(EXCLUDED.malzeme_gelis_tarihi, rollout_progress.malzeme_gelis_tarihi),
+          enh_malzeme_gelis_tarihi = COALESCE(EXCLUDED.enh_malzeme_gelis_tarihi, rollout_progress.enh_malzeme_gelis_tarihi)
         `,
         Object.values(r),
       );
@@ -11898,7 +12197,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         pac_actual_end_date, tamamlanma_tarihi,
         suzme_date, pac_subcon, pac_plan_date,
         -- YSB
-        ysb_subcon, ysb_plan_start_date, ysb_actual_end_date
+        ysb_subcon, ysb_plan_start_date, ysb_actual_end_date,
+        -- 27.10.2026: gerçek malzeme geliş (teslim/varış) tarihi — RF ve ENH ayrı; BoQ sürüm önerisinin tek kaynağı
+        malzeme_gelis_tarihi, enh_malzeme_gelis_tarihi
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,
         $8,$9,$10,$11,$12,$13,$14,$15,
@@ -11911,7 +12212,8 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         $38,$39,$40,$41,$42,
         $43,$44,$45,
         $46,$47,$48,$49,$50,$51,$52,$53,$54,$55,
-        $56,$57,$58
+        $56,$57,$58,
+        $59,$60
       )
       ON CONFLICT (site_code) DO UPDATE SET
         site_type = EXCLUDED.site_type,
@@ -11971,6 +12273,8 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
         ysb_subcon = EXCLUDED.ysb_subcon,
         ysb_plan_start_date = EXCLUDED.ysb_plan_start_date,
         ysb_actual_end_date = EXCLUDED.ysb_actual_end_date,
+        malzeme_gelis_tarihi = EXCLUDED.malzeme_gelis_tarihi,
+        enh_malzeme_gelis_tarihi = EXCLUDED.enh_malzeme_gelis_tarihi,
         updated_at = NOW()
       RETURNING *`,
       [
@@ -11990,6 +12294,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
                     vd("pac_actual_end_date"), vd("tamamlanma_tarihi"), vd("suzme_date"),
                     v("pac_subcon"), vd("pac_plan_date"),
         /* 56-58 */ v("ysb_subcon"), vd("ysb_plan_start_date"), vd("ysb_actual_end_date"),
+        /* 59-60 */ vd("malzeme_gelis_tarihi"), vd("enh_malzeme_gelis_tarihi"),
       ]
     );
 
@@ -12194,6 +12499,8 @@ app.get("/export/excel", async (req, res) => {
       { header: "Project Code",    key: "project_code",                   width: 18,  section: "info" },
       { header: "Site Code",       key: "site_code",                      width: 24,  section: "info" },
       { header: "Malzeme Status",  key: "malzeme_status",                 width: 16,  section: "info" },
+      { header: "Malzeme Geliş Tarihi", key: "malzeme_gelis_tarihi",      width: 18,  section: "info" },
+      { header: "ENH Malzeme Geliş Tarihi", key: "enh_malzeme_gelis_tarihi", width: 20, section: "info" },
       { header: "İl",              key: "il",                             width: 14,  section: "info" },
       // RF
       { header: "RF Subcon",                key: "rf_subcon",                       width: 20, section: "rf" },
@@ -14485,6 +14792,11 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
       return res.status(400).json({ ok: false, error: "Item Code zorunludur — listeden bir kalem seçin" });
     }
 
+    // 27.10.2026: BoQ sürümü seçildiyse kalem o sürümde doğrulanır, fiyat/açıklama/birim anlık görüntüsü satıra yazılır
+    const boqSecim = await boqSecimHazirla(req, { surum: m.boq_surum, kod: itemCode, site: siteCode, gerekce: m.boq_secim_gerekce, kapsam: m.boq_kapsam });
+    if (!boqSecim.ok) return res.status(boqSecim.http || 400).json({ ok: false, error: boqSecim.hata, boq_oneri: boqSecim.oneri || null });
+    const boqSnap = boqSnapDegerler(boqSecim.snapshot);
+
     console.log("DUPLICATE CHECK BASLIYOR");
 
     const duplicateCheck = await pool.query(
@@ -14522,7 +14834,10 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
           qc_durum = $5,
           kabul_durum = $6,
           kabul_not = $7,
-          note = $8
+          note = $8,
+          boq_surum = COALESCE($12, boq_surum), boq_bolge = COALESCE($13, boq_bolge), boq_birim = COALESCE($14, boq_birim),
+          boq_para_birimi = COALESCE($15, boq_para_birimi), boq_birim_fiyat = COALESCE($16, boq_birim_fiyat), boq_aciklama = COALESCE($17, boq_aciklama),
+          boq_secim_gerekce = COALESCE($18, boq_secim_gerekce), boq_secim_kullanici = COALESCE($19, boq_secim_kullanici), boq_secim_zaman = COALESCE($20, boq_secim_zaman)
         WHERE
           project_code = $9
           AND site_code = $10
@@ -14540,12 +14855,15 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
           projectCode,
           siteCode,
           itemCode,
+          ...boqSnap,
         ],
       );
+      if (boqSecim.log) await boqSecim.log(duplicateCheck.rows[0].id);
 
       return res.json({
         ok: true,
         message: "Kayıt güncellendi",
+        boq_uyari: boqSecim.uyari || "",
       });
     }
 
@@ -14566,9 +14884,10 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
         qc_durum,
         kabul_durum,
         kabul_not,
-        olusturan
+        olusturan,
+        boq_surum, boq_bolge, boq_birim, boq_para_birimi, boq_birim_fiyat, boq_aciklama, boq_secim_gerekce, boq_secim_kullanici, boq_secim_zaman
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
       RETURNING *
       `,
       [
@@ -14586,8 +14905,10 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
         m.kabul_durum || "NOK",
         m.kabul_not ? String(m.kabul_not).trim() : null,
         (optionalAuth(req)?.email || "").toLowerCase().trim() || null, // 21.10.2026: talebi açan (PO taleplerim)
+        ...boqSnap,
       ],
     );
+    if (boqSecim.log) await boqSecim.log(result.rows[0]?.id);
 
     setImmediate(async () => {
       try {
@@ -14733,6 +15054,10 @@ app.put("/master/:id", sahaKayitYazma, async (req, res) => {
   try {
     const id = req.params.id;
     const m = req.body;
+    // 27.10.2026: BoQ sürümü geldiyse doğrula + anlık görüntü (gelmediyse mevcut değerler korunur)
+    const boqSecim = await boqSecimHazirla(req, { surum: m.boq_surum, kod: String(m.item_code || "").trim(), site: String(m.site_code || "").replace(/\s+/g, "").toUpperCase(), gerekce: m.boq_secim_gerekce, kapsam: m.boq_kapsam });
+    if (!boqSecim.ok) return res.status(boqSecim.http || 400).json({ ok: false, error: boqSecim.hata, boq_oneri: boqSecim.oneri || null });
+    const boqSnap = boqSnapDegerler(boqSecim.snapshot);
 
     const result = await pool.query(
       `
@@ -14750,7 +15075,10 @@ app.put("/master/:id", sahaKayitYazma, async (req, res) => {
         note = $10,
         qc_durum = $11,
         kabul_durum = $12,
-        kabul_not = $13
+        kabul_not = $13,
+        boq_surum = COALESCE($15, boq_surum), boq_bolge = COALESCE($16, boq_bolge), boq_birim = COALESCE($17, boq_birim),
+        boq_para_birimi = COALESCE($18, boq_para_birimi), boq_birim_fiyat = COALESCE($19, boq_birim_fiyat), boq_aciklama = COALESCE($20, boq_aciklama),
+        boq_secim_gerekce = COALESCE($21, boq_secim_gerekce), boq_secim_kullanici = COALESCE($22, boq_secim_kullanici), boq_secim_zaman = COALESCE($23, boq_secim_zaman)
       WHERE id = $14
       RETURNING *
       `,
@@ -14771,14 +15099,16 @@ app.put("/master/:id", sahaKayitYazma, async (req, res) => {
         m.kabul_durum || "NOK",
         m.kabul_not ? String(m.kabul_not).trim() : null,
         id,
+        ...boqSnap,
       ],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
     }
+    if (boqSecim.log) await boqSecim.log(Number(id));
 
-    res.json({ ok: true, data: result.rows[0] });
+    res.json({ ok: true, data: result.rows[0], boq_uyari: boqSecim.uyari || "" });
   } catch (err) {
     console.error("MASTER UPDATE ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
