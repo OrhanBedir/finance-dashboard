@@ -673,6 +673,13 @@ const avansOnayciMi = (u, req) => avansOnayciMiEski(u) || (!taseronMu(u) && devi
 
 const taseronDegil = rolKapisi((u) => !taseronMu(u), "Taşeron hesabı bu işlemi yapamaz");
 const ikYazma = rolKapisi(ikYazmaYetkili, "İK kayıtlarını değiştirme yetkiniz yok");
+// 27.10.2026: İSG / Belgeler yazma — İK yazma yetkilisi ya da etkin izinde isg_duzenle / isg_sil AÇIKÇA true olan kişi
+// (ör. İSG Sorumlusu Yağmur Şimşek; yetki_ayar ile). Maaş ve finans izni vermez; İSG kapısı yol listesini ayrıca uygular.
+const isgYazma = rolKapisi((u, req) => ikYazmaYetkili(u) || req?.izinler?.isg_duzenle === true, "İSG kayıtlarını değiştirme yetkiniz yok");
+const isgSil = rolKapisi((u, req) => (ikYazmaYetkili(u) && req?.izinler?.isg_sil !== false) || req?.izinler?.isg_sil === true, "İSG kaydı / belge silme yetkiniz yok");
+// Yeni personel: İK yazma yetkilisi; İSG yetkilisi yalnız taşeron personeli (alanları İSG kapısında süzülür)
+const personelEkleKapisi = rolKapisi((u, req) => ikYazmaYetkili(u)
+  || (req?.izinler?.isg_duzenle === true && String(req.body?.firma_tipi || "").toLowerCase() === "taseron"), "İK kayıtlarını değiştirme yetkiniz yok");
 const puantajYazma = rolKapisi((u) => ikYazmaYetkili(u) || _rol(u) === "rollout", "Puantaj değiştirme yetkiniz yok");
 const finansYazma = rolKapisi(finansYazmaYetkili, "Finans kayıtlarını değiştirme yetkiniz yok");
 const sahaKayitYazma = rolKapisi((u) => !taseronMu(u) && !altMarkaKullanicisi(u) && !sahaPersoneliMi(u), "Saha iş kaydı değiştirme yetkiniz yok");
@@ -1123,13 +1130,13 @@ async function kullaniciYetkiAyari(u) {
   if (!e) return null;
   const c = _yetkiOnbellek.get(e);
   if (c && Date.now() - c.t < YETKI_TTL_MS) return c.ayar;
-  let ayar = null, rol = null, profil = null;
+  let ayar = null, rol = null, profil = null, kid = null;
   try {
-    const r = await pool.query(`SELECT yetki_ayar, role, to_jsonb(users)->>'yonetim_profili' AS yonetim_profili FROM users
+    const r = await pool.query(`SELECT id, yetki_ayar, role, to_jsonb(users)->>'yonetim_profili' AS yonetim_profili FROM users
       WHERE LOWER(TRIM(email)) = $1 ORDER BY (id = $2) DESC, id DESC LIMIT 1`, [e, Number(u?.user_id || u?.id || 0)]);
-    ayar = r.rows[0]?.yetki_ayar || null; rol = r.rows[0]?.role || null; profil = r.rows[0]?.yonetim_profili || null;
-  } catch { ayar = c?.ayar ?? null; rol = c?.rol ?? null; profil = c?.profil ?? null; }
-  _yetkiOnbellek.set(e, { t: Date.now(), ayar, rol, profil });
+    ayar = r.rows[0]?.yetki_ayar || null; rol = r.rows[0]?.role || null; profil = r.rows[0]?.yonetim_profili || null; kid = Number(r.rows[0]?.id || 0) || null;
+  } catch { ayar = c?.ayar ?? null; rol = c?.rol ?? null; profil = c?.profil ?? null; kid = c?.id ?? null; }
+  _yetkiOnbellek.set(e, { t: Date.now(), ayar, rol, profil, id: kid });
   return ayar;
 }
 // Rolü olmayan jeton (ör. finans girişi: { email, scope }) → rol kullanıcı kaydından (önbellekten) okunur
@@ -1142,14 +1149,29 @@ async function oturumProfilAlanlari(userId) {
 }
 const kayitliRol = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.rol || null;
 const kayitliProfil = (u) => u?.yonetim_profili || _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.profil || null;
+const kayitliId = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.id || 0;
 // 22.10.2026 (Orhan): Maaş görme VARSAYILAN KAPALI. İK/finans verisini okuyabilen (ikOkumaYetkili: rollout/bölge
 // müdürü, pm, muhasebe, onay e-posta listelerindeki kişiler, finans girişi) ama aşağıdaki maaş yetkilisi olmayan
 // herkeste maas_goruntule=false → GİZLİLİK KATMANI maaş alanlarını siler / maaş uçlarını 403 yapar. Maaş yetkilisi
-// web _hrYetkili ile aynı: tam admin rolü (Orhan, Düzgün, Eren Can, AHY, Teknocenter) + adı geçen e-postalar
-// (rolsüz finans jetonunda da geçerli). Kişiye özel açmak için users.yetki_ayar.maas_goruntule=true (Admin → Yetkiler).
+// alt marka / diğer kiracılarda: tam admin rolü + adı geçen e-postalar (rolsüz finans jetonunda da geçerli).
+// ERC'de 27.10.2026'dan beri aşağıdaki MAAS_ERC_YETKILI kuralı geçerlidir (rol / e-posta listesi ERC'de maaş açmaz).
 const MAAS_YETKILI_ROLLER = ["admin", "platform_admin"];
-const MAAS_YETKILI_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com",
-  "eren.simsek@simsektel.com", "erencan.simsek@simsektel.com", "info@ahyelektrik.com", "teknocenter"];
+const MAAS_YETKILI_EMAIL = ["info@ahyelektrik.com", "teknocenter"];
+// 27.10.2026 (Orhan): ERC'de maaş, ücret, bordro ve maaş hakedişi YALNIZ doğrulanmış iki kişiye açıktır. Kimlik users.id +
+// e-posta ÇİFTİYLE eşleşir (27.10.2026 canlı kayıttan doğrulandı; ad benzerliği kullanılmaz):
+//   5 ORHAN BEDİR (orhan.bedir@simsektel.com, admin) · 121 ORHAN BEDİR (orhan.bedir@gmail.com, platform_admin)
+//   6 DÜZGÜN ŞİMŞEK (duzgun.simsek@simsektel.com, admin)
+// Rol (admin dahil), İSG / İK / finans yetkisi ya da kişiye özel yetki ayarı ERC'de başka kimseye maaş AÇMAZ; yetki ayarındaki
+// maas_goruntule=false bu kişileri de kapatabilir. Kapalı olanda GİZLİLİK KATMANI maaş uçlarını 403 yapar ve maaş alanlarını
+// her JSON yanıttan siler (web + mobil aynı sunucu kuralı). Alt marka (Teknocenter / AHY), taşeron ve başka kiracı (2kx,
+// omnixdemo) hesapları bu kuraldan etkilenmez — mevcut kapsamları aynen kalır.
+const MAAS_ERC_YETKILI = new Map([[5, "orhan.bedir@simsektel.com"], [121, "orhan.bedir@gmail.com"], [6, "duzgun.simsek@simsektel.com"]]);
+const ercMaasKapsami = (u) => !!u && !taseronMu(u) && !altMarkaMi(u.marka)
+  && String(u.tenant || detectTenant(u.email, u.subcon_name)).toLowerCase() === "erc";
+function ercMaasYetkilisi(u) {
+  const id = Number(u?.user_id || u?.id || 0) || kayitliId(u);
+  return MAAS_ERC_YETKILI.has(id) && MAAS_ERC_YETKILI.get(id) === _eposta(u);
+}
 // 26.10.2026 (Orhan): alt marka (Teknocenter) YÖNETİM hesabı kendi firma kapsamında Rollout'u görüntüler ve Excel alır;
 // düzenleme AYRI izindir (rollout_duzenle, varsayılan kapalı). Kapsam "MARKA ROLLOUT KAPSAMI" katmanında zorlanır.
 const MARKA_ROLLOUT_ROLLER = ["admin", "direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur"];
@@ -1169,6 +1191,8 @@ function etkinIzinHesapla(u, ayar) {
   if (yp === "SAHIP") { o.maas_goruntule = true; o.personel_yonetimi = true; }
   else if (yp === "YONETICI") { o.personel_yonetimi = true; if (!(ayar && "maas_goruntule" in ayar)) o.maas_goruntule = false; }
   if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
+  // ERC maaş kuralı en son uygulanır: yetki ayarı / rol / profil ERC'de maaşı açamaz (yalnız kapatabilir)
+  if (ercMaasKapsami(u)) o.maas_goruntule = ercMaasYetkilisi(u) && !(ayar && ayar.maas_goruntule === false);
   return o;
 }
 const maasGizliMi = (req) => req?.izinler?.maas_goruntule === false;
@@ -1218,11 +1242,23 @@ const IZIN_OKUMA_YOLLARI = {
   arac_depo_goruntule: [/^\/hr\/arac-gecmis$/, /^\/hr\/arac-kira-odemeler$/, /^\/hr\/arac-fatura-kalemleri$/, /^\/hr\/arac-teslim-projeler$/,
     /^\/hr\/araclar\/\d+\/(teslim|lastik|islem-log)$/, /^\/hr\/arac-belge\/file\/[^/]+$/, /^\/hr\/ofis$/, /^\/hr\/ofis-kira-odemeler$/, /^\/hr\/ofis-belge\/file\/[^/]+$/],
   malzeme_goruntule: [/^\/malzeme\/(talepler|talepler\/\d+|dagitim|dagitim\/ozet|dagitim\/personel|fiyat-listesi|sarf|depo-stok|site-codes)$/],
+  // 27.10.2026: İSG belge yüklemesi için imzalı yükleme adresi (yalnız isg-belgeler klasörü)
+  isg_duzenle: [/^\/hr\/isg\/signed-upload-url$/],
 };
 // İzne bağlı yazma yolları (İSG kapısı). PO talebi: yalnız YENİ satır (mevcut satır güncellenmez, onay alanı yok)
 const IZIN_YAZMA_YOLLARI = {
   po_talep_olustur: [["POST", /^\/master\/add$/]],
+  // 27.10.2026 (Orhan — Yağmur Şimşek): İSG / Belgeler alanında tam işlem — Şimşek ve taşeron personelinin belgeleri ve
+  // İSG eğitimleri; yeni personel YALNIZ taşeron personeli (maaş / banka alanı alınmaz). Maaş ve finans izni AÇMAZ.
+  isg_duzenle: [["POST", /^\/hr\/personel$/], ["POST", /^\/hr\/personel\/\d+\/belge\/[a-z0-9_]+$/], ["POST", /^\/hr\/personel\/\d+\/isg$/],
+    ["PUT", /^\/hr\/personel\/\d+\/isg\/\d+$/], ["POST", /^\/hr\/personel\/\d+\/isg\/\d+\/belge$/],
+    ["PATCH", /^\/hr\/personel\/\d+\/isg\/\d+\/belge-url$/], ["POST", /^\/hr\/personel\/\d+\/isg\/\d+\/belge-url$/]],
+  isg_sil: [["DELETE", /^\/hr\/personel\/\d+\/belge\/[a-z0-9_]+$/], ["DELETE", /^\/hr\/personel\/\d+\/isg\/\d+$/],
+    ["DELETE", /^\/hr\/personel\/\d+\/isg\/\d+\/belge$/]],
 };
+// İSG yazmasında personel alanları: taşeron personeli kaydında yalnız kimlik / İSG takip alanları alınır
+const ISG_TASERON_ALANLARI = ["ad_soyad", "unvan", "alt_yuklenici", "telefon", "email", "bolge", "tc_no", "dogum_tarihi", "ise_giris_tarihi",
+  "ekip_bilgisi", "kkd_zimmet_tarihi", "mesleki_yeterlilik_durum", "mesleki_yeterlilik_tarihi", "elektrik_isi", "yuksekte_calisma", "arac_kullanim", "ayni_isim_onay"];
 app.use(async (req, res, next) => {
   try {
     if (req.method === "OPTIONS") return next();
@@ -1285,6 +1321,22 @@ app.use(async (req, res, next) => {
     const yazma = ISG_YAZMA.find(([mt, rx]) => mt === m && rx.test(yol))
       || Object.entries(IZIN_YAZMA_YOLLARI).filter(([k]) => izin[k] === true).flatMap(([, l]) => l).find(([mt, rx]) => mt === m && rx.test(yol));
     if (!yazma) return red("İSG Sorumlusu rolü bu kaydı değiştiremez");
+    // 27.10.2026: İSG yazması — yeni personel yalnız taşeron personeli; maaş / banka / IBAN alanları istemciden alınmaz
+    if (m === "POST" && yol === "/hr/personel") {
+      if (!req.body || typeof req.body !== "object" || String(req.body.firma_tipi || "").toLowerCase() !== "taseron")
+        return red("İSG yetkisiyle yalnız taşeron personeli eklenebilir");
+      const kapY = altMarkaKapsam(req);
+      req.body = { ...Object.fromEntries(ISG_TASERON_ALANLARI.filter((k) => k in req.body).map((k) => [k, req.body[k]])),
+        firma_tipi: "taseron", marka: kapY ? kapY.kod : String(req.body.marka || "ERC").toUpperCase() };
+    }
+    // Personel kaydına bağlı İSG / belge işlemi: personel var olmalı, alt marka İSG kullanıcısında kendi bordro firması
+    const pm = yol.match(/^\/hr\/personel\/(\d+)\/(isg|belge)/);
+    if (pm) {
+      const pr = (await pool.query(`SELECT UPPER(COALESCE(marka,'ERC')) AS marka FROM personel WHERE id=$1`, [Number(pm[1])]).catch(() => ({ rows: [] }))).rows[0];
+      if (!pr) return res.status(404).json({ ok: false, error: "Personel bulunamadı" });
+      const kapY = altMarkaKapsam(req);
+      if (kapY && !kapY.bordro.includes(pr.marka)) return red("Bu personel başka bir firmaya ait");
+    }
     // PO talebi: yalnız yeni satır; QC / kabul (onay) alanları istemciden alınmaz, talep eden oturumdan
     if (m === "POST" && yol === "/master/add") {
       if (!req.body || typeof req.body !== "object") return res.status(400).json({ ok: false, error: "Geçersiz istek" });
@@ -19753,7 +19805,7 @@ app.get("/hr/maas-gecmisi", ikOkuma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/personel", ikYazma, async (req, res) => {
+app.post("/hr/personel", personelEkleKapisi, async (req, res) => {
   try {
     const { ad_soyad, tc_no, dogum_tarihi, telefon, email, unvan, bolge, ise_giris_tarihi,
       net_maas, bankadan_gosterilen, elden_verilen, iban, banka_adi, banka_hesap_no,
@@ -19909,7 +19961,7 @@ app.delete("/hr/personel/:id", ikYazma, async (req, res) => {
 });
 
 // ---- PERSONEL BELGE ----
-app.post("/hr/personel/:id/belge/:tur", ikYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
+app.post("/hr/personel/:id/belge/:tur", isgYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     const { id, tur } = req.params;
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
@@ -19933,6 +19985,19 @@ app.get("/hr/personel/:id/belgeler", isgOkuma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 27.10.2026: personel belgesini silme (dosya depodan da kaldırılır) — İSG / Belgeler tam işlem
+app.delete("/hr/personel/:id/belge/:tur", isgSil, async (req, res) => {
+  try {
+    const { id, tur } = req.params;
+    const old = await pool.query("SELECT id, dosya_yolu FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
+    if (!old.rows[0]) return res.status(404).json({ ok: false, error: "Belge bulunamadı" });
+    await deleteFromStorage(old.rows[0].dosya_yolu).catch(() => {});
+    await pool.query("DELETE FROM personel_belgeler WHERE personel_id=$1 AND belge_turu=$2", [id, tur]);
+    islemGecmisiYaz(req, "personel_belge", Number(id), "SILME", { belge_turu: tur, dosya_yolu: old.rows[0].dosya_yolu }, null, "Personel belgesi silindi").catch(() => {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- ISG EĞİTİMLER ----
 app.get("/hr/personel/:id/isg", isgOkuma, async (req, res) => {
   try {
@@ -19941,7 +20006,7 @@ app.get("/hr/personel/:id/isg", isgOkuma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/personel/:id/isg", ikYazma, async (req, res) => {
+app.post("/hr/personel/:id/isg", isgYazma, async (req, res) => {
   try {
     const { egitim_turu, egitim_tarihi, gecerlilik_yil } = req.body;
     const bitis = new Date(egitim_tarihi);
@@ -19955,28 +20020,67 @@ app.post("/hr/personel/:id/isg", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/personel/:id/isg/:isgId", ikYazma, async (req, res) => {
+app.delete("/hr/personel/:id/isg/:isgId", isgSil, async (req, res) => {
   try {
-    await pool.query("DELETE FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id]);
+    const sil = await pool.query("DELETE FROM personel_isg WHERE id=$1 AND personel_id=$2 RETURNING egitim_turu, egitim_tarihi, belge_yolu", [req.params.isgId, req.params.id]);
+    if (sil.rows[0]) islemGecmisiYaz(req, "personel_isg", Number(req.params.isgId), "SILME", { ...sil.rows[0], egitim_tarihi: ymdYerel(sil.rows[0].egitim_tarihi) }, null, "İSG eğitimi silindi").catch(() => {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 27.10.2026: İSG eğitimini düzenleme (tür / tarih / geçerlilik; bitiş tarihi yeniden hesaplanır) ve eğitim belgesini kaldırma
+app.put("/hr/personel/:id/isg/:isgId", isgYazma, async (req, res) => {
+  try {
+    const { egitim_turu, egitim_tarihi, gecerlilik_yil } = req.body || {};
+    const yil = parseInt(gecerlilik_yil, 10);
+    if (!String(egitim_turu || "").trim() || !/^\d{4}-\d{2}-\d{2}/.test(String(egitim_tarihi || "")) || !(yil > 0 && yil <= 20))
+      return res.status(400).json({ ok: false, error: "Eğitim türü, tarihi ve geçerlilik (yıl) zorunlu" });
+    const eski = (await pool.query("SELECT * FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id])).rows[0];
+    if (!eski) return res.status(404).json({ ok: false, error: "Eğitim kaydı bulunamadı" });
+    const bitis = new Date(String(egitim_tarihi).slice(0, 10) + "T00:00:00Z");
+    bitis.setUTCFullYear(bitis.getUTCFullYear() + yil);
+    const r = await pool.query(`UPDATE personel_isg SET egitim_turu=$1, egitim_tarihi=$2, gecerlilik_yil=$3, bitis_tarihi=$4
+      WHERE id=$5 AND personel_id=$6 RETURNING *`, [String(egitim_turu).trim(), String(egitim_tarihi).slice(0, 10), yil, bitis.toISOString().slice(0, 10), req.params.isgId, req.params.id]);
+    islemGecmisiYaz(req, "personel_isg", Number(req.params.isgId), "DUZENLEME",
+      { egitim_turu: eski.egitim_turu, egitim_tarihi: ymdYerel(eski.egitim_tarihi), gecerlilik_yil: eski.gecerlilik_yil },
+      { egitim_turu: r.rows[0].egitim_turu, egitim_tarihi: ymdYerel(r.rows[0].egitim_tarihi), gecerlilik_yil: r.rows[0].gecerlilik_yil }, "İSG eğitimi düzenlendi").catch(() => {});
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/hr/personel/:id/isg/:isgId/belge", isgSil, async (req, res) => {
+  try {
+    const ek = (await pool.query("SELECT belge_yolu FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id])).rows[0];
+    if (!ek) return res.status(404).json({ ok: false, error: "Eğitim kaydı bulunamadı" });
+    if (ek.belge_yolu) await deleteFromStorage(ek.belge_yolu).catch(() => {});
+    await pool.query("UPDATE personel_isg SET belge_yolu=NULL WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id]);
+    islemGecmisiYaz(req, "personel_isg", Number(req.params.isgId), "BELGE_SIL", { belge_yolu: ek.belge_yolu }, null, "İSG eğitim belgesi kaldırıldı").catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ISG belge yükleme
-app.post("/hr/personel/:id/isg/:isgId/belge", ikYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
+app.post("/hr/personel/:id/isg/:isgId/belge", isgYazma, uploadPersonelBelge.single("dosya"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Dosya gelmedi" });
+    const ek = (await pool.query("SELECT id FROM personel_isg WHERE id=$1 AND personel_id=$2", [req.params.isgId, req.params.id])).rows[0];
+    if (!ek) return res.status(404).json({ error: "Eğitim kaydı bulunamadı" });
     const fname = `isg-${req.params.isgId}-${Date.now()}${path.extname(utf8Name(req.file.originalname)).toLowerCase()}`;
     const { url } = await uploadToStorage("isg-belgeler", fname, req.file.buffer, req.file.mimetype);
-    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
+    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2 AND personel_id=$3", [url, req.params.isgId, req.params.id]);
     res.json({ ok: true, dosya: url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Signed URL — browser Supabase'e direkt upload yapar (Vercel body limitini aşmak için)
-app.get("/hr/isg/signed-upload-url", ikYazma, async (req, res) => {
+app.get("/hr/isg/signed-upload-url", isgYazma, async (req, res) => {
   try {
     const { isgId, ext } = req.query;
+    // 27.10.2026: eğitim kaydı var olmalı; alt marka kullanıcısında personel kendi bordro firmasından
+    const ek = (await pool.query(`SELECT UPPER(COALESCE(p.marka,'ERC')) AS marka FROM personel_isg i JOIN personel p ON p.id = i.personel_id WHERE i.id=$1`, [Number(isgId)]).catch(() => ({ rows: [] }))).rows[0];
+    if (!ek) return res.status(404).json({ error: "Eğitim kaydı bulunamadı" });
+    const kapY = altMarkaKapsam(req);
+    if (kapY && !kapY.bordro.includes(ek.marka)) return res.status(403).json({ error: "Bu personel başka bir firmaya ait" });
+    if (!/^[A-Za-z0-9]{1,6}$/.test(String(ext || "jpg").replace(/^\./, ""))) return res.status(400).json({ error: "Geçersiz dosya uzantısı" });
     const filePath = `isg-belgeler/isg-${isgId}-${Date.now()}.${(ext||"jpg").replace(/^\./, "")}`;
     const { data, error } = await supabase.storage.from(BUCKET).createSignedUploadUrl(filePath);
     if (error) throw error;
@@ -19985,19 +20089,21 @@ app.get("/hr/isg/signed-upload-url", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch("/hr/personel/:id/isg/:isgId/belge-url", ikYazma, async (req, res) => {
+// 27.10.2026: belge adresi yalnız imzalı yüklemenin ürettiği isg-belgeler adresi olabilir; eğitim kaydı o personelin olmalı
+async function isgBelgeUrlKaydet(req, res) {
   try {
-    const { url } = req.body;
-    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
+    const url = String(req.body?.url || "");
+    const kok = supabase.storage.from(BUCKET).getPublicUrl("isg-belgeler/").data.publicUrl;
+    if (!url.startsWith(kok) || !new RegExp(`/isg-belgeler/isg-${Number(req.params.isgId)}-\\d+\\.[A-Za-z0-9]+$`).test(url))
+      return res.status(400).json({ ok: false, error: "Geçersiz belge adresi" });
+    const r = await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2 AND personel_id=$3 RETURNING id", [url, req.params.isgId, req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Eğitim kaydı bulunamadı" });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.post("/hr/personel/:id/isg/:isgId/belge-url", ikYazma, async (req, res) => {
-  try {
-    const { url } = req.body;
-    await pool.query("UPDATE personel_isg SET belge_yolu=$1 WHERE id=$2", [url, req.params.isgId]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+app.patch("/hr/personel/:id/isg/:isgId/belge-url", isgYazma, isgBelgeUrlKaydet);
+app.post("/hr/personel/:id/isg/:isgId/belge-url", isgYazma, async (req, res) => {
+  return isgBelgeUrlKaydet(req, res);
 });
 
 // ---- PUANTAJ ----

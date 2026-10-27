@@ -19286,8 +19286,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // + info@ahyelektrik (Haşım Bey — YALNIZ ekstra şifreyle: ahy2026gsm).
   // 26.10.2026 (Orhan): sunucunun hesapladığı etkin izin de yetki verir — şirket sahibi profili (yonetim_profili=SAHIP,
   // ör. İlhami Şahin / Teknocenter) ya da Admin → Yetkiler'de maaş görme açılan kişi; asıl kontrol sunucuda (maasGizliMi).
-  const _hrYetkili = _hrEmail === "orhan.bedir@simsektel.com" || _hrEmail === "duzgun.simsek@simsektel.com" || _hrEmail === "erencan.simsek@simsektel.com" || _hrEmail === "info@ahyelektrik.com" || _hrEmail === "teknocenter"
-    || currentUser?.izinler?.maas_goruntule === true;
+  // 27.10.2026 (Orhan): ERC'de maaş YALNIZ Orhan Bedir ve Düzgün Şimşek — karar sunucuda (doğrulanmış kullanıcı kimliği),
+  // burada yalnız sunucunun verdiği izin okunur; ad / e-posta listesiyle ERC'de maaş açılmaz. Alt marka yönetim hesapları
+  // (AHY, Teknocenter) kendi firmalarında eskisi gibi; sunucu maaş izni kapalıysa (false) onlarda da açılmaz.
+  const _hrYetkili = currentUser?.izinler?.maas_goruntule === true
+    || (currentUser?.izinler?.maas_goruntule !== false && (_hrEmail === "info@ahyelektrik.com" || _hrEmail === "teknocenter"));
   // İK marka izolasyonu (TEK YÖNLÜ): ERC ana yüklenici — maaş ve kalan
   // ödemeleri yaptığı için TÜM personeli görür. Alt marka (AHY) yalnız
   // kendi markasının personelini görür; devir tarihi (15 Temmuz 2026)
@@ -19986,8 +19989,44 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
     } catch { /* sessiz */ }
   };
   const handleBelgeUpload = async (personelId, tur, file) => {
+    if (!file) return;
     const fd = new FormData(); fd.append("dosya", file);
-    await fetch(`${API_BASE}/hr/personel/${personelId}/belge/${tur}`, { method:"POST", body: fd });
+    const r = await fetch(`${API_BASE}/hr/personel/${personelId}/belge/${tur}`, { method:"POST", body: fd }).catch(() => null);
+    if (!r || !r.ok) { const d = r ? await r.json().catch(() => ({})) : {}; alert("Belge yüklenemedi: " + (d.error || (r ? r.status : "bağlantı hatası"))); }
+    loadPersonelDetail(selectedPersonel);
+  };
+  // 27.10.2026: İSG / Belgeler tam işlem — belge silme, eğitim düzenleme, eğitim belgesini kaldırma (sunucu yetkiyi ayrıca doğrular)
+  const _isgSilGorunur = !saltOkunur && (String(currentUser?.role || "").toLowerCase() === "isg"
+    ? currentUser?.izinler?.isg_sil === true : currentUser?.izinler?.isg_sil !== false);
+  const _indirUrl = (u) => u ? `${u}${String(u).includes("?") ? "&" : "?"}download=` : u;
+  const [isgDuzenle, setIsgDuzenle] = useState(null); // { id, egitim_turu, egitim_tarihi, gecerlilik_yil }
+  const _islemSonuc = async (r, ad) => {
+    if (r && r.ok) return true;
+    const d = r ? await r.json().catch(() => ({})) : {};
+    alert(`${ad}: ` + (d.error || (r ? r.status : "bağlantı hatası")));
+    return false;
+  };
+  const handleBelgeSil = async (personelId, tur, etiket) => {
+    if (!window.confirm(`"${etiket}" belgesi silinsin mi? Dosya da kaldırılır.`)) return;
+    const r = await fetch(`${API_BASE}/hr/personel/${personelId}/belge/${tur}`, { method:"DELETE" }).catch(() => null);
+    await _islemSonuc(r, "Belge silinemedi");
+    loadPersonelDetail(selectedPersonel);
+  };
+  const handleIsgDuzenleKaydet = async () => {
+    if (!isgDuzenle) return;
+    const r = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgDuzenle.id}`, {
+      method:"PUT", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ egitim_turu: isgDuzenle.egitim_turu, egitim_tarihi: isgDuzenle.egitim_tarihi, gecerlilik_yil: isgDuzenle.gecerlilik_yil }),
+    }).catch(() => null);
+    if (!(await _islemSonuc(r, "Eğitim güncellenemedi"))) return;
+    setIsgDuzenle(null);
+    loadPersonelDetail(selectedPersonel);
+    loadIsgUyarilar();
+  };
+  const handleIsgBelgeSil = async (isgId) => {
+    if (!window.confirm("Eğitim belgesi kaldırılsın mı? (Eğitim kaydı kalır)")) return;
+    const r = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge`, { method:"DELETE" }).catch(() => null);
+    await _islemSonuc(r, "Belge kaldırılamadı");
     loadPersonelDetail(selectedPersonel);
   };
   const handleSaveIsg = async (e) => {
@@ -20138,7 +20177,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   };
   const handleDeleteIsg = async (isgId) => {
     if (!window.confirm("Silinsin mi?")) return;
-    await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}`, { method:"DELETE" });
+    const r = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}`, { method:"DELETE" }).catch(() => null);
+    await _islemSonuc(r, "Eğitim silinemedi");
     loadPersonelDetail(selectedPersonel);
     loadIsgUyarilar();
   };
@@ -22865,8 +22905,22 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                         <div key={bt.key} style={{ border:"1.5px solid #e5e7eb", borderRadius:"10px", padding:"10px 12px", background: mevcut?"#f0fdf4":"#fafafa" }}>
                           <div style={{ fontSize:"13px", fontWeight:600, color:"#374151", marginBottom:"8px" }}>{bt.label}</div>
                           {mevcut ? (
-                            <a href={mevcut.dosya_yolu} target="_blank" rel="noreferrer"
-                              style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
+                            <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", alignItems:"center" }}>
+                              <a href={mevcut.dosya_yolu} target="_blank" rel="noreferrer"
+                                style={{ fontSize:"12px", color:"#166534", fontWeight:600 }}>Görüntüle →</a>
+                              <a href={_indirUrl(mevcut.dosya_yolu)} download title="Belgeyi indir"
+                                style={{ fontSize:"12px", color:"#1d4ed8", fontWeight:600, textDecoration:"none" }}>⬇ İndir</a>
+                              {!saltOkunur && (
+                                <label title="Yeni dosya yükle (eskisi değişir)" style={{ fontSize:"12px", color:"#4338ca", fontWeight:600, cursor:"pointer" }}>
+                                  <input type="file" style={{display:"none"}} onChange={e=>handleBelgeUpload(selectedPersonel.id,bt.key,e.target.files[0])} />
+                                  ↻ Değiştir
+                                </label>
+                              )}
+                              {_isgSilGorunur && (
+                                <button type="button" onClick={()=>handleBelgeSil(selectedPersonel.id, bt.key, bt.label)} aria-label={`${bt.label} belgesini sil`}
+                                  style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"2px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>
+                              )}
+                            </div>
                           ) : saltOkunur ? (
                             <span style={{ fontSize:"12px", color:"#9ca3af" }}>Yüklenmemiş</span>
                           ) : (
@@ -22933,7 +22987,23 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                                   {suresi==="YAKLASAN" && <span style={{ color:"#d97706", fontWeight:700 }}> ⚠️ YAKLAŞIYOR</span>}
                                 </div>
                               </div>
-                              <div style={{ display:"flex", gap:"6px", alignItems:"center" }}>
+                              <div style={{ display:"flex", gap:"6px", alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
+                                {eg.belge_yolu && <a href={_indirUrl(eg.belge_yolu)} download title="Eğitim belgesini indir" style={{ background:"#eef2ff", color:"#3730a3", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", textDecoration:"none", whiteSpace:"nowrap" }}>⬇ İndir</a>}
+                                {eg.belge_yolu && !saltOkunur && (
+                                  <label title="Eğitim belgesini değiştir" style={{ background:"#e0e7ff", color:"#4338ca", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer", whiteSpace:"nowrap" }}>
+                                    ↻ Değiştir
+                                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display:"none" }}
+                                      onChange={e=>{ const f=e.target.files[0]; if(f) handleIsgBelgeUpload(selectedPersonel.id, eg.id, f); }} />
+                                  </label>
+                                )}
+                                {eg.belge_yolu && _isgSilGorunur && (
+                                  <button type="button" onClick={()=>handleIsgBelgeSil(eg.id)} title="Eğitim belgesini kaldır (kayıt kalır)"
+                                    style={{ background:"#fff1f2", color:"#9f1239", border:"1px solid #fecdd3", borderRadius:"6px", padding:"3px 8px", fontSize:"12px", cursor:"pointer", whiteSpace:"nowrap" }}>Belgeyi kaldır</button>
+                                )}
+                                {!saltOkunur && (
+                                  <button type="button" onClick={()=>setIsgDuzenle(isgDuzenle?.id === eg.id ? null : { id: eg.id, egitim_turu: eg.egitim_turu, egitim_tarihi: String(eg.egitim_tarihi || "").split("T")[0], gecerlilik_yil: eg.gecerlilik_yil || 1 })}
+                                    style={{ background:"#f1f5f9", color:"#1e3a5f", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>{isgDuzenle?.id === eg.id ? "Vazgeç" : "Düzenle"}</button>
+                                )}
                                 {eg.belge_yolu
                                   ? <a href={eg.belge_yolu} target="_blank" rel="noreferrer" style={{ background:"#dbeafe", color:"#1d4ed8", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", textDecoration:"none", whiteSpace:"nowrap" }}>📎 Belge</a>
                                   : saltOkunur ? <span style={{ fontSize:"11.5px", color:"#9ca3af" }}>Belge yok</span>
@@ -22943,9 +23013,29 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                                         onChange={e=>{ const f=e.target.files[0]; if(f) handleIsgBelgeUpload(selectedPersonel.id, eg.id, f); }} />
                                     </label>
                                 }
-                                {!saltOkunur && <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
+                                {_isgSilGorunur && <button onClick={()=>handleDeleteIsg(eg.id)} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", padding:"4px 8px", fontSize:"12px", cursor:"pointer" }}>Sil</button>}
                               </div>
                             </div>
+                            {isgDuzenle?.id === eg.id && (
+                              <div style={{ display:"flex", flexWrap:"wrap", gap:"8px", alignItems:"flex-end", padding:"8px 10px 10px", borderTop:"1px solid rgba(0,0,0,0.06)", background:"#fff" }}>
+                                <label style={{ fontSize:"11px", color:"#6b7280", display:"flex", flexDirection:"column", gap:"3px", minWidth:"180px", flex:"1 1 180px" }}>Eğitim türü
+                                  <select value={isgDuzenle.egitim_turu} onChange={e=>{ const t = isgTurleri.find(x=>x.tur===e.target.value); setIsgDuzenle(d=>({ ...d, egitim_turu:e.target.value, gecerlilik_yil: t?.gecerlilik_yil || d.gecerlilik_yil })); }}
+                                    style={{ padding:"6px 8px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12.5px" }}>
+                                    {[...new Set([isgDuzenle.egitim_turu, ...isgTurleri.map(t=>t.tur)])].filter(Boolean).map(t => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                </label>
+                                <label style={{ fontSize:"11px", color:"#6b7280", display:"flex", flexDirection:"column", gap:"3px" }}>Eğitim tarihi
+                                  <input type="date" value={isgDuzenle.egitim_tarihi} onChange={e=>setIsgDuzenle(d=>({ ...d, egitim_tarihi:e.target.value }))}
+                                    style={{ padding:"5px 8px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12.5px" }} />
+                                </label>
+                                <label style={{ fontSize:"11px", color:"#6b7280", display:"flex", flexDirection:"column", gap:"3px", width:"110px" }}>Geçerlilik (yıl)
+                                  <input type="number" min="1" max="20" value={isgDuzenle.gecerlilik_yil} onChange={e=>setIsgDuzenle(d=>({ ...d, gecerlilik_yil:e.target.value }))}
+                                    style={{ padding:"5px 8px", border:"1px solid #d1d5db", borderRadius:"6px", fontSize:"12.5px" }} />
+                                </label>
+                                <button type="button" onClick={handleIsgDuzenleKaydet}
+                                  style={{ background:"#166534", color:"#fff", border:"none", borderRadius:"6px", padding:"7px 14px", fontSize:"12.5px", fontWeight:700, cursor:"pointer" }}>Kaydet</button>
+                              </div>
+                            )}
                           </div>
                         );
                       })
