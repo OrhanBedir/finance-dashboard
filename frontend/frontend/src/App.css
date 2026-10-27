@@ -1597,6 +1597,52 @@ body {
 .rolloutFiltre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 8px 0 10px; }
 .rolloutFiltre .select { max-width: 200px; }
 .rolloutFiltre .qcActionBox { margin-left: auto; flex-wrap: wrap; }
+/* Firma / Taşeron filtresi (27.10.2026): arama + kutucuklu açılır liste, üst firma → ilişkili taşeronlar */
+.ftf { position: relative; }
+.ftf .ftfDugme { cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+.ftf .ftfDolu { border-color: #1e3a5f; color: #1e3a5f; font-weight: 700; background: #eef4ff; }
+.ftfPanel { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; width: min(360px, calc(100vw - 32px)); background: #fff; border: 1px solid #dbe3ee; border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, .16); padding: 10px; animation: ftfAc .12s ease-out; }
+@keyframes ftfAc { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.ftfAra { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; }
+.ftfAra:focus { outline: 2px solid #93c5fd; border-color: #3b82f6; }
+.ftfListe { max-height: 300px; overflow-y: auto; margin: 8px 0; }
+.ftfGrup + .ftfGrup { border-top: 1px solid #eef2f7; margin-top: 4px; padding-top: 4px; }
+.ftfAltBaslik { font-size: 10.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .04em; padding: 4px 0 2px 30px; }
+.ftfSatir { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #0f172a; cursor: pointer; }
+.ftfSatir:hover, .ftfSatir:focus-within { background: #f1f5f9; }
+.ftfSatir input { width: 15px; height: 15px; accent-color: #1e3a5f; flex: none; }
+.ftfAd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ftfSayi { font-size: 11px; color: #64748b; background: #f1f5f9; border-radius: 999px; padding: 1px 7px; flex: none; }
+.ftfBos { font-size: 12.5px; color: #64748b; padding: 10px; text-align: center; }
+.ftfAlt { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #eef2f7; padding-top: 8px; flex-wrap: wrap; }
+.ftfKolu { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; font-weight: 600; }
+.ftfKolu select { font-size: 12px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 6px; max-width: 190px; }
+.ftfTemizle { font-size: 12px; font-weight: 700; color: #1e3a5f; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+.ftfTemizle:disabled { opacity: .45; cursor: default; }
+.ftfEtiketler { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 10px; }
+.ftfEtiket { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #1e3a5f; background: #e0ecff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 3px 4px 3px 10px; }
+.ftfEtiket button { border: none; background: transparent; color: #1e3a5f; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 5px; border-radius: 999px; }
+.ftfEtiket button:hover, .ftfEtiket button:focus-visible { background: #bfdbfe; }
+.ftfEtiketKolu { background: #f1f5f9; color: #475569; border-color: #e2e8f0; padding-right: 10px; }
+.ftfTemizleLink { border: none; background: none; color: #475569; font-size: 12px; text-decoration: underline; cursor: pointer; }
+@media (max-width: 640px) { .ftf .ftfDugme { max-width: none; } .ftfPanel { position: fixed; left: 16px; right: 16px; top: auto; width: auto; } }
+/* ERC nakit akışı — hedef firma seçimi (27.10.2026) */
+.hfs { position: relative; }
+.hfsDugme { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1.5px solid #e5e7eb; border-radius: 8px; background: #fff; font-size: 13px; font-weight: 700; color: #1e3a5f; cursor: pointer; white-space: nowrap; }
+.hfsDugme:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+.hfsDolu { border-color: #1e3a5f; background: #eef4ff; }
+.hfsPanel { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: min(300px, calc(100vw - 32px)); background: #fff; border: 1px solid #dbe3ee; border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, .16); padding: 10px; animation: ftfAc .12s ease-out; }
+.hfsSecenek { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; border: none; background: transparent; text-align: left; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: #0f172a; cursor: pointer; }
+.hfsSecenek:hover, .hfsSecenek:focus-visible { background: #f1f5f9; outline: none; }
+.hfsAktif { background: #eef4ff; }
+.hfsAlt { font-size: 11px; color: #64748b; }
+.hfsBar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #e5e7eb; }
+.hfsEtiket { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #1e3a5f; background: #e0ecff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 3px 10px; }
+.hfsDon { padding: 8px 14px; background: #fff; color: #1e3a5f; border: 1.5px solid #1e3a5f; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.hfsGecis { animation: hfsGecis .18s ease-out; }
+@keyframes hfsGecis { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .hfsGecis, .hfsPanel, .ftfPanel { animation: none; } }
+@media (max-width: 640px) { .hfsPanel { left: auto; right: 0; } }
 .rolloutYetkiEtiketi { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #64748b; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
 /* Tablo: kompakt satır, belirgin ve yatayda sabit Site ID, tutarlı milestone hücreleri */
 .rolloutTableWrap { padding: 8px 10px; margin-top: 0; }

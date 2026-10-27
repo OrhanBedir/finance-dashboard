@@ -1508,13 +1508,93 @@ const MARKA_KAYIT_SAHIBI = [
   [/^\/finance\/marka-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'ERC')) AS m FROM cashflow_odeme WHERE id=$1`],
   [/^\/finance\/marka-borc-aktarim\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_borc_aktarim WHERE id=$1`], // 26.10.2026 mutabakat
 ];
+// ═══ HEDEF FİRMA YÖNETİMİ (27.10.2026, Orhan) ═══════════════════════════════════════════════════
+// ERC (alt marka olmayan) hesabı bir alt markanın (Teknocenter) nakit akışını KENDİ oturumuyla açıp yönetir: başka hesaba
+// giriş / kullanıcı taklidi yoktur, işlemi yapan her zaman gerçek oturum sahibidir. Hak rolden ya da ekrandan gelmez:
+// kullanici_hedef_firma tablosunda (e-posta + marka, aktif) açıkça tanımlı kişiye verilir — ilk tanım Orhan Bedir ve
+// Düzgün Şimşek için TEKNO (canlıya Orhan onayıyla yazılır). Tanımsız ERC hesabı alt marka hedefli marka panel uçlarında 403
+// alır; marka-ozet (Bölge Analizi'nin okuduğu özet) eskisi gibi açıktır. Alt marka hesabı bu tablodan başka firma kazanamaz
+// (onun kapsamı aşağıdaki katmanda oturumdan zorlanır). Yazma işlemleri islem_gecmisi'ne "hedef_firma" modülüyle düşer:
+// işlemi yapan, erişim (ERC yönetim ekranı), hedef firma, kaynak kayıt, önceki / yeni değer, tarih ve varsa gerekçe.
+// Direktör onay yönlendirmesi (onayDevri, 01.11.2026 İlhami Şahin) bu hakka bakmaz.
+pool.query(`CREATE TABLE IF NOT EXISTS kullanici_hedef_firma (
+  id SERIAL PRIMARY KEY, email TEXT NOT NULL, marka TEXT NOT NULL, aktif BOOLEAN NOT NULL DEFAULT true,
+  aciklama TEXT, olusturan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`)
+  .then(() => pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS kullanici_hedef_firma_uq ON kullanici_hedef_firma (LOWER(TRIM(email)), UPPER(TRIM(marka)))`))
+  .then(() => pool.query(`ALTER TABLE kullanici_hedef_firma ENABLE ROW LEVEL SECURITY`))
+  .catch((e) => console.error("[hedef-firma tablo]", e.message));
+const _hedefFirmaOnbellek = new Map(); // e-posta → { t, v: [marka] }
+async function hedefFirmalari(u) {
+  const e = String(u?.email || "").toLowerCase().trim();
+  if (!e || !u || altMarkaKullanicisi(u) || taseronMu(u)) return [];
+  const c = _hedefFirmaOnbellek.get(e);
+  if (c && Date.now() - c.t < YETKI_TTL_MS) return c.v;
+  const r = await pool.query(`SELECT DISTINCT UPPER(TRIM(marka)) AS m FROM kullanici_hedef_firma WHERE LOWER(TRIM(email)) = $1 AND aktif = true`, [e])
+    .catch(() => ({ rows: [] }));
+  const v = (r.rows || []).map((x) => x.m).filter((m) => altMarkaMi(m));
+  _hedefFirmaOnbellek.set(e, { t: Date.now(), v });
+  return v;
+}
+// Kayıt sahibi sorgusundaki tablo (önceki değer için tam satır okunur)
+const _kayitTablosu = (sql) => (String(sql).match(/FROM\s+([a-z_]+)\s+WHERE/i) || [])[1] || null;
+const HEDEF_FIRMA_SERBEST_OKUMA = /^\/finance\/marka-ozet$/;
+async function hedefFirmaKapisi(req, res, next, u, yol) {
+  const yaz = !["GET", "HEAD"].includes(req.method);
+  const ac = (v) => (v != null && String(v).trim() !== "" ? String(v).trim().toUpperCase() : null);
+  const hedefler = new Set();
+  const qm = ac(req.query?.marka), bm = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? ac(req.body.marka) : null;
+  if (qm) hedefler.add(qm);
+  if (bm) hedefler.add(bm);
+  let kayit = null; // { tablo, id }
+  for (const [rx, sql] of MARKA_KAYIT_SAHIBI) {
+    const m = yol.match(rx);
+    if (!m) continue;
+    const r = await pool.query(sql, [Number(m[1])]).catch(() => ({ rows: [] }));
+    if (r.rows[0]?.m) hedefler.add(r.rows[0].m);
+    kayit = { tablo: _kayitTablosu(sql), id: Number(m[1]) };
+  }
+  // Marka belirtilmeyen istekte uçların çoğu AHY varsayar — hak kontrolü o varsayılana göre yapılır
+  if (!hedefler.size && !kayit) hedefler.add("AHY");
+  const altHedef = [...hedefler].filter((m) => altMarkaMi(m));
+  if (!altHedef.length) return next(); // ERC'nin kendi kayıtları (ör. ERC banka girişi): mevcut davranış
+  if (!yaz && HEDEF_FIRMA_SERBEST_OKUMA.test(yol)) return next();
+  const izinli = await hedefFirmalari(u);
+  const yetkisiz = altHedef.filter((m) => !izinli.includes(m));
+  if (yetkisiz.length) return res.status(403).json({ ok: false, error: `${yetkisiz.map((m) => altMarka(m)?.ad || m).join(", ")} için firma yönetim yetkiniz yok` });
+  const hedef = altHedef[0];
+  req.hedefFirma = { marka: hedef, ad: altMarka(hedef)?.ad || hedef, erisim: "ERC yönetim ekranı" };
+  if (!yaz) return next();
+  // Önceki değer (kimlikli kayıtta) → yanıt başarılıysa işlem geçmişine yazılır
+  let eski = null;
+  if (kayit?.tablo) eski = (await pool.query(`SELECT to_jsonb(t) AS j FROM ${kayit.tablo} t WHERE id = $1`, [kayit.id]).catch(() => ({ rows: [] }))).rows[0]?.j || null;
+  const govde = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? { ...req.body } : null;
+  const orig = res.json.bind(res);
+  res.json = (o) => {
+    if (res.statusCode < 400 && !(o && o.ok === false)) {
+      const yeni = (o && (o.row || o.kayit)) || govde;
+      const kid = kayit?.id || Number(yeni?.id || o?.id || o?.borc_id || 0) || 0;
+      const gerekce = govde && (govde.gerekce || govde.duzeltme_gerekcesi) ? ` · gerekçe: ${govde.gerekce || govde.duzeltme_gerekcesi}` : "";
+      islemGecmisiYaz(req, "hedef_firma", kid, req.method,
+        eski ? { ...eski, _kaynak: kayit.tablo } : null,
+        yeni && typeof yeni === "object" ? { ...yeni, _hedef_firma: hedef, _erisim: "ERC yönetim ekranı", _yol: yol } : { _hedef_firma: hedef, _erisim: "ERC yönetim ekranı", _yol: yol },
+        `${req.hedefFirma.erisim} → ${req.hedefFirma.ad}: ${req.method} ${yol}${gerekce}`).catch(() => {});
+    }
+    return orig(o);
+  };
+  next();
+}
 app.use(async (req, res, next) => {
   try {
     if (req.method === "OPTIONS") return next();
     const yol = req.path.replace(/\/+$/, "") || "/";
     if (!MARKA_PANEL_YOLU.test(yol)) return next();
     const u = optionalAuth(req);
-    if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return next();
+    if (!u) return next();
+    if (!altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) {
+      // Taşeron / sahibi belirsiz hesap: mevcut kapılar (rol kontrolleri) aynen; ERC hesabı alt marka hedefinde hedef firma hakkı ister
+      if (taseronMu(u)) return next();
+      return await hedefFirmaKapisi(req, res, next, u, yol);
+    }
     const kendi = String(u.marka).trim().toUpperCase();
     const red = () => res.status(403).json({ ok: false, error: "Bu kayıt başka bir firmaya ait — erişim yetkiniz yok" });
     const farkli = (v) => v != null && String(v).trim() !== "" && String(v).trim().toUpperCase() !== kendi;
@@ -1534,6 +1614,30 @@ app.use(async (req, res, next) => {
     console.error("[marka-kapsami]", e.message);
     res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
   }
+});
+// ERC nakit akışındaki "Firma / Taşeron seç" listesi: yalnız oturum sahibine tanımlı, kendi nakit akışı (proje kasası)
+// olan alt markalar. Sıradan taşeron / tedarikçi listelenmez — onlar için kasa yoktur.
+app.get("/finance/hedef-firmalar", authMiddleware, async (req, res) => {
+  try {
+    const liste = await hedefFirmalari(req.user);
+    const rol = String(req.user?.role || "").toLowerCase();
+    const rows = MARKA_KASA_ROLLER.includes(rol) ? liste.map((kod) => { const P = markaProfil(kod); return { kod: P.kod, ad: P.ad, devir: P.devir, bitis: P.bitis || null }; }) : [];
+    res.json({ ok: true, rows });
+  } catch (e) { res.status(500).json({ ok: false, error: "Firma listesi alınamadı" }); }
+});
+// Bir alt markanın ERC yönetim ekranından yapılan işlemleri (işlemi yapan gerçek kişi, önceki / yeni değer). Yol marka panel
+// kapsamında: Teknocenter hesabı yalnız kendi firmasınınkini görür; ERC hesabı hedef firma hakkıyla.
+app.get("/finance/marka-hedef-islemler", authMiddleware, async (req, res) => {
+  try {
+    if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const marka = String(req.query.marka || "").trim().toUpperCase();
+    if (!altMarkaMi(marka)) return res.status(400).json({ ok: false, error: "Geçersiz firma" });
+    const r = await pool.query(`SELECT g.id, g.kayit_id, g.tip, g.eski, g.yeni, g.aciklama, g.kullanici,
+        to_char(g.created_at,'YYYY-MM-DD HH24:MI') AS zaman, COALESCE(NULLIF(u.name,''), g.kullanici) AS kisi
+      FROM islem_gecmisi g LEFT JOIN LATERAL (SELECT name FROM users WHERE LOWER(TRIM(email)) = g.kullanici ORDER BY id DESC LIMIT 1) u ON true
+      WHERE g.modul = 'hedef_firma' AND UPPER(COALESCE(g.yeni->>'_hedef_firma','')) = $1 ORDER BY g.id DESC LIMIT 300`, [marka]);
+    res.json({ ok: true, rows: r.rows || [] });
+  } catch (e) { res.status(500).json({ ok: false, error: "İşlem geçmişi alınamadı" }); }
 });
 // ═══ MARKA FATURA KAPSAMI (23.10.2026, Orhan) ═══════════════════════════════════════════════════
 // Alt marka yetkilisi ERC Fatura Girişi uçlarını yalnız KENDİ firması etiketli (invoice_entries.firma) kayıtlar için kullanır:
@@ -1692,6 +1796,47 @@ async function markaRolloutKapsami(req) {
   };
 }
 const rolloutKapsam = async (req) => (req.markaRollout !== undefined ? req.markaRollout : await markaRolloutKapsami(req));
+// ── Rollout "Firma / Taşeron" filtresi (27.10.2026, Orhan) ──────────────────────────────────────────────────────
+// Her satıra iş koluna göre AÇIKÇA yazılmış taşeron adları eklenir: firma_rf (RF / LOS / TSS / TSSR / BTK / TRS / EMR / PAC /
+// YSB) ve firma_enh (ENH / ENH proje / Power). İkisinin birleşimi, Teknocenter panelinin satır kapsamıyla (herhangi bir iş
+// kolunun taşeron alanı) birebir aynı kuraldır. Adlar normalize edilir (büyük harf, tek boşluk); N/A / boş alınmaz.
+// firma_sozluk: ad → alt marka kodu (MARKA ROLLOUT KAPSAMI deseni + ekipler.bagli_firma etiketleri; TEKNOSA eşleşmez).
+// Alt marka hesabına yalnız kendi firmasının adları gönderilir (başka firmanın taşeron adı açılmaz).
+const ROLLOUT_KOL_GRUBU = { rf: "rf", los: "rf", tss: "rf", tssr: "rf", btk: "rf", trs: "rf", emr: "rf", pac: "rf", ysb: "rf", enh: "enh", enh_proje: "enh", power: "enh" };
+const rolloutFirmaAdi = (v) => {
+  const s = String(v || "").trim().toUpperCase().replace(/\s+/g, " ");
+  return !s || s === "N/A" || s === "__NA__" || s === "-" ? null : s;
+};
+function rolloutFirmaGruplari(r) {
+  const g = { rf: new Set(), enh: new Set() };
+  for (const L of ROLLOUT_IS_KOLU_ALANLARI) { const v = rolloutFirmaAdi(r[L.subcon]); if (v) g[ROLLOUT_KOL_GRUBU[L.kolu]].add(v); }
+  return g;
+}
+async function rolloutFirmaEsleyicileri() {
+  const out = [];
+  for (const m of ALT_MARKALAR) {
+    const P = markaProfil(m.kod);
+    const desen = new RegExp(markaRolloutDeseni(P)), etiketler = await markaRolloutEtiketleri(P.kod);
+    out.push({ kod: P.kod, ad: P.ad, esle: (s) => desen.test(s) || etiketler.includes(s) });
+  }
+  return out;
+}
+// Ham satırlar (maske ÖNCESİ) → { gruplar: [{rf:[], enh:[]}], sozluk, markalar }. K: alt marka kapsamı (yalnız kendi adları)
+async function rolloutFirmaBilgisi(hamRows, K) {
+  const esleyiciler = await rolloutFirmaEsleyicileri();
+  const sozluk = {}, markaSay = {};
+  const markaOf = (ad) => { if (!(ad in sozluk)) sozluk[ad] = esleyiciler.find((m) => m.esle(ad))?.kod || null; return sozluk[ad]; };
+  const gruplar = (hamRows || []).map((r) => {
+    const g = rolloutFirmaGruplari(r);
+    const suz = (set) => [...set].filter((ad) => !K || K.esle(ad));
+    const o = { rf: suz(g.rf), enh: suz(g.enh) };
+    for (const ad of new Set([...o.rf, ...o.enh])) { const m = markaOf(ad); if (m) markaSay[m] = true; }
+    return o;
+  });
+  const temizSozluk = Object.fromEntries(Object.entries(sozluk).filter(([, m]) => m && (!K || m === K.kod)));
+  const markalar = esleyiciler.filter((m) => markaSay[m.kod] && (!K || m.kod === K.kod)).map((m) => ({ kod: m.kod, ad: m.ad }));
+  return { gruplar, sozluk: temizSozluk, markalar };
+}
 // Kapsamdaki saha kodları (UPPER) — iş atama / Clean Up / iş yükü listelerini süzmek için
 async function markaRolloutSahalar(K) {
   const r = await pool.query(`SELECT DISTINCT UPPER(TRIM(r.site_code)) AS sc FROM rollout_progress r WHERE ${K.sql("r", 1)}`, K.params);
@@ -12234,7 +12379,10 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
 
     // Maske ham satıra uygulanır: başka firmanın iş kolu alanları map'e boş girer (N/A doldurması / hafta türetmeleri dahil)
     const ham = K ? markaRolloutMaskele(K, result.rows || []) : (result.rows || []);
-    const rows = ham.map((r) => {
+    // 27.10.2026: Firma / Taşeron filtresi — sahiplik maske öncesi ham satırdan, aynı sırayla
+    const FB = await rolloutFirmaBilgisi(result.rows || [], K);
+    const rows = ham.map((r, i) => {
+      const fg = FB.gruplar[i] || { rf: [], enh: [] };
       const normalizedSiteType =
         getSiteTypeFromSiteCode(r.site_code) || r.site_type;
 
@@ -12297,11 +12445,14 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
         plan_week: r.plan_start_date ? getWeekNumber(r.plan_start_date) : null,
         install_week: installStart ? getWeekNumber(installStart) : null,
         onair_week: onairDate ? getWeekNumber(onairDate) : null,
+        firma_rf: fg.rf,
+        firma_enh: fg.enh,
       };
     });
 
-    if (K) return res.json({ ok: true, kapsam: K.kod, rows });
-    res.json({ ok: true, rows });
+    const firma = { firma_sozluk: FB.sozluk, firma_markalar: FB.markalar };
+    if (K) return res.json({ ok: true, kapsam: K.kod, rows, ...firma });
+    res.json({ ok: true, rows, ...firma });
   } catch (err) {
     console.error("ROLLOUT LIST ERROR:", err);
     res.status(500).json({
@@ -17680,6 +17831,16 @@ app.post("/finance/marka-odeme", authMiddleware, async (req, res) => {
     if (!MARKA_ODEME_KATEGORI.includes(String(req.body?.kategori || "").toUpperCase()))
       return res.status(400).json({ ok: false, error: "Kategori araç kirası, araç depozitosu, ticket ya da diğer olmalı" });
     if (!(parseFinanceNumber(req.body?.tutar) > 0)) return res.status(400).json({ ok: false, error: "Tutar sıfırdan büyük olmalı" });
+    // 27.10.2026: tekrarlanan kaydetme (çift tıklama / yeniden deneme / iki ekrandan aynı anda) — aynı firma, kategori, tarih,
+    // tutar, dönem ve açıklamalı kayıt son 10 dakikada girildiyse çakışma; gerçekten ayrı bir ödemeyse onaylı (zorla) kaydedilir
+    if (!req.body?.zorla) {
+      const t = parseFinanceNumber(req.body.tutar);
+      const ayni = await pool.query(`SELECT id FROM cashflow_odeme WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(kategori) = $2 AND tarih = $3::date
+          AND ROUND(tutar::numeric, 2) = ROUND($4::numeric, 2) AND COALESCE(donem,'') = COALESCE($5,'') AND COALESCE(TRIM(aciklama),'') = COALESCE(TRIM($6),'')
+          AND created_at > NOW() - INTERVAL '10 minutes' LIMIT 1`,
+        [marka, String(req.body.kategori).toUpperCase(), req.body.tarih, t, req.body.donem || null, req.body.aciklama || null]).catch(() => ({ rows: [] }));
+      if (ayni.rows[0]) return res.status(409).json({ ok: false, cakisma: true, error: `Aynı ödeme birkaç dakika önce kaydedildi (#${ayni.rows[0].id}). Tekrar girmeyin; farklı bir ödemeyse onaylayarak kaydedin.` });
+    }
     const sonuc = await cashflowOdemeKaydet({ ...req.body, kategori: String(req.body.kategori).toUpperCase() }, marka, markaOdemeAracKapsam(req, marka));
     res.status(sonuc.http).json(sonuc.json);
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }

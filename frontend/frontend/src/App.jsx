@@ -2082,11 +2082,16 @@ function MarkaMutabakatBolumu({ marka, markaAd, yenile, onDegisti }) {
     </div>
   );
 }
-function MarkaNakitPanel({ currentUser }) {
+// 27.10.2026: ERC nakit akışından hedef firma (Teknocenter) görünümü — oturum sahibi değişmez; firma bilgisi hedefFirma'dan,
+// her istek marka parametresiyle gider ve sunucuda hedef firma hakkı doğrulanır. Firma değişiminde bileşen anahtarla yeniden kurulur.
+function MarkaNakitPanel({ currentUser: oturumKullanici, hedefFirma = null, baslangicAy = null, onFormDurumu = null, gomulu = false }) {
+  const currentUser = hedefFirma
+    ? { ...oturumKullanici, marka: hedefFirma.kod, marka_ad: hedefFirma.ad, marka_devir: hedefFirma.devir, marka_bitis: hedefFirma.bitis }
+    : oturumKullanici;
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
-  const [ay, setAy] = useState(() => new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
+  const [ay, setAy] = useState(() => baslangicAy || new Date().toISOString().slice(0, 7)); // görüntülenen ay (YYYY-MM)
   const [kasa, setKasa] = useState({ rows: [], toplam: 0 }); // manuel nakit girişleri
   const [kasaModal, setKasaModal] = useState(false);
   const [kasaGecmis, setKasaGecmis] = useState(null); // { r, yukleniyor, hata, olaylar } — kasa girişi işlem geçmişi (20.10.2026)
@@ -2118,6 +2123,9 @@ function MarkaNakitPanel({ currentUser }) {
   const [odemeForm, setOdemeForm] = useState(_bosOdemeForm);
   const [odemeVeri, setOdemeVeri] = useState({ odemeler: [], araclar: [], yukleniyor: false, hata: "" });
   const [odemeKaydediliyor, setOdemeKaydediliyor] = useState(false);
+  const [hedefIslemAcik, setHedefIslemAcik] = useState(false);
+  // Açık ödeme formu üst ekrana bildirilir (firma değişiminde kaydedilmemiş veri uyarısı)
+  useEffect(() => { if (onFormDurumu) onFormDurumu(!!odemeModal); }, [odemeModal]); // eslint-disable-line
   const loadGelenOde = async () => {
     try {
       const r = await fetch(`${API_BASE}/finance/simsek-ahy-odeme?marka=${marka}`, { headers: _auth });
@@ -2333,7 +2341,7 @@ function MarkaNakitPanel({ currentUser }) {
     <div style={{ padding: "24px", maxWidth: "1500px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
         <div>
-          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>
+          {!gomulu && <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>💰 {markaAd} — Günlük Nakit Akışı</h2>}
           <div style={{ fontSize: "13px", color: "#64748b" }}>
             {devirMetni(currentUser)} devrinden itibaren — masraf formları burada listelenmez (iş avansını kapatır, para avansta çıkmıştır)
           </div>
@@ -2346,6 +2354,8 @@ function MarkaNakitPanel({ currentUser }) {
             <button onClick={() => { setOdemeForm(_bosOdemeForm()); setOdemeModal(true); loadOdeme(ay); }}
               title="Araç kirası, depozito, ticket ve diğer gerçekleşen ödemeleri girin"
               style={{ padding: "6px 14px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Ödeme Ekle</button>
+            <button onClick={() => setHedefIslemAcik(true)} title="ERC yönetim ekranından bu firma adına yapılan işlemler (işlemi yapan, önceki / yeni değer)"
+              style={{ padding: "6px 12px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #cbd5e1", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>🕘 ERC işlemleri</button>
             <button onClick={() => exportStandardExcel({
               title: `${markaAd} — Günlük Nakit Akışı (tüm hareketler)`,
               sheetName: "Nakit Akışı", fileBase: `${marka}_Nakit_Akisi`,
@@ -3215,6 +3225,114 @@ function MarkaNakitPanel({ currentUser }) {
               ))}
               {borc.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz borç kaydı yok</div>}
             </div>
+          </div>
+        </div>
+      )}
+      {hedefIslemAcik && <HedefFirmaIslemleri marka={marka} markaAd={markaAd} onClose={() => setHedefIslemAcik(false)} />}
+    </div>
+  );
+}
+
+// 27.10.2026: ERC yönetim ekranından bir firma adına yapılan işlemler — işlemi yapan gerçek kişi, erişim, hedef firma,
+// kaynak kayıt, önceki / yeni değer, zaman ve varsa gerekçe (sunucu: islem_gecmisi modul='hedef_firma'). Salt okunur.
+const HEDEF_ISLEM_ALAN = { tutar: "Tutar", tarih: "Tarih", aciklama: "Açıklama", kategori: "Kategori", donem: "Dönem", tip: "Tür", kasa_hareketi: "Kasa hareketi", hesap: "Hesap", arac_id: "Araç" };
+const HEDEF_ISLEM_KAYNAK = { "/finance/marka-kasa": "Kasa girişi", "/finance/marka-odeme": "Ödeme", "/finance/marka-borc": "Borç defteri",
+  "/finance/marka-borc-aktarim": "Borç aktarımı", "/finance/simsek-ahy-odeme": "Şimşek'ten gelen bakiye", "/finance/marka-taseron-odeme": "Taşeron ödemesi" };
+function HedefFirmaIslemleri({ marka, markaAd, onClose }) {
+  const [d, setD] = useState({ yukleniyor: true, hata: "", rows: [] });
+  useEffect(() => {
+    let iptal = false;
+    fetch(`${API_BASE}/finance/marka-hedef-islemler?marka=${encodeURIComponent(marka)}`, { headers: AUTH_H() })
+      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok || !j.ok) throw new Error(j.error || "İşlem geçmişi alınamadı"); return j; })
+      .then((j) => { if (!iptal) setD({ yukleniyor: false, hata: "", rows: j.rows || [] }); })
+      .catch((e) => { if (!iptal) setD({ yukleniyor: false, hata: e.message, rows: [] }); });
+    return () => { iptal = true; };
+  }, [marka]);
+  useEffect(() => {
+    const f = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", f);
+    return () => window.removeEventListener("keydown", f);
+  }, []); // eslint-disable-line
+  const kaynakAd = (yol) => { const k = Object.keys(HEDEF_ISLEM_KAYNAK).find((x) => String(yol || "").startsWith(x)); return k ? HEDEF_ISLEM_KAYNAK[k] : (yol || "—"); };
+  const ozet = (o) => !o ? "—" : Object.keys(HEDEF_ISLEM_ALAN).filter((k) => o[k] != null && o[k] !== "").map((k) => `${HEDEF_ISLEM_ALAN[k]}: ${k === "tutar" ? "₺" + Number(o[k]).toLocaleString("tr-TR") : String(o[k]).slice(0, 10) === String(o[k]) ? o[k] : String(o[k]).slice(0, 80)}`).join(" · ") || "—";
+  const TIP = { POST: ["Ekleme", "#dcfce7", "#166534"], PUT: ["Düzenleme", "#e0f2fe", "#075985"], DELETE: ["Silme / iptal", "#fee2e2", "#991b1b"], PATCH: ["Düzenleme", "#e0f2fe", "#075985"] };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", zIndex: 12000, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${markaAd} — ERC yönetim ekranından yapılan işlemler`}
+        style={{ background: "#fff", borderRadius: "14px", width: "min(980px, 100%)", maxHeight: "86vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid #e5e7eb" }}>
+          <div>
+            <div style={{ fontSize: "16px", fontWeight: 800, color: "#0f172a" }}>🕘 {markaAd} — ERC yönetim ekranından yapılan işlemler</div>
+            <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>Kayıtlar firmanın kendi kayıtlarıdır; burada yalnız işlemi kimin, nereden yaptığı izlenir. Geçmiş değiştirilemez.</div>
+          </div>
+          <button onClick={onClose} style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: "8px", padding: "6px 12px", fontWeight: 700, cursor: "pointer" }}>Kapat</button>
+        </div>
+        <div style={{ overflow: "auto", padding: "8px 18px 16px" }}>
+          {d.yukleniyor && <div style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>Yükleniyor…</div>}
+          {d.hata && <div style={{ padding: "24px", textAlign: "center", color: "#b91c1c" }}>⚠ {d.hata}</div>}
+          {!d.yukleniyor && !d.hata && d.rows.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: "#64748b" }}>ERC yönetim ekranından bu firma için yapılmış işlem yok.</div>}
+          {!d.yukleniyor && !d.hata && d.rows.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+              <thead><tr style={{ textAlign: "left", color: "#475569", background: "#f8fafc" }}>
+                {["Zaman", "İşlemi yapan", "Erişim", "İşlem", "Kaynak", "Önceki", "Yeni"].map((h) => <th key={h} style={{ padding: "8px", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>{h}</th>)}
+              </tr></thead>
+              <tbody>{d.rows.map((r) => { const t = TIP[r.tip] || [r.tip, "#f1f5f9", "#475569"]; const y = r.yeni || {}; return (
+                <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9", verticalAlign: "top" }}>
+                  <td style={{ padding: "8px", whiteSpace: "nowrap" }}>{String(r.zaman || "").split(" ")[0].split("-").reverse().join(".")} {String(r.zaman || "").split(" ")[1] || ""}</td>
+                  <td style={{ padding: "8px", fontWeight: 700 }}>{r.kisi || r.kullanici || "—"}</td>
+                  <td style={{ padding: "8px", whiteSpace: "nowrap" }}>{y._erisim || "ERC yönetim ekranı"}</td>
+                  <td style={{ padding: "8px" }}><span style={{ background: t[1], color: t[2], borderRadius: "999px", padding: "2px 8px", fontWeight: 700, whiteSpace: "nowrap" }}>{t[0]}</span></td>
+                  <td style={{ padding: "8px" }}>{kaynakAd(y._yol)}{r.kayit_id ? ` #${r.kayit_id}` : ""}{/gerekçe:/.test(r.aciklama || "") ? <div style={{ color: "#92400e", marginTop: "2px" }}>{String(r.aciklama).split("gerekçe:")[1]}</div> : null}</td>
+                  <td style={{ padding: "8px", color: "#64748b" }}>{ozet(r.eski)}</td>
+                  <td style={{ padding: "8px" }}>{r.tip === "DELETE" ? "—" : ozet(y)}</td>
+                </tr>); })}</tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ERC nakit akışındaki "Firma / Taşeron seç" (27.10.2026): aranabilir tek seçim. Seçenekler sunucudan — yalnız oturum sahibine
+// tanımlı, kendi nakit akışı olan firmalar (/finance/hedef-firmalar). Sıradan taşeron listelenmez (onlar için kasa yoktur).
+function HedefFirmaSecici({ firmalar, secili, onSec, yukleniyor, hata }) {
+  const [acik, setAcik] = useState(false);
+  const [ara, setAra] = useState("");
+  const kutuRef = useRef(null);
+  const araRef = useRef(null);
+  useEffect(() => {
+    if (!acik) return;
+    const dis = (e) => { if (kutuRef.current && !kutuRef.current.contains(e.target)) setAcik(false); };
+    document.addEventListener("mousedown", dis);
+    setTimeout(() => araRef.current?.focus(), 0);
+    return () => document.removeEventListener("mousedown", dis);
+  }, [acik]);
+  const Q = _firmaNorm(ara);
+  const secenekler = [{ kod: "ERC", ad: "ERC — Şimşek", alt: "Şirket nakit akışı" }, ...(firmalar || []).map((f) => ({ ...f, alt: `${f.kod} · proje kasası` }))]
+    .filter((f) => !Q || _firmaNorm(f.ad).includes(Q) || _firmaNorm(f.kod).includes(Q) || _firmaNorm(f.ad).replace(/\s+/g, "").includes(Q.replace(/\s+/g, "")));
+  const sec = (f) => { setAcik(false); setAra(""); onSec(f.kod === "ERC" ? null : f); };
+  return (
+    <div className="hfs" ref={kutuRef} onKeyDown={(e) => { if (e.key === "Escape") setAcik(false); }}>
+      <button type="button" className={`hfsDugme${secili ? " hfsDolu" : ""}`} aria-haspopup="listbox" aria-expanded={acik} onClick={() => setAcik((a) => !a)}
+        title="Nakit akışı görüntülenecek firma">🏢 {secili ? secili.ad : "Firma / Taşeron seç"} <span aria-hidden="true">▾</span></button>
+      {acik && (
+        <div className="hfsPanel">
+          <input ref={araRef} className="ftfAra" placeholder="Firma ara (ör. TEKNO)" aria-label="Firma ara" value={ara} onChange={(e) => setAra(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && secenekler.length === 1) sec(secenekler[0]); }} />
+          <div role="listbox" aria-label="Firmalar" style={{ marginTop: "6px", maxHeight: "260px", overflowY: "auto" }}>
+            {secenekler.map((f) => {
+              const aktif = (secili ? secili.kod : "ERC") === f.kod;
+              return (
+                <button key={f.kod} type="button" role="option" aria-selected={aktif} className={`hfsSecenek${aktif ? " hfsAktif" : ""}`} onClick={() => sec(f)}>
+                  <span style={{ fontWeight: 700 }}>{f.ad}</span><span className="hfsAlt">{f.alt}</span>
+                </button>
+              );
+            })}
+            {!secenekler.length && <div className="ftfBos">Eşleşen firma yok</div>}
+            {yukleniyor && <div className="ftfBos">Firmalar yükleniyor…</div>}
+            {hata && <div className="ftfBos" style={{ color: "#b91c1c" }}>⚠ {hata}</div>}
+            {!yukleniyor && !hata && !(firmalar || []).length && <div className="ftfBos">Size tanımlı başka firma nakit akışı yok</div>}
           </div>
         </div>
       )}
@@ -6333,6 +6451,122 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
   );
 }
 
+// ── Rollout "Firma / Taşeron" filtresi (27.10.2026, Orhan) ─────────────────────────────────────────────────────
+// Kaynak: /rollout/list satırlarındaki firma_rf / firma_enh (iş koluna açıkça yazılmış taşeron adları) + firma_sozluk
+// (ad → alt marka). Üst firma (alt marka, ör. Teknocenter — TEKNO) altında ona bağlı ekip / taşeronlar; kalanlar "Diğer".
+// Seçim anahtarı: "M:<marka kodu>" (üst firmanın tamamı) veya "T:<ad>". Seçimler kendi içinde VEYA, diğer filtrelerle VE;
+// satır bazında süzüldüğü için üst firma + alt taşeron birlikte seçilince saha iki kez sayılmaz.
+const _firmaNorm = (s) => String(s || "").toLocaleUpperCase("tr").replace(/\s+/g, " ").trim();
+function rolloutFirmaAdlari(row, kolu = "TUMU") {
+  if (kolu === "rf") return row.firma_rf || [];
+  if (kolu === "enh") return row.firma_enh || [];
+  return [...new Set([...(row.firma_rf || []), ...(row.firma_enh || [])])];
+}
+function rolloutFirmaSecili(row, secim, sozluk, kolu) {
+  if (!secim || !secim.length) return true;
+  const set = new Set(secim);
+  return rolloutFirmaAdlari(row, kolu).some((ad) => set.has(`T:${ad}`) || (sozluk[ad] && set.has(`M:${sozluk[ad]}`)));
+}
+// Serbest aramada firma eşleşmesi — sınırlı: "TEKNO" → TEKNO, TEKNO_ENDER, Teknocenter (TEKNO markası); TEKNOSA ✗
+function rolloutFirmaAramaEslesir(row, q, sozluk, markalar) {
+  const Q = _firmaNorm(q);
+  if (Q.length < 2) return false;
+  const sinirli = (ad) => ad === Q || (ad.startsWith(Q) && /[^A-Z0-9ÇĞİÖŞÜ]/.test(ad.charAt(Q.length)));
+  const markaEslesir = (kod) => {
+    const m = markalar.find((x) => x.kod === kod);
+    if (!m) return false;
+    const ad = _firmaNorm(m.ad), adBitisik = ad.replace(/\s+/g, "");
+    return Q === _firmaNorm(m.kod) || Q === ad || Q === adBitisik || (Q.length >= 3 && (ad.startsWith(Q) || adBitisik.startsWith(Q.replace(/\s+/g, ""))));
+  };
+  return rolloutFirmaAdlari(row).some((ad) => sinirli(ad) || (sozluk[ad] && markaEslesir(sozluk[ad])));
+}
+function rolloutFirmaSecenekleri(rows, sozluk, markalar) {
+  const say = new Map();
+  for (const r of rows || []) for (const ad of rolloutFirmaAdlari(r)) say.set(ad, (say.get(ad) || 0) + 1);
+  const sirala = (a, b) => b.sayi - a.sayi || a.ad.localeCompare(b.ad, "tr");
+  const ustler = (markalar || []).map((m) => {
+    const cocuklar = [...say].filter(([ad]) => sozluk[ad] === m.kod).map(([ad, sayi]) => ({ ad, sayi })).sort(sirala);
+    const sahaSayisi = (rows || []).filter((r) => rolloutFirmaAdlari(r).some((ad) => sozluk[ad] === m.kod)).length;
+    return { kod: m.kod, ad: m.ad, sayi: sahaSayisi, cocuklar };
+  }).filter((m) => m.cocuklar.length);
+  const digerleri = [...say].filter(([ad]) => !sozluk[ad]).map(([ad, sayi]) => ({ ad, sayi })).sort(sirala);
+  return { ustler, digerleri };
+}
+function rolloutFirmaEtiketi(anahtar, markalar) {
+  if (anahtar.startsWith("M:")) { const k = anahtar.slice(2); return (markalar || []).find((m) => m.kod === k)?.ad || k; }
+  return anahtar.slice(2);
+}
+function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu }) {
+  const [acik, setAcik] = useState(false);
+  const [ara, setAra] = useState("");
+  const kutuRef = useRef(null);
+  const araRef = useRef(null);
+  useEffect(() => {
+    if (!acik) return;
+    const disTik = (e) => { if (kutuRef.current && !kutuRef.current.contains(e.target)) setAcik(false); };
+    document.addEventListener("mousedown", disTik);
+    setTimeout(() => araRef.current?.focus(), 0);
+    return () => document.removeEventListener("mousedown", disTik);
+  }, [acik]);
+  const Q = _firmaNorm(ara);
+  const uyar = (s) => !Q || _firmaNorm(s).includes(Q);
+  const ustler = secenekler.ustler.map((m) => {
+    const ustUyar = uyar(m.ad) || uyar(m.kod);
+    return { ...m, gorunur: ustUyar ? m.cocuklar : m.cocuklar.filter((c) => uyar(c.ad)), ustUyar };
+  }).filter((m) => m.ustUyar || m.gorunur.length);
+  const digerleri = secenekler.digerleri.filter((c) => uyar(c.ad));
+  const set = new Set(secim);
+  const degistir = (k) => onSecim(set.has(k) ? secim.filter((x) => x !== k) : [...secim, k]);
+  const satir = (k, etiket, sayi, girinti, kalin) => (
+    <label key={k} className="ftfSatir" style={{ paddingLeft: girinti ? "30px" : "10px", fontWeight: kalin ? 700 : 500 }}>
+      <input type="checkbox" checked={set.has(k)} onChange={() => degistir(k)} aria-label={`${etiket} (${sayi} saha)`} />
+      <span className="ftfAd">{etiket}</span>
+      <span className="ftfSayi">{sayi}</span>
+    </label>
+  );
+  const ozet = secim.length === 0 ? "Firma / Taşeron" : secim.length === 1 ? rolloutFirmaEtiketi(secim[0], markalar) : `${secim.length} firma/taşeron`;
+  return (
+    <div className="ftf" ref={kutuRef} onKeyDown={(e) => { if (e.key === "Escape") { setAcik(false); } }}>
+      <button type="button" className={`select ftfDugme${secim.length ? " ftfDolu" : ""}`} aria-haspopup="true" aria-expanded={acik}
+        onClick={() => setAcik((a) => !a)} title="Firma / Taşeron filtresi — birden fazla seçilebilir">
+        🏢 {ozet} <span aria-hidden="true">▾</span>
+      </button>
+      {acik && (
+        <div className="ftfPanel" role="group" aria-label="Firma / Taşeron seçimi">
+          <input ref={araRef} className="ftfAra" placeholder="Firma veya taşeron ara (ör. TEKNO)" aria-label="Firma veya taşeron ara"
+            value={ara} onChange={(e) => setAra(e.target.value)} />
+          <div className="ftfListe">
+            {ustler.map((m) => (
+              <div key={m.kod} className="ftfGrup">
+                {satir(`M:${m.kod}`, `${m.ad} — ${m.kod}`, m.sayi, false, true)}
+                <div className="ftfAltBaslik">İlişkili ekipler / taşeronlar</div>
+                {m.gorunur.map((c) => satir(`T:${c.ad}`, c.ad, c.sayi, true, false))}
+              </div>
+            ))}
+            {digerleri.length > 0 && (
+              <div className="ftfGrup">
+                <div className="ftfAltBaslik" style={{ paddingLeft: "10px" }}>Diğer firmalar / taşeronlar</div>
+                {digerleri.map((c) => satir(`T:${c.ad}`, c.ad, c.sayi, false, false))}
+              </div>
+            )}
+            {!ustler.length && !digerleri.length && <div className="ftfBos">Eşleşen firma / taşeron yok</div>}
+          </div>
+          <div className="ftfAlt">
+            <label className="ftfKolu">İş kolu
+              <select value={kolu} onChange={(e) => onKolu(e.target.value)} aria-label="Firma eşleşmesinin bakılacağı iş kolu">
+                <option value="TUMU">Tüm iş kolları</option>
+                <option value="rf">RF (montaj, LOS, TSSR, BTK, TRS, PAC…)</option>
+                <option value="enh">ENH (enerji, proje, power)</option>
+              </select>
+            </label>
+            <button type="button" className="ftfTemizle" onClick={() => onSecim([])} disabled={!secim.length}>Seçimi temizle</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, kapsamEtiketi = null }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
@@ -6390,6 +6624,11 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [qcFilter, setQcFilter] = useState("ALL");
   const [enhFilter, setEnhFilter] = useState("ALL");
+  // 27.10.2026: Firma / Taşeron filtresi (çoklu) + firma eşleşmesinin bakılacağı iş kolu
+  const [firmaSecim, setFirmaSecim] = useState([]);
+  const [firmaKolu, setFirmaKolu] = useState("TUMU");
+  const [firmaSozluk, setFirmaSozluk] = useState({});
+  const [firmaMarkalar, setFirmaMarkalar] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
@@ -6654,7 +6893,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `rollout_${regionLabel}_${fileSuffix}_${today}.xlsx`;
+    // 27.10.2026: firma / taşeron seçiliyse dosya adında görünür (içerik zaten filteredRows)
+    const firmaEk = firmaSecim.length ? "_" + (firmaSecim.length === 1 ? rolloutFirmaEtiketi(firmaSecim[0], firmaMarkalar) : `${firmaSecim.length}_firma`).replace(/[^A-Za-z0-9ÇĞİÖŞÜçğıöşü_-]+/g, "_") : "";
+    a.download = `rollout_${regionLabel}${firmaEk}_${fileSuffix}_${today}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -6669,6 +6910,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
       });
 
       setRows(data.rows || []);
+      setFirmaSozluk(data.firma_sozluk || {});
+      setFirmaMarkalar(data.firma_markalar || []);
       if (!saltOkunur) try {
         const cleanupData = await fetchJson(`${API_BASE}/rollout/cleanup`, { withAuth: true });
         setCleanupRows(cleanupData.rows || []);
@@ -6676,6 +6919,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
     } catch (err) {
       console.error("ROLLOUT LOAD ERROR:", err);
       setRows([]);
+      setFirmaSozluk({});
+      setFirmaMarkalar([]);
       setErrorMessage(err.message || "Rollout data alınamadı");
     } finally {
       setLoading(false);
@@ -6750,11 +6995,16 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         ${row.qc_aciklama || ""}
       `.toLowerCase();
 
-      const searchOk = q ? text.includes(q) : true;
+      // 27.10.2026: firma / taşeron adıyla arama (TEKNO, Teknocenter, TEKNO_ENDER) — sınırlı eşleşme, TEKNOSA ✗
+      const searchOk = q ? (text.includes(q) || rolloutFirmaAramaEslesir(row, q, firmaSozluk, firmaMarkalar)) : true;
+      const firmaOk = rolloutFirmaSecili(row, firmaSecim, firmaSozluk, firmaKolu);
 
-      return regionOk && typeOk && qcOk && enhOk && searchOk;
+      return regionOk && typeOk && qcOk && enhOk && searchOk && firmaOk;
     });
-  }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter]);
+  }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter, firmaSecim, firmaKolu, firmaSozluk, firmaMarkalar]);
+  const firmaSecenekleri = useMemo(() => rolloutFirmaSecenekleri(rows, firmaSozluk, firmaMarkalar), [rows, firmaSozluk, firmaMarkalar]);
+  const firmaBaslik = firmaSecim.length === 0 ? null
+    : firmaSecim.length === 1 ? rolloutFirmaEtiketi(firmaSecim[0], firmaMarkalar) : `${firmaSecim.length} firma/taşeron seçili`;
 
   const summary = useMemo(() => {
     const total = filteredRows.length;
@@ -6812,6 +7062,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         enhFilter={enhFilter}
         toplam={rows.length}
         durum={errorMessage ? "hata" : loading ? "yukleniyor" : "ok"}
+        firmaBaslik={firmaBaslik}
       />
 
       <div className="rolloutFiltre">
@@ -6874,6 +7125,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
           <option value="SUZME">💧 Süzme</option>
           <option value="ABONE_SUZME">🔌💧 Abone + Süzme</option>
         </select>
+
+        <FirmaTaseronFiltre secenekler={firmaSecenekleri} markalar={firmaMarkalar} secim={firmaSecim} onSecim={setFirmaSecim}
+          kolu={firmaKolu} onKolu={setFirmaKolu} />
 
         <div className="qcActionBox">
           {saltOkunur && <span className="rolloutYetkiEtiketi" title="Bu ekranda yalnız görüntüleme yetkiniz var; kayıt değiştirme, iş atama ve Clean Up kapalı">🔒 Görüntüleme</span>}
@@ -6967,6 +7221,18 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
           )}
         </div>
       </div>
+      {firmaSecim.length > 0 && (
+        <div className="ftfEtiketler" aria-label="Seçili firmalar / taşeronlar">
+          {firmaSecim.map((k) => (
+            <span key={k} className="ftfEtiket">
+              {rolloutFirmaEtiketi(k, firmaMarkalar)}
+              <button type="button" aria-label={`${rolloutFirmaEtiketi(k, firmaMarkalar)} seçimini kaldır`} onClick={() => setFirmaSecim(firmaSecim.filter((x) => x !== k))}>×</button>
+            </span>
+          ))}
+          {firmaKolu !== "TUMU" && <span className="ftfEtiket ftfEtiketKolu">iş kolu: {firmaKolu === "rf" ? "RF" : "ENH"}</span>}
+          <button type="button" className="ftfTemizleLink" onClick={() => setFirmaSecim([])}>Seçimi temizle</button>
+        </div>
+      )}
       {showIsAtama && (
         <IsAtamaPanel rolloutRows={rows} baslangic={isAtamaBaslangic} onClose={() => { setShowIsAtama(false); setIsAtamaBaslangic(null); }} onChanged={() => { acikIsYukle(); loadData(); setIsKoluYenile((k) => k + 1); }} />
       )}
@@ -31574,6 +31840,25 @@ function CashFlowPanel({ currentUser, onBack }) {
   const [isAvanslar,  setIsAvanslar]  = useState([]); // PD onaylı iş avansları (otomatik)
   const [showOdemeModal, setShowOdemeModal] = useState(false);
   const [odemeForm,   setOdemeForm]   = useState({ kategori:"ARAC", tarih:"", tutar:"", donem:"", aciklama:"", marka:"ERC", arac_id:"" });
+  // 27.10.2026: Firma / Taşeron seç — ERC'den çıkmadan hedef firmanın (Teknocenter) nakit akışı; oturum sahibi değişmez
+  const [hedefFirmalar, setHedefFirmalar] = useState({ rows: [], yukleniyor: true, hata: "" });
+  const [secFirma, setSecFirma] = useState(null);       // null = ERC görünümü
+  const [firmaFormAcik, setFirmaFormAcik] = useState(false);
+  useEffect(() => {
+    let iptal = false;
+    fetch(`${API_BASE}/finance/hedef-firmalar`, { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` } })
+      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok || !j.ok) throw new Error(j.error || "Firma listesi alınamadı"); return j; })
+      .then((j) => { if (!iptal) setHedefFirmalar({ rows: j.rows || [], yukleniyor: false, hata: "" }); })
+      .catch((e) => { if (!iptal) setHedefFirmalar({ rows: [], yukleniyor: false, hata: e.message }); });
+    return () => { iptal = true; };
+  }, []);
+  const firmaDegistir = (f) => {
+    if ((secFirma?.kod || null) === (f?.kod || null)) return;
+    if ((showOdemeModal || firmaFormAcik) && !window.confirm("Açık bir ödeme formu var; kaydedilmemiş bilgiler kaybolacak. Firma değiştirilsin mi?")) return;
+    setShowOdemeModal(false);
+    setFirmaFormAcik(false);
+    setSecFirma(f);
+  };
   const [tumAraclar,  setTumAraclar]  = useState([]); // 16.10.2026: manuel araç kira/depozito girişinde seçim (pasifler dahil)
   const [odemeSaving, setOdemeSaving] = useState(false);
   const [loading,     setLoading]     = useState(false);
@@ -31894,6 +32179,31 @@ function CashFlowPanel({ currentUser, onBack }) {
     });
   };
 
+  // Hedef firma görünümü: aynı sayfada tam genişlik; ERC menüsü ve gerçek kullanıcı yerinde. Bileşen firma + kullanıcı
+  // anahtarıyla kurulur — önceki firmanın rakamı yeni başlık altında görünmez, eski istek yeni ekrana yazamaz.
+  if (secFirma) return (
+    <div style={{ padding:"20px 24px", maxWidth:"100%" }}>
+      <div className="hfsBar">
+        {onBack && <button onClick={onBack} aria-label="Finans paneline dön" style={{ background:"#f3f4f6", border:"none", borderRadius:"50%", width:"36px", height:"36px", fontSize:"18px", cursor:"pointer" }}>←</button>}
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>💵 {secFirma.ad} — Nakit Akışı</h2>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:"6px", alignItems:"center", marginTop:"6px" }}>
+            <span className="hfsEtiket" title="Kayıtlar bu firmanın kasasına / defterine işlenir; işlemi yapan sizsiniz">🏢 İşlem yapılan firma: <b>{secFirma.ad}</b></span>
+            <span style={{ fontSize:"12px", color:"#64748b" }}>Oturum: {currentUser?.name || currentUser?.email}</span>
+          </div>
+        </div>
+        <div style={{ marginLeft:"auto", display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+          <HedefFirmaSecici firmalar={hedefFirmalar.rows} secili={secFirma} onSec={firmaDegistir} yukleniyor={hedefFirmalar.yukleniyor} hata={hedefFirmalar.hata} />
+          <button type="button" onClick={() => firmaDegistir(null)} className="hfsDon">← ERC nakit akışına dön</button>
+        </div>
+      </div>
+      <div className="hfsGecis" key={`${secFirma.kod}|${currentUser?.email || ""}`}>
+        <MarkaNakitPanel key={`${secFirma.kod}|${currentUser?.email || ""}`} currentUser={currentUser} hedefFirma={secFirma}
+          baslangicAy={`${yil}-${ay}`} onFormDurumu={setFirmaFormAcik} gomulu />
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ padding:"24px", maxWidth:"100%" }}>
       {/* Header */}
@@ -31903,6 +32213,10 @@ function CashFlowPanel({ currentUser, onBack }) {
           <h2 style={{ margin:0, fontSize:"22px", fontWeight:800, color:"#1e3a5f" }}>💵 Nakit Akış</h2>
           <p style={{ margin:"4px 0 0", fontSize:"13px", color:"#6b7280" }}>Aylık gelir & gider takvimi</p>
         </div>
+        {/* 27.10.2026: Firma / Taşeron seç — yalnız size tanımlı firma varsa görünür */}
+        {(hedefFirmalar.rows.length > 0 || hedefFirmalar.hata) && (
+          <HedefFirmaSecici firmalar={hedefFirmalar.rows} secili={null} onSec={firmaDegistir} yukleniyor={hedefFirmalar.yukleniyor} hata={hedefFirmalar.hata} />
+        )}
         {/* Filtreler */}
         <div style={{ marginLeft:"auto", display:"flex", gap:"8px", alignItems:"center" }}>
           <select value={yil} onChange={e=>setYil(e.target.value)} style={{ padding:"8px 12px", border:"1.5px solid #e5e7eb", borderRadius:"8px", fontSize:"13px", fontWeight:600 }}>
@@ -38027,7 +38341,7 @@ function QCUploadInline({ onClose, onUploaded }) {
     </div>
   );
 }
-function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok" }) {
+function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok", firmaBaslik = null }) {
   const regionTitle = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
   const isEnhMode = enhFilter !== "ALL";
 
@@ -38115,7 +38429,9 @@ function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok
     "Power": "sahada enerji bağlandı", "Abonelik": "sahada abonelik tamamlandı", "Süzme": "sahada süzme yapıldı", "ENH QC": "sahada ENH QC kapandı" };
   const DUZ_RENK = { "Malzeme": "#6366f1", "Montaj Başladı": "#3b82f6", "Montaj Bitti": "#0ea5e9", "QC": "#f59e0b", "Acceptance": "#10b981",
     "ENH Proje": "#6366f1", "ENH Montaj": "#3b82f6", "Power": "#f59e0b", "Abonelik": "#0ea5e9", "Süzme": "#06b6d4", "ENH QC": "#10b981" };
-  const baslik = `${regionTitle} — ${isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Saha Durum Özeti"}`;
+  // 27.10.2026: Firma / Taşeron filtresi seçiliyse başlık seçimi söyler ("Teknocenter — Saha Durum Özeti")
+  const baslikKapsam = firmaBaslik ? (regionFilter && regionFilter !== "ALL" ? `${firmaBaslik} · ${regionTitle}` : firmaBaslik) : regionTitle;
+  const baslik = `${baslikKapsam} — ${isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Saha Durum Özeti"}`;
   const kapsamNotu = typeof toplam === "number" && toplam !== rows.length ? `filtre: ${rows.length} / toplam ${toplam} saha` : null;
   const veriYok = durum === "yukleniyor" || durum === "hata";
   return (
