@@ -1549,3 +1549,62 @@ body {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* ── Rollout: kompakt saha durum özeti + açılır ilerleme detayı (27.10.2026) ───────────────────────── */
+.rolloutTitleKompakt { margin-bottom: 8px; gap: 10px; }
+.rolloutTitleKompakt img { width: 34px; height: 34px; }
+.rolloutTitleKompakt span { font-size: 22px; }
+.rsOzet { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin: 6px 0 8px; }
+.rsOzetSatir { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px; min-height: 56px; box-sizing: border-box; }
+.rsOzetBaslik { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rsOzetAd { font-size: 13px; font-weight: 800; color: #0f172a; white-space: nowrap; }
+.rsOzetPill { background: #0b1a33; color: #fff; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.rsOzetSayilar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; }
+.rsOzetKalem { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #475569; padding: 2px 12px; border-left: 1px solid #e2e8f0; white-space: nowrap; }
+.rsOzetKalem:first-child { border-left: none; padding-left: 0; }
+.rsOzetIkon { font-size: 13px; line-height: 1; }
+.rsOzetEtiket { font-weight: 600; }
+.rsOzetSayi { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rsOzetKapsam { color: #94a3b8; font-size: 11px; }
+.rsOzetDugme { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #dbe3ee; color: #1e3a5f; border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.rsOzetDugme:hover { background: #eff6ff; }
+.rsOzetDugme:focus-visible { outline: 2px solid #1e3a5f; outline-offset: 2px; }
+.rsOzetOk { display: inline-block; transition: transform .15s ease; }
+.rsOzetOk.acik { transform: rotate(180deg); }
+.rsOzetDetay { border-top: 1px solid #f1f5f9; padding: 6px 16px 10px; animation: rsOzetAcil .18s ease-out; }
+@keyframes rsOzetAcil { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.rsOzetDetayBaslik, .rsOzetDetaySatir { display: grid; grid-template-columns: minmax(200px, 1.6fr) 130px minmax(120px, 1fr) 56px 110px; gap: 12px; align-items: center; }
+.rsOzetDetayBaslik { font-size: 10.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; padding: 4px 0; }
+.rsOzetDetaySatir { padding: 6px 0; border-top: 1px solid #f8fafc; font-size: 12.5px; color: #0f172a; }
+.rsOzetDetayAd { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsOzetDetayCumle { font-weight: 500; color: #64748b; }
+.rsOzetDetaySayi { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; }
+.rsOzetCubuk { display: block; height: 6px; border-radius: 3px; background: #eef2f7; overflow: hidden; }
+.rsOzetCubukDolu { display: block; height: 100%; border-radius: 3px; transition: width .25s ease; }
+.rsOzetDetayYuzde { font-weight: 700; color: #475569; text-align: right; font-variant-numeric: tabular-nums; }
+.rsOzetDetayBekleyen { font-size: 12px; font-weight: 700; white-space: nowrap; }
+@media (max-width: 760px) {
+  .rsOzetDetayBaslik { display: none; }
+  .rsOzetDetaySatir { grid-template-columns: 1fr 70px; }
+  .rsOzetCubuk, .rsOzetDetayYuzde { display: none; }
+  .rsOzetDugme { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rsOzetDetay { animation: none; }
+  .rsOzetOk, .rsOzetCubukDolu { transition: none; }
+}
+/* Filtre satırı: tek hizada, dar ekranda düzenli alt satır; işlem düğmeleri sağda */
+.rolloutFiltre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 8px 0 10px; }
+.rolloutFiltre .select { max-width: 200px; }
+.rolloutFiltre .qcActionBox { margin-left: auto; flex-wrap: wrap; }
+.rolloutYetkiEtiketi { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #64748b; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+/* Tablo: kompakt satır, belirgin ve yatayda sabit Site ID, tutarlı milestone hücreleri */
+.rolloutTableWrap { padding: 8px 10px; margin-top: 0; }
+.rolloutTable thead th { font-size: 11px; padding: 6px 10px; }
+.rolloutTable tbody td { padding: 5px 10px; font-size: 12.5px; line-height: 1.3; height: 34px; box-sizing: border-box; }
+.rolloutTable .siteIdCell { position: sticky; left: 0; z-index: 1; background: #fff; font-weight: 800; color: #0f172a; font-family: ui-monospace, Menlo, monospace; letter-spacing: .01em; box-shadow: inset -2px 0 0 #e2e8f0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.rolloutTable thead th.siteIdCell { z-index: 3; background: #eef2ff; }
+.rolloutTable tbody tr:hover .siteIdCell { background: #f9fafb; }
+.rolloutTable .msCell { text-align: center; width: 44px; min-width: 44px; }
+.rolloutTable .msCell:focus-visible { outline: 2px solid #1e3a5f; outline-offset: -2px; }
+.rolloutTable .msIkon { display: inline-block; font-size: 13px; line-height: 1; width: 16px; }

@@ -6792,7 +6792,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
 
   return (
     <>
-      <h1 className="rolloutTitle">
+      <h1 className="rolloutTitle rolloutTitleKompakt">
         <img src={towerIcon} alt="Baz istasyonu" />
         <span>Rollout Data</span>
         {kapsamEtiketi && <span title="Yalnız firmanıza ait iş kollarının sahaları listelenir; başka firmanın iş detayı gösterilmez"
@@ -6810,23 +6810,18 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         rows={filteredRows}
         regionFilter={regionFilter}
         enhFilter={enhFilter}
+        toplam={rows.length}
+        durum={errorMessage ? "hata" : loading ? "yukleniyor" : "ok"}
       />
 
-      <div
-        style={{
-          display: "flex",
-          gap: "12px",
-          flexWrap: "wrap",
-          margin: "20px 0",
-          alignItems: "center",
-        }}
-      >
+      <div className="rolloutFiltre">
         <input
           className="search"
           placeholder="Site, proje, il, durum ara..."
+          aria-label="Site, proje, il veya durum ara"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: "1 1 320px" }}
+          style={{ flex: "1 1 260px", minWidth: "200px" }}
         />
 
         <select
@@ -6881,7 +6876,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         </select>
 
         <div className="qcActionBox">
-          {saltOkunur && <span style={{ fontSize: "12px", fontWeight: 700, color: "#475569", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "8px 12px", whiteSpace: "nowrap" }}>Görüntüleme yetkisi</span>}
+          {saltOkunur && <span className="rolloutYetkiEtiketi" title="Bu ekranda yalnız görüntüleme yetkiniz var; kayıt değiştirme, iş atama ve Clean Up kapalı">🔒 Görüntüleme</span>}
           {!saltOkunur && <button
             className="saveButton"
             onClick={() => {
@@ -6992,8 +6987,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         saltOkunur={saltOkunur}
       />
 
-      <div className="tableWrap" style={isKoluListeModu(rows, search, isKoluFilter) ? { display: "none" } : undefined}>
-        <table>
+      <div className="tableWrap rolloutTableWrap" style={isKoluListeModu(rows, search, isKoluFilter) ? { display: "none" } : undefined}>
+        <table className="rolloutTable">
           <thead>
             <tr>
               <th colSpan="1">✏️</th>
@@ -7037,7 +7032,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
               <th>Site Type</th>
               <th>Site Fiziksel Tip</th>
               <th>Project Code</th>
-              <th>Site Code</th>
+              <th className="siteIdCell">Site Code</th>
               <th>Malzeme Status</th>
               <th>İl</th>
 
@@ -7110,10 +7105,16 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
                 const ms_rfFin   = !!row.installation_actual_end_date;
                 const ms_qcOk    = String(row.qc_durum||"").toUpperCase()==="OK";
                 const ms_accept  = !!row.pac_actual_end_date;
-                const ms = (v) => v ? "✅" : "⏳";
-                const msTd = (v) => (
-                  <td style={{ textAlign:"center", fontSize:"14px", background: v?"#f0fdf4":"#fafafa" }}>{ms(v)}</td>
-                );
+                // 27.10.2026: durum yalnız renkle değil ikon + metinle; tarih varsa hover ve klavye odağında (title / aria-label)
+                const msTd = (v, ad, tarih) => {
+                  const t = tarih && tarih !== "N/A" ? formatDate(tarih) : "";
+                  const etiket = `${ad}: ${v ? "tamamlandı" : "bekliyor"}${t ? " · " + t : ""}`;
+                  return (
+                    <td className="msCell" tabIndex={0} title={etiket} aria-label={etiket} style={{ background: v ? "#f0fdf4" : "#fafafa" }}>
+                      <span aria-hidden="true" className="msIkon">{v ? "✅" : "⏳"}</span>
+                    </td>
+                  );
+                };
                 const hasBelge = !!(row.los_belge_url || row.tssr_belge_url || row.btk_belge_url || row.emr_belge_url || row.ysb_belge_url || row.pac_belge_url || row.enh_proje_belge_url);
                 return (
                 <tr key={row.id}>
@@ -7134,16 +7135,16 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
                       <BelgeSecModal siteCode={row.site_code} kaynak={row} onClose={() => setBelgeSecRow(null)} />
                     )}
                   </td>
-                  {msTd(ms_rfRcv)}
-                  {msTd(ms_rfStart)}
-                  {msTd(ms_rfFin)}
-                  {msTd(ms_qcOk)}
-                  {msTd(ms_accept)}
+                  {msTd(ms_rfRcv, "Malzeme", row.installation_actual_start_date)}
+                  {msTd(ms_rfStart, "Montaj başladı", row.installation_actual_start_date)}
+                  {msTd(ms_rfFin, "Montaj tamamlandı", row.installation_actual_end_date)}
+                  {msTd(ms_qcOk, "QC", row.qc_closed_date)}
+                  {msTd(ms_accept, "Kabul (PAC)", row.pac_actual_end_date)}
                   <td>{row.bolge}</td>
                   <td>{row.site_type}</td>
                   <td>{row.site_physical_type}</td>
                   <td>{row.project_code}</td>
-                  <td>{row.site_code}</td>
+                  <td className="siteIdCell" title={row.site_code}>{row.site_code}</td>
                   <td>{row.malzeme_status}</td>
                   <td>{row.il}</td>
 
@@ -38026,7 +38027,7 @@ function QCUploadInline({ onClose, onUploaded }) {
     </div>
   );
 }
-function RolloutSummaryCard({ rows, regionFilter, enhFilter }) {
+function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok" }) {
   const regionTitle = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
   const isEnhMode = enhFilter !== "ALL";
 
@@ -38102,61 +38103,70 @@ function RolloutSummaryCard({ rows, regionFilter, enhFilter }) {
     const done = it.kapsam.filter(it.done).length;
     return { ...it, total, done, bekleyen: total - done, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
   });
-  const sonAsama = hesap[hesap.length - 1];
-
+  const sonAsama = hesap[hesap.length - 1]; // eslint-disable-line no-unused-vars
+  // 27.10.2026 (Orhan): kompakt özet — büyük beş satırlık panel ilk açılışta KAPALI, tek satır sayılar + "İlerleme detayları"
+  // düğmesi (aynı yerde açılır; modal / sayfa yok). Hesaplar (items / hesap) değişmedi; sayılar sabitlenmedi.
+  const [detayAcik, setDetayAcik] = useState(false);
+  const detayId = "rollout-ilerleme-detay";
+  const KISA = { "Malzeme": "Malzeme", "Montaj Başladı": "Başlayan", "Montaj Bitti": "Tamamlanan", "QC": "QC", "Acceptance": "Kabul" };
+  // Aşamaya uygun cümle: "17 sahada malzeme mevcut" / "0 sahada montaj tamamlandı" — başlayanı tamamlanan gibi sunmaz
+  const CUMLE = { "Malzeme": "sahada malzeme mevcut", "Montaj Başladı": "sahada montaj başladı", "Montaj Bitti": "sahada montaj tamamlandı",
+    "QC": "sahada QC kapandı", "Acceptance": "sahada kabul tamamlandı", "ENH Proje": "sahada ENH projesi hazır", "ENH Montaj": "sahada ENH kurulumu tamamlandı",
+    "Power": "sahada enerji bağlandı", "Abonelik": "sahada abonelik tamamlandı", "Süzme": "sahada süzme yapıldı", "ENH QC": "sahada ENH QC kapandı" };
+  const DUZ_RENK = { "Malzeme": "#6366f1", "Montaj Başladı": "#3b82f6", "Montaj Bitti": "#0ea5e9", "QC": "#f59e0b", "Acceptance": "#10b981",
+    "ENH Proje": "#6366f1", "ENH Montaj": "#3b82f6", "Power": "#f59e0b", "Abonelik": "#0ea5e9", "Süzme": "#06b6d4", "ENH QC": "#10b981" };
+  const baslik = `${regionTitle} — ${isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Saha Durum Özeti"}`;
+  const kapsamNotu = typeof toplam === "number" && toplam !== rows.length ? `filtre: ${rows.length} / toplam ${toplam} saha` : null;
+  const veriYok = durum === "yukleniyor" || durum === "hata";
   return (
-    <div style={{ background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", margin: "12px 0 4px", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", padding: "14px 20px 11px", borderBottom: "1px solid #f1f5f9" }}>
-        <div>
-          <div style={{ fontSize: "14px", fontWeight: 700, color: "#0f172a" }}>{regionTitle} — {isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Genel Durum"}</div>
-          <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Aşama bazında ilerleme · {new Date().toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" })}</div>
+    <section aria-label="Saha durum özeti" className="rsOzet">
+      <div className="rsOzetSatir">
+        <div className="rsOzetBaslik">
+          <span className="rsOzetAd">{baslik}</span>
+          {veriYok
+            ? <span className="rsOzetPill" style={{ background: durum === "hata" ? "#fee2e2" : "#f1f5f9", color: durum === "hata" ? "#b91c1c" : "#475569" }}>{durum === "hata" ? "veri yüklenemedi" : "yükleniyor…"}</span>
+            : <span className="rsOzetPill" title={kapsamNotu || "Listelenen saha sayısı"}>{rows.length} saha{kapsamNotu ? ` · ${kapsamNotu}` : ""}</span>}
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
-          {sonAsama && sonAsama.total > 0 && (
-            <span style={{ fontSize: "11px", color: "#64748b" }}>{sonAsama.label} <b style={{ color: "#334155" }}>%{sonAsama.pct}</b></span>
-          )}
-          <span style={{ background: "#0b1a33", color: "#fff", borderRadius: "999px", padding: "5px 14px", fontSize: "13px", fontWeight: 700 }}>{rows.length} saha</span>
-        </div>
+        {!veriYok && (
+          <div className="rsOzetSayilar" role="list">
+            {hesap.map((it) => (
+              <span key={it.label} role="listitem" className="rsOzetKalem"
+                title={`${it.label}: ${it.done} / ${it.total} saha · %${it.pct}${it.bekleyen > 0 ? ` · ${it.bekleyen} bekliyor` : ""}`}>
+                <span aria-hidden="true" className="rsOzetIkon">{it.icon}</span>
+                <span className="rsOzetEtiket">{KISA[it.label] || it.label}</span>
+                <b className="rsOzetSayi" style={{ color: it.total > 0 && it.done >= it.total ? "#16a34a" : "#0f172a" }}>{it.done}</b>
+                {it.total !== rows.length && <span className="rsOzetKapsam">/{it.total}</span>}
+              </span>
+            ))}
+          </div>
+        )}
+        {!veriYok && hesap.length > 0 && (
+          <button type="button" className="rsOzetDugme" aria-expanded={detayAcik} aria-controls={detayId} onClick={() => setDetayAcik((a) => !a)}>
+            {detayAcik ? "Detayları gizle" : "İlerleme detayları"}
+            <span aria-hidden="true" className={`rsOzetOk${detayAcik ? " acik" : ""}`}>▾</span>
+          </button>
+        )}
       </div>
-      <div style={{ padding: "2px 20px 4px" }}>
-        {hesap.map((it, i) => {
-          const onceki = i > 0 ? hesap[i - 1] : null;
-          const tamam = it.pct >= 100 && it.total > 0;
-          return (
-            <div key={it.label} style={{ display: "grid", gridTemplateColumns: "minmax(190px,230px) 1fr minmax(170px,210px)", gap: "20px", alignItems: "center", padding: "11px 0", borderBottom: i < hesap.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-              <div style={{ display: "flex", gap: "11px", alignItems: "center", minWidth: 0 }}>
-                <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: IKON_BG[it.label] || "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flex: "none" }}>{it.icon}</div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>{it.label}{it.total !== rows.length ? <span style={{ fontWeight: 500, color: "#94a3b8" }}> · {it.total} saha</span> : null}</div>
-                  <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>{ACIKLAMA[it.label] || ""}</div>
-                </div>
-              </div>
-              <div style={{ position: "relative", minWidth: 0 }}>
-                <div style={{ height: "13px", borderRadius: "7px", background: "#eef2f7", overflow: "hidden", position: "relative" }}>
-                  <div style={{ height: "100%", borderRadius: "7px", width: `${Math.max(it.done > 0 ? 2 : 0, it.pct)}%`, background: tamam ? "linear-gradient(90deg,#16a34a,#22c55e)" : (RENK[it.label] || "linear-gradient(90deg,#3b82f6,#60a5fa)"), transition: "width .5s ease" }} />
-                  {onceki && onceki.pct > it.pct && (
-                    <div title={`${onceki.label}: %${onceki.pct}`} style={{ position: "absolute", top: "-4px", bottom: "-4px", left: `${onceki.pct}%`, width: "2px", background: "#334155", opacity: .45, borderRadius: "1px", transform: "translateX(-1px)" }} />
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginTop: "5px", gap: "10px" }}>
-                  <span>{it.total > 0 ? <>{it.total} sahanın <b style={{ color: "#334155", fontWeight: 600 }}>{it.done}</b>'i tamamlandı</> : "Kapsamda saha yok"}</span>
-                  {onceki && onceki.done > 0 && <span style={{ whiteSpace: "nowrap" }}>{onceki.label} olanın <b style={{ color: "#334155", fontWeight: 600 }}>%{Math.round((it.done / onceki.done) * 100)}</b>'i</span>}
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "flex-end", gap: "8px" }}>
-                  <span style={{ fontSize: "21px", fontWeight: 800, color: tamam ? "#16a34a" : "#0f172a", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{it.done}</span>
-                  <span style={{ fontSize: "12px", fontWeight: 700, color: "#94a3b8" }}>%{it.pct}</span>
-                </div>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "999px", marginTop: "4px", background: it.bekleyen > 0 ? "#fffbeb" : "#ecfdf5", color: it.bekleyen > 0 ? "#b45309" : "#047857", whiteSpace: "nowrap" }}>
-                  {it.bekleyen > 0 ? `⏳ ${it.bekleyen} bekliyor` : "✓ Tamamı bitti"}
+      {detayAcik && !veriYok && (
+        <div id={detayId} className="rsOzetDetay">
+          <div className="rsOzetDetayBaslik" aria-hidden="true"><span>Aşama</span><span>Tamamlanan/Toplam</span><span>İlerleme</span><span>Yüzde</span><span>Bekleyen</span></div>
+          {hesap.map((it) => {
+            const tamam = it.pct >= 100 && it.total > 0;
+            return (
+              <div key={it.label} className="rsOzetDetaySatir" title={`${it.done} ${CUMLE[it.label] || "sahada tamamlandı"}`}>
+                <span className="rsOzetDetayAd"><span aria-hidden="true">{it.icon}</span> {it.label}<span className="rsOzetDetayCumle"> · {it.done} {CUMLE[it.label] || "sahada tamamlandı"}</span></span>
+                <span className="rsOzetDetaySayi">{it.done} / {it.total}</span>
+                <span className="rsOzetCubuk" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={it.pct} aria-label={`${it.label} yüzde ${it.pct}`}>
+                  <span className="rsOzetCubukDolu" style={{ width: `${Math.max(it.done > 0 ? 2 : 0, it.pct)}%`, background: tamam ? "#16a34a" : (DUZ_RENK[it.label] || "#3b82f6") }} />
                 </span>
+                <span className="rsOzetDetayYuzde">%{it.pct}</span>
+                <span className="rsOzetDetayBekleyen" style={{ color: it.bekleyen > 0 ? "#b45309" : "#16a34a" }}>{it.total === 0 ? "kapsam yok" : it.bekleyen > 0 ? `${it.bekleyen} bekliyor` : "tamamı bitti"}</span>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
