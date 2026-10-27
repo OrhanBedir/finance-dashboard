@@ -5281,7 +5281,15 @@ app.get("/rollout/fix-site-types", async (req, res) => {
         skipped++;
       }
     }
-    res.json({ ok: true, fixed, skipped, total: rows.rows.length });
+    // 27.10.2026 (Orhan): bölge / il boş kayıtlar Site ID önekinden doldurulur (BI → Bartın, DU → Düzce …); dolu değer ezilmez
+    let bolgeDuzeltilen = 0, ilDuzeltilen = 0;
+    const bos = await pool.query(`SELECT id, site_code, bolge, il FROM rollout_progress WHERE COALESCE(TRIM(bolge),'') = '' OR COALESCE(TRIM(il),'') = ''`);
+    for (const row of bos.rows) {
+      const b = getRegionFromSiteCode(row.site_code), c = getCityFromSiteCode(row.site_code);
+      if (b && !String(row.bolge || "").trim()) { await pool.query("UPDATE rollout_progress SET bolge=$1 WHERE id=$2 AND COALESCE(TRIM(bolge),'') = ''", [b, row.id]); bolgeDuzeltilen++; }
+      if (c && !String(row.il || "").trim()) { await pool.query("UPDATE rollout_progress SET il=$1 WHERE id=$2 AND COALESCE(TRIM(il),'') = ''", [c, row.id]); ilDuzeltilen++; }
+    }
+    res.json({ ok: true, fixed, skipped, total: rows.rows.length, bolge_duzeltilen: bolgeDuzeltilen, il_duzeltilen: ilDuzeltilen });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -11361,7 +11369,11 @@ function getRegionFromSiteCode(siteCode) {
     code.startsWith("ES") ||
     code.startsWith("BO") ||
     code.startsWith("ZO") ||
-    code.startsWith("KA")
+    code.startsWith("KA") ||
+    // 27.10.2026 (Orhan): Bartın (BI), Düzce (DU), Çankırı (CN) sahaları bölgesiz kalıyordu — Ankara bölgesi
+    code.startsWith("BI") ||
+    code.startsWith("DU") ||
+    code.startsWith("CN")
   ) {
     return "Ankara";
   }
@@ -11620,6 +11632,7 @@ function getCityFromSiteCode(siteCode) {
   if (code.startsWith("ZO")) return "ZONGULDAK";
   if (code.startsWith("KA")) return "KARABÜK";
   if (code.startsWith("BI")) return "BARTIN";
+  if (code.startsWith("DU")) return "DÜZCE"; // 27.10.2026 (Orhan)
   if (code.startsWith("CN")) return "ÇANKIRI";
 
   if (code.startsWith("IZ")) return "İZMİR";
@@ -12135,7 +12148,8 @@ app.get("/export/excel", async (req, res) => {
     };
 
     result.rows.forEach((row) => {
-      const rowObj = { ...row, site_type: getSiteTypeFromSiteCode(row.site_code) };
+      const rowObj = { ...row, site_type: getSiteTypeFromSiteCode(row.site_code),
+        bolge: getRegionFromSiteCode(row.site_code) || row.bolge, il: row.il || getCityFromSiteCode(row.site_code) || null }; // 27.10.2026: ekranla aynı
       DATE_KEYS.forEach(k => { if (k in rowObj) rowObj[k] = toDate(rowObj[k]); });
       const excelRow = worksheet.addRow(rowObj);
       // Tarih hücrelerine format uygula
@@ -12253,6 +12267,7 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
         ...r,
         site_type: normalizedSiteType,
         bolge: getRegionFromSiteCode(r.site_code) || r.bolge,
+        il: r.il || getCityFromSiteCode(r.site_code) || null, // 27.10.2026: HW yüklemesinden gelen kayıtlarda il boş kalıyordu
 
         installation_actual_start_date: installStart,
         installation_actual_end_date: installEnd,
