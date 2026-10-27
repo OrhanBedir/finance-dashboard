@@ -1624,6 +1624,7 @@ body {
 .ftfEtiket button { border: none; background: transparent; color: #1e3a5f; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 5px; border-radius: 999px; }
 .ftfEtiket button:hover, .ftfEtiket button:focus-visible { background: #bfdbfe; }
 .ftfEtiketKolu { background: #f1f5f9; color: #475569; border-color: #e2e8f0; padding-right: 10px; }
+.ftfNot { font-size: 10.5px; color: #94a3b8; padding: 6px 2px 0; }
 .ftfTemizleLink { border: none; background: none; color: #475569; font-size: 12px; text-decoration: underline; cursor: pointer; }
 @media (max-width: 640px) { .ftf .ftfDugme { max-width: none; } .ftfPanel { position: fixed; left: 16px; right: 16px; top: auto; width: auto; } }
 /* ERC nakit akışı — hedef firma seçimi (27.10.2026) */

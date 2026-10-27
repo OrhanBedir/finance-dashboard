@@ -1860,11 +1860,15 @@ const rolloutKapsam = async (req) => (req.markaRollout !== undefined ? req.marka
 // Her satıra iş koluna göre AÇIKÇA yazılmış taşeron adları eklenir: firma_rf (RF / LOS / TSS / TSSR / BTK / TRS / EMR / PAC /
 // YSB) ve firma_enh (ENH / ENH proje / Power). İkisinin birleşimi, Teknocenter panelinin satır kapsamıyla (herhangi bir iş
 // kolunun taşeron alanı) birebir aynı kuraldır. Adlar normalize edilir (büyük harf, tek boşluk); N/A / boş alınmaz.
-// firma_sozluk: ad → alt marka kodu (MARKA ROLLOUT KAPSAMI deseni + ekipler.bagli_firma etiketleri; TEKNOSA eşleşmez).
+// firma_sozluk: ad → üst firma kodu. 27.10.2026 (Orhan) gruplama kuralı: yalnız iş kolunun firma/taşeron alanındaki AD belirler —
+//   önek + ayraç (TEKNO_ENDER, AHY_2KX, ŞİMŞEK_VEDAT / SIMSEK_VEDAT) ya da doğrudan firma adı (TEKNO, TEKNOCENTER, AHY, ŞİMŞEK,
+//   SIMSEK, "ŞİMŞEK HABERLEŞME"). Desen MARKA ROLLOUT KAPSAMI'nın sınırlı eşleşmesidir (markaRolloutDeseni: TEKNOSA ✗) ve
+//   Türkçe harfler katlanarak karşılaştırılır (Ş→S, İ→I …). Ekip etiketleri (ekipler.bagli_firma) GRUPLAMADA kullanılmaz:
+//   öneksiz "2KX" gibi bir ad otomatik TEKNO / AHY sayılmaz → "Diğer". Saha kapsamı / erişim (K.esle) bundan etkilenmez.
 // Alt marka hesabına yalnız kendi firmasının adları gönderilir (başka firmanın taşeron adı açılmaz).
 const ROLLOUT_KOL_GRUBU = { rf: "rf", los: "rf", tss: "rf", tssr: "rf", btk: "rf", trs: "rf", emr: "rf", pac: "rf", ysb: "rf", enh: "enh", enh_proje: "enh", power: "enh" };
 const rolloutFirmaAdi = (v) => {
-  const s = String(v || "").trim().toUpperCase().replace(/\s+/g, " ");
+  const s = String(v || "").trim().toLocaleUpperCase("tr-TR").replace(/\s+/g, " "); // "Şimşek_vedat" → ŞİMŞEK_VEDAT (ŞIMŞEK değil)
   return !s || s === "N/A" || s === "__NA__" || s === "-" ? null : s;
 };
 function rolloutFirmaGruplari(r) {
@@ -1872,14 +1876,21 @@ function rolloutFirmaGruplari(r) {
   for (const L of ROLLOUT_IS_KOLU_ALANLARI) { const v = rolloutFirmaAdi(r[L.subcon]); if (v) g[ROLLOUT_KOL_GRUBU[L.kolu]].add(v); }
   return g;
 }
+// Türkçe harf katlama: ŞİMŞEK / Şimşek / SIMSEK / ŞIMŞEK aynı karşılaştırılır (görünen ad değişmez)
+const firmaKatla = (v) => String(v || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G")
+  .replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C").replace(/\s+/g, " ").trim();
+// Ana firma: alt marka değildir (markalar tablosunda platform ERC olarak durur); Rollout'ta ŞİMŞEK_xxx / ŞİMŞEK HABERLEŞME yazılır
+const ROLLOUT_ANA_FIRMA = { kod: "SIMSEK", ad: "Şimşek Haberleşme", onek: "ŞİMŞEK", etiket: "ŞİMŞEK", bitis: null };
+// Üst grup etiketi: ad kodla başlıyorsa yalnız kod ("AHY Elektrik" → AHY), değilse "KOD — Ad" ("TEKNO — Teknocenter")
+const firmaGrupEtiketi = (P) => P.etiket || (firmaKatla(P.ad).split(" ")[0] === firmaKatla(P.kod) ? P.kod : `${P.kod} — ${P.ad}`);
 async function rolloutFirmaEsleyicileri() {
-  const out = [];
-  for (const m of ALT_MARKALAR) {
-    const P = markaProfil(m.kod);
-    const desen = new RegExp(markaRolloutDeseni(P)), etiketler = await markaRolloutEtiketleri(P.kod);
-    out.push({ kod: P.kod, ad: P.ad, esle: (s) => desen.test(s) || etiketler.includes(s) });
-  }
-  return out;
+  const profiller = [...ALT_MARKALAR.map((m) => markaProfil(m.kod)), ROLLOUT_ANA_FIRMA];
+  return profiller.map((P, i) => {
+    const desen = new RegExp(markaRolloutDeseni({ ...P, kod: firmaKatla(P.kod), ad: firmaKatla(P.ad), onek: firmaKatla(P.onek || P.kod) }));
+    // Sıra: aktif alt marka (TEKNO) → bitmiş alt marka (AHY) → ana firma (ŞİMŞEK)
+    const sira = P === ROLLOUT_ANA_FIRMA ? 2 : (P.bitis ? 1 : 0);
+    return { kod: P.kod, ad: P.ad, etiket: firmaGrupEtiketi(P), sira: sira * 100 + i, esle: (ad) => desen.test(firmaKatla(ad)) };
+  }).sort((x, y) => x.sira - y.sira);
 }
 // Ham satırlar (maske ÖNCESİ) → { gruplar: [{rf:[], enh:[]}], sozluk, markalar }. K: alt marka kapsamı (yalnız kendi adları)
 async function rolloutFirmaBilgisi(hamRows, K) {
@@ -1894,7 +1905,7 @@ async function rolloutFirmaBilgisi(hamRows, K) {
     return o;
   });
   const temizSozluk = Object.fromEntries(Object.entries(sozluk).filter(([, m]) => m && (!K || m === K.kod)));
-  const markalar = esleyiciler.filter((m) => markaSay[m.kod] && (!K || m.kod === K.kod)).map((m) => ({ kod: m.kod, ad: m.ad }));
+  const markalar = esleyiciler.filter((m) => markaSay[m.kod] && (!K || m.kod === K.kod)).map((m) => ({ kod: m.kod, ad: m.ad, etiket: m.etiket }));
   return { gruplar, sozluk: temizSozluk, markalar };
 }
 // Kapsamdaki saha kodları (UPPER) — iş atama / Clean Up / iş yükü listelerini süzmek için

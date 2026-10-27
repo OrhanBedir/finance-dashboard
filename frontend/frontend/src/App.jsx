@@ -6613,6 +6613,9 @@ function HwYuklemeMerkezi({ odak, onRejected }) {
 // Seçim anahtarı: "M:<marka kodu>" (üst firmanın tamamı) veya "T:<ad>". Seçimler kendi içinde VEYA, diğer filtrelerle VE;
 // satır bazında süzüldüğü için üst firma + alt taşeron birlikte seçilince saha iki kez sayılmaz.
 const _firmaNorm = (s) => String(s || "").toLocaleUpperCase("tr").replace(/\s+/g, " ").trim();
+// 27.10.2026: Türkçe harf katlama — "şimşek", "SIMSEK", "ŞİMŞEK" aynı aranır / karşılaştırılır (sunucudaki firmaKatla ile aynı)
+const _firmaKatla = (s) => _firmaNorm(s).replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C");
+const rolloutFirmaGrupAdi = (m) => (m ? (m.etiket || `${m.kod} — ${m.ad}`) : "");
 function rolloutFirmaAdlari(row, kolu = "TUMU") {
   if (kolu === "rf") return row.firma_rf || [];
   if (kolu === "enh") return row.firma_enh || [];
@@ -6625,31 +6628,40 @@ function rolloutFirmaSecili(row, secim, sozluk, kolu) {
 }
 // Serbest aramada firma eşleşmesi — sınırlı: "TEKNO" → TEKNO, TEKNO_ENDER, Teknocenter (TEKNO markası); TEKNOSA ✗
 function rolloutFirmaAramaEslesir(row, q, sozluk, markalar) {
-  const Q = _firmaNorm(q);
+  const Q = _firmaKatla(q);
   if (Q.length < 2) return false;
-  const sinirli = (ad) => ad === Q || (ad.startsWith(Q) && /[^A-Z0-9ÇĞİÖŞÜ]/.test(ad.charAt(Q.length)));
+  const sinirli = (ham) => { const ad = _firmaKatla(ham); return ad === Q || (ad.startsWith(Q) && /[^A-Z0-9]/.test(ad.charAt(Q.length))); };
   const markaEslesir = (kod) => {
     const m = markalar.find((x) => x.kod === kod);
     if (!m) return false;
-    const ad = _firmaNorm(m.ad), adBitisik = ad.replace(/\s+/g, "");
-    return Q === _firmaNorm(m.kod) || Q === ad || Q === adBitisik || (Q.length >= 3 && (ad.startsWith(Q) || adBitisik.startsWith(Q.replace(/\s+/g, ""))));
+    const ad = _firmaKatla(m.ad), adBitisik = ad.replace(/\s+/g, ""), etiket = _firmaKatla(m.etiket || "");
+    return Q === _firmaKatla(m.kod) || Q === ad || Q === adBitisik || (etiket && Q === etiket) || (Q.length >= 3 && (ad.startsWith(Q) || adBitisik.startsWith(Q.replace(/\s+/g, ""))));
   };
   return rolloutFirmaAdlari(row).some((ad) => sinirli(ad) || (sozluk[ad] && markaEslesir(sozluk[ad])));
 }
-function rolloutFirmaSecenekleri(rows, sozluk, markalar) {
-  const say = new Map();
-  for (const r of rows || []) for (const ad of rolloutFirmaAdlari(r)) say.set(ad, (say.get(ad) || 0) + 1);
+// 27.10.2026 (Orhan): sayaçlar BENZERSİZ saha sayısıdır ve yalnız seçili iş kolunun firma/taşeron alanından hesaplanır
+// (kolu: TUMU | rf | enh). Üst grup sayısı alt ekip sayılarının toplamı değildir — aynı saha birden fazla ekipte geçse de bir kez.
+// rows: firma filtresi DIŞINDAKİ filtrelerden geçmiş satırlar (seçince gelecek sayıyla aynı). Seçili ama 0 kalan seçenek görünür kalır.
+function rolloutFirmaSecenekleri(rows, sozluk, markalar, kolu = "TUMU", secim = []) {
+  const secili = new Set(secim || []);
+  const say = new Map(), grupSay = new Map();
+  for (const r of rows || []) {
+    const adlar = rolloutFirmaAdlari(r, kolu); // satır içinde tekil
+    const gruplar = new Set();
+    for (const ad of adlar) { say.set(ad, (say.get(ad) || 0) + 1); if (sozluk[ad]) gruplar.add(sozluk[ad]); }
+    for (const g of gruplar) grupSay.set(g, (grupSay.get(g) || 0) + 1);
+  }
+  for (const k of secili) if (k.startsWith("T:") && !say.has(k.slice(2))) say.set(k.slice(2), 0);
   const sirala = (a, b) => b.sayi - a.sayi || a.ad.localeCompare(b.ad, "tr");
   const ustler = (markalar || []).map((m) => {
     const cocuklar = [...say].filter(([ad]) => sozluk[ad] === m.kod).map(([ad, sayi]) => ({ ad, sayi })).sort(sirala);
-    const sahaSayisi = (rows || []).filter((r) => rolloutFirmaAdlari(r).some((ad) => sozluk[ad] === m.kod)).length;
-    return { kod: m.kod, ad: m.ad, sayi: sahaSayisi, cocuklar };
-  }).filter((m) => m.cocuklar.length);
+    return { kod: m.kod, ad: m.ad, etiket: rolloutFirmaGrupAdi(m), sayi: grupSay.get(m.kod) || 0, cocuklar };
+  }).filter((m) => m.cocuklar.length || secili.has(`M:${m.kod}`));
   const digerleri = [...say].filter(([ad]) => !sozluk[ad]).map(([ad, sayi]) => ({ ad, sayi })).sort(sirala);
   return { ustler, digerleri };
 }
 function rolloutFirmaEtiketi(anahtar, markalar) {
-  if (anahtar.startsWith("M:")) { const k = anahtar.slice(2); return (markalar || []).find((m) => m.kod === k)?.ad || k; }
+  if (anahtar.startsWith("M:")) { const k = anahtar.slice(2); const m = (markalar || []).find((x) => x.kod === k); return m ? rolloutFirmaGrupAdi(m) : k; }
   return anahtar.slice(2);
 }
 function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu }) {
@@ -6664,10 +6676,10 @@ function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu
     setTimeout(() => araRef.current?.focus(), 0);
     return () => document.removeEventListener("mousedown", disTik);
   }, [acik]);
-  const Q = _firmaNorm(ara);
-  const uyar = (s) => !Q || _firmaNorm(s).includes(Q);
+  const Q = _firmaKatla(ara); // Türkçe harf duyarsız: "şimşek" → SIMSEK_xxx da bulunur
+  const uyar = (s) => !Q || _firmaKatla(s).includes(Q);
   const ustler = secenekler.ustler.map((m) => {
-    const ustUyar = uyar(m.ad) || uyar(m.kod);
+    const ustUyar = uyar(m.ad) || uyar(m.kod) || uyar(m.etiket);
     return { ...m, gorunur: ustUyar ? m.cocuklar : m.cocuklar.filter((c) => uyar(c.ad)), ustUyar };
   }).filter((m) => m.ustUyar || m.gorunur.length);
   const digerleri = secenekler.digerleri.filter((c) => uyar(c.ad));
@@ -6694,14 +6706,14 @@ function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu
           <div className="ftfListe">
             {ustler.map((m) => (
               <div key={m.kod} className="ftfGrup">
-                {satir(`M:${m.kod}`, `${m.ad} — ${m.kod}`, m.sayi, false, true)}
-                <div className="ftfAltBaslik">İlişkili ekipler / taşeronlar</div>
+                {satir(`M:${m.kod}`, m.etiket, m.sayi, false, true)}
+                <div className="ftfAltBaslik">Alt ekipler / taşeronlar</div>
                 {m.gorunur.map((c) => satir(`T:${c.ad}`, c.ad, c.sayi, true, false))}
               </div>
             ))}
             {digerleri.length > 0 && (
               <div className="ftfGrup">
-                <div className="ftfAltBaslik" style={{ paddingLeft: "10px" }}>Diğer firmalar / taşeronlar</div>
+                <div className="ftfAltBaslik" style={{ paddingLeft: "10px" }}>Diğer Firmalar / Taşeronlar</div>
                 {digerleri.map((c) => satir(`T:${c.ad}`, c.ad, c.sayi, false, false))}
               </div>
             )}
@@ -6717,6 +6729,7 @@ function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu
             </label>
             <button type="button" className="ftfTemizle" onClick={() => onSecim([])} disabled={!secim.length}>Seçimi temizle</button>
           </div>
+          <div className="ftfNot">Sayılar benzersiz saha sayısıdır; seçili iş kolu ve diğer filtrelere göre hesaplanır.</div>
         </div>
       )}
     </div>
@@ -7105,7 +7118,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
     };
   }, [loadData]);
 
-  const filteredRows = useMemo(() => {
+  const firmaHaricRows = useMemo(() => {
     const q = search.toLowerCase().trim();
 
     return rows.filter((row) => {
@@ -7153,12 +7166,15 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
 
       // 27.10.2026: firma / taşeron adıyla arama (TEKNO, Teknocenter, TEKNO_ENDER) — sınırlı eşleşme, TEKNOSA ✗
       const searchOk = q ? (text.includes(q) || rolloutFirmaAramaEslesir(row, q, firmaSozluk, firmaMarkalar)) : true;
-      const firmaOk = rolloutFirmaSecili(row, firmaSecim, firmaSozluk, firmaKolu);
 
-      return regionOk && typeOk && qcOk && enhOk && searchOk && firmaOk;
+      return regionOk && typeOk && qcOk && enhOk && searchOk;
     });
-  }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter, firmaSecim, firmaKolu, firmaSozluk, firmaMarkalar]);
-  const firmaSecenekleri = useMemo(() => rolloutFirmaSecenekleri(rows, firmaSozluk, firmaMarkalar), [rows, firmaSozluk, firmaMarkalar]);
+  }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter, firmaSozluk, firmaMarkalar]);
+  // 27.10.2026: firma / taşeron süzgeci en son — liste, özet, sayaçlar ve Excel aynı sonucu kullanır
+  const filteredRows = useMemo(() => firmaHaricRows.filter((row) => rolloutFirmaSecili(row, firmaSecim, firmaSozluk, firmaKolu)),
+    [firmaHaricRows, firmaSecim, firmaSozluk, firmaKolu]);
+  const firmaSecenekleri = useMemo(() => rolloutFirmaSecenekleri(firmaHaricRows, firmaSozluk, firmaMarkalar, firmaKolu, firmaSecim),
+    [firmaHaricRows, firmaSozluk, firmaMarkalar, firmaKolu, firmaSecim]);
   const firmaBaslik = firmaSecim.length === 0 ? null
     : firmaSecim.length === 1 ? rolloutFirmaEtiketi(firmaSecim[0], firmaMarkalar) : `${firmaSecim.length} firma/taşeron seçili`;
 
