@@ -558,6 +558,7 @@ const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
+const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 app.use(express.json());
@@ -1505,6 +1506,7 @@ const MARKA_KAYIT_SAHIBI = [
   [/^\/finance\/marka-taseron-fatura\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(firma,'')) AS m FROM invoice_entries WHERE id=$1`],
   [/^\/finance\/marka-taseron-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_taseron_odeme WHERE id=$1`],
   [/^\/finance\/marka-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'ERC')) AS m FROM cashflow_odeme WHERE id=$1`],
+  [/^\/finance\/marka-borc-aktarim\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_borc_aktarim WHERE id=$1`], // 26.10.2026 mutabakat
 ];
 app.use(async (req, res, next) => {
   try {
@@ -9115,6 +9117,7 @@ app.get("/finance/marka-nakit", authMiddleware, async (req, res) => {
    Beklenen alacaklar / HW ödedi-aktarılmadı tutarları bakiyeye eklenmez. Masraf formları çıkış değildir
    (iş avansını kapatır). Borç bakiyesinin kendisi kasaya eklenmez/çıkarılmaz; yalnız kasa işaretli hareketler. */
 const PK_KATEGORI_AD = { NAKIT_GIRIS: "Kasa girişi", BORC_GERI: "Borç geri ödemesi (giriş)", BORC_VERILEN: "Şimşek'e borç verildi",
+  BORC_IPTAL: "Borç iptali — ters kayıt (giriş)", BORC_GERI_IPTAL: "Geri ödeme iptali — ters kayıt (çıkış)", FIRMA_KASA_GIRIS: "Firma kendi kasası (ödeme karşılığı)",
   MAAS_ODEME: "Maaş ödemesi", MAAS_AVANSI: "Maaş avansı", IS_AVANSI: "İş avansı", ARAC_KIRA: "Araç kirası",
   ARAC_DEPOZITO: "Araç depozitosu", OFIS_KIRA: "Depo/Ofis kirası", TICKET: "Ticket/Yemek", TASERON: "Taşeron ödemesi", DIGER: "Diğer ödeme" };
 app.get("/finance/marka-proje-kasa", authMiddleware, async (req, res) => {
@@ -9126,19 +9129,24 @@ app.get("/finance/marka-proje-kasa", authMiddleware, async (req, res) => {
     await ensureMarkaKasaTable(); await ensureMarkaBorcTable();
     const { rows: nakit, P } = await markaNakitSatirlari(marka, req);
     const [kasa, borc, sao] = await Promise.all([
-      pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu
+      pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu, kaynak
                   FROM marka_kasa WHERE UPPER(marka)=$1`, [marka]),
-      pool.query(`SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu,
-                  COALESCE(kasa_hareketi,false) AS kasa_hareketi FROM marka_borc WHERE UPPER(marka)=$1`, [marka]),
+      pool.query(`SELECT id, UPPER(COALESCE(tip,'BORC')) AS tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama, COALESCE(belge_yolu,'') AS belge_yolu,
+                  COALESCE(kasa_hareketi,false) AS kasa_hareketi, COALESCE(kaynak,'MANUEL') AS kaynak FROM marka_borc WHERE UPPER(marka)=$1`, [marka]),
       pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama FROM simsek_ahy_odeme WHERE UPPER(marka)=$1`, [marka]).catch(() => ({ rows: [] })),
     ]);
     const h = [];
-    kasa.rows.forEach(r => h.push({ tarih: r.tarih, yon: "GIRIS", kategori: "NAKIT_GIRIS", kisi: "", aciklama: r.aciklama, referans: r.belge_yolu ? "Dekont" : "", belge_url: r.belge_yolu || "",
-      odeme_yontemi: "", tutar: Number(r.tutar || 0), kaynak: "marka_kasa", kaynak_id: r.id, dahil: true }));
+    // 26.10.2026: kasa girişinin kaynağı (Şimşek kasası / firmanın kendi kasası) hareket listesinde ayrı kategori
+    kasa.rows.forEach(r => { const firma = markaMutabakat.kasaKaynagi(r, P) === "FIRMA";
+      h.push({ tarih: r.tarih, yon: "GIRIS", kategori: firma ? "FIRMA_KASA_GIRIS" : "NAKIT_GIRIS", kisi: "", aciklama: r.aciklama, referans: r.belge_yolu ? "Dekont" : "", belge_url: r.belge_yolu || "",
+      odeme_yontemi: "", tutar: Number(r.tutar || 0), kaynak: "marka_kasa", kaynak_id: r.id, dahil: true, kasa_kaynak: firma ? "FIRMA" : "SIMSEK" }); });
     borc.rows.forEach(r => {
       if (!r.kasa_hareketi) return; // kasaya girmeyen/çıkmayan borç kaydı (yalnız mutabakat) — bakiyeye katılmaz
-      const geri = String(r.tip).toUpperCase() === "ODEME";
-      h.push({ tarih: r.tarih, yon: geri ? "GIRIS" : "CIKIS", kategori: geri ? "BORC_GERI" : "BORC_VERILEN", kisi: "Şimşek Haberleşme", aciklama: r.aciklama,
+      // 26.10.2026: ters kayıtlar ilk hareketin tersi yönde (BORC_IPTAL giriş, ODEME_IPTAL çıkış); orijinal satır değişmez
+      const tip = String(r.tip).toUpperCase();
+      const giris = tip === "ODEME" || tip === "BORC_IPTAL";
+      const kategori = ({ ODEME: "BORC_GERI", BORC: "BORC_VERILEN", BORC_IPTAL: "BORC_IPTAL", ODEME_IPTAL: "BORC_GERI_IPTAL" })[tip] || "BORC_VERILEN";
+      h.push({ tarih: r.tarih, yon: giris ? "GIRIS" : "CIKIS", kategori, kisi: "Şimşek Haberleşme", aciklama: r.aciklama,
         referans: `Borç #${r.id}`, belge_url: r.belge_yolu || "", odeme_yontemi: "", tutar: Number(r.tutar || 0), kaynak: "marka_borc", kaynak_id: r.id, dahil: true });
     });
     nakit.forEach(r => {
@@ -9237,10 +9245,15 @@ app.get("/finance/marka-kasa", authMiddleware, async (req, res) => {
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const r = await pool.query(
       `SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
-              COALESCE(belge_yolu,'') AS belge_yolu
+              COALESCE(belge_yolu,'') AS belge_yolu, kaynak
        FROM marka_kasa WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
-    const toplam = r.rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
-    res.json({ ok: true, rows: r.rows, toplam });
+    // 26.10.2026: kaynak — SIMSEK (Şimşek kasasına giren finansman) / FIRMA (firma kendi hesabından ödedi, Şimşek'e gelmedi);
+    // kayıtta yoksa açıklama kuralından türetilir (markaMutabakat.kasaKaynagi)
+    const P = markaProfil(marka);
+    const rows = r.rows.map((x) => ({ ...x, kaynak_etkin: markaMutabakat.kasaKaynagi(x, P) }));
+    const toplam = rows.reduce((s, x) => s + Number(x.tutar || 0), 0);
+    const firma_toplam = rows.filter((x) => x.kaynak_etkin === "FIRMA").reduce((s, x) => s + Number(x.tutar || 0), 0);
+    res.json({ ok: true, rows, toplam, simsek_toplam: toplam - firma_toplam, firma_toplam });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.post("/finance/marka-kasa", authMiddleware, async (req, res) => {
@@ -9253,10 +9266,13 @@ app.post("/finance/marka-kasa", authMiddleware, async (req, res) => {
     const t = Number(tutar || 0);
     if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
     const kullanici = String(req.user?.email || "").toLowerCase() || null;
+    // 26.10.2026: kaynak açıkça seçilebilir (SIMSEK / FIRMA); verilmezse açıklama kuralı (eski davranış)
+    const kaynakSecim = String(req.body.kaynak || "").trim().toUpperCase();
+    const kaynak = markaMutabakat.KASA_KAYNAK.includes(kaynakSecim) ? kaynakSecim : null;
     const r = await pool.query(
-      `INSERT INTO marka_kasa (marka, tarih, tutar, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [marka, tarih, t, aciklama || null, kullanici]);
-    await kasaIslemLog(r.rows[0].id, marka, "OLUSTURMA", null, { tarih, tutar: t, aciklama: aciklama || null }, null, kullanici);
+      `INSERT INTO marka_kasa (marka, tarih, tutar, aciklama, olusturan, kaynak) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [marka, tarih, t, aciklama || null, kullanici, kaynak]);
+    await kasaIslemLog(r.rows[0].id, marka, "OLUSTURMA", null, { tarih, tutar: t, aciklama: aciklama || null, kaynak }, null, kullanici);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -9778,11 +9794,14 @@ app.get("/finance/marka-borc", authMiddleware, async (req, res) => {
     await ensureMarkaBorcTable();
     const marka = String(req.query.marka || "AHY").toUpperCase();
     const r = await pool.query(
-      `SELECT id, tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
-              COALESCE(belge_yolu,'') AS belge_yolu, COALESCE(kasa_hareketi,false) AS kasa_hareketi
+      `SELECT id, UPPER(COALESCE(tip,'BORC')) AS tip, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, COALESCE(aciklama,'') AS aciklama,
+              COALESCE(belge_yolu,'') AS belge_yolu, COALESCE(kasa_hareketi,false) AS kasa_hareketi,
+              COALESCE(kaynak,'MANUEL') AS kaynak, aktarim_id, hesap, olusturan, iptal_edilen_id
        FROM marka_borc WHERE UPPER(marka)=$1 ORDER BY tarih DESC, id DESC`, [marka]);
-    const alinan = r.rows.filter(x => x.tip !== 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
-    const odenen = r.rows.filter(x => x.tip === 'ODEME').reduce((s, x) => s + Number(x.tutar || 0), 0);
+    // 26.10.2026: ters kayıtlar (BORC_IPTAL / ODEME_IPTAL) ilgili toplamdan düşer; kayıt silinmez
+    const t = (tip) => r.rows.filter(x => x.tip === tip).reduce((s, x) => s + Number(x.tutar || 0), 0);
+    const alinan = t("BORC") - t("BORC_IPTAL");
+    const odenen = t("ODEME") - t("ODEME_IPTAL");
     res.json({ ok: true, rows: r.rows, alinan, odenen, kalan: alinan - odenen });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -9796,9 +9815,12 @@ app.post("/finance/marka-borc", authMiddleware, async (req, res) => {
     const { tarih, tutar, aciklama, kasa_hareketi } = req.body;
     const t = Number(tutar || 0);
     if (!tarih || !t) return res.status(400).json({ ok: false, error: "tarih ve tutar zorunlu" });
+    // 26.10.2026: geri ödemede paranın geldiği hesap açık yazılır (proje kasası = kasa hareketi; firma hesabı = kasa dışı);
+    // elle giriş kaynak=MANUEL, aktarım/ters kayıt yalnız mutabakat uçlarından üretilir
+    const hesap = tip === "ODEME" ? (kasa_hareketi ? "PROJE_KASASI" : "FIRMA_HESABI") : null;
     const r = await pool.query(
-      `INSERT INTO marka_borc (marka, tip, tarih, tutar, aciklama, kasa_hareketi) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [marka, tip, tarih, t, aciklama || null, !!kasa_hareketi]);
+      `INSERT INTO marka_borc (marka, tip, tarih, tutar, aciklama, kasa_hareketi, kaynak, hesap, olusturan) VALUES ($1,$2,$3,$4,$5,$6,'MANUEL',$7,$8) RETURNING *`,
+      [marka, tip, tarih, t, aciklama || null, !!kasa_hareketi, hesap, String(req.user?.email || "").toLowerCase() || null]);
     res.json({ ok: true, row: r.rows[0] });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -9806,6 +9828,9 @@ app.delete("/finance/marka-borc/:id", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    // 26.10.2026: aktarım ve ters kayıt satırları silinmez — düzeltme yalnız gerekçeli geri alma (ters kayıt) ile
+    const k = (await pool.query(`SELECT COALESCE(kaynak,'MANUEL') AS kaynak FROM marka_borc WHERE id=$1`, [req.params.id])).rows[0];
+    if (k && k.kaynak !== "MANUEL") return res.status(400).json({ ok: false, error: "Aktarımla oluşan borç kaydı silinemez — Borç Ayrıştırması → Geri Al kullanın (gerekçeli ters kayıt)" });
     await pool.query(`DELETE FROM marka_borc WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -9832,6 +9857,16 @@ app.delete("/finance/marka-borc/:id/belge", authMiddleware, async (req, res) => 
     await pool.query(`UPDATE marka_borc SET belge_yolu=NULL WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ═══ TEKNOCENTER FİNANSMAN VE OPERASYON MUTABAKATI (26.10.2026, Orhan) — backend/markaMutabakat.js ═══
+// Şimşek'e aktarılan finansman / firmanın kendi kasa ödemeleri / operasyon ödemeleri / onaylı avans rezervi / Şimşek borcu
+// tek hesaptan (hesapla); borç aktarımı önizleme → uygula (tek işlem) → gerekçeli geri alma (ters kayıt); kurumsal Excel.
+ensureMarkaKasaTable().then(ensureMarkaBorcTable).then(() => markaMutabakat.semaKur(pool)).catch((e) => console.error("[marka-mutabakat şema]", e.message));
+markaMutabakat.kur(app, { pool, authMiddleware, markaNakitSatirlari, markaProfil, altMarkaMi, islemGecmisiYaz,
+  avansFirmaSql: onayDevri.avansFirmaSql,
+  // Rezerv onaycısı: Orhan Bedir'in kullanıcı hesapları (users tablosundan kimliğe çevrilir; kişi adına bakılmaz)
+  rezervOnayciEmails: () => [PM_KISISEL_EMAIL, "orhan.bedir@gmail.com"],
 });
 
 // MARKA TAŞERON: AHY'nin taşeronlarının (AHY_OLCAY vb.) kestiği faturalar

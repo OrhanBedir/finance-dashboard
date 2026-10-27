@@ -1906,6 +1906,182 @@ function MarkaPLPanel({ currentUser }) {
   );
 }
 
+/* ═══ TEKNOCENTER FİNANSMAN & MUTABAKAT (26.10.2026, Orhan) ═══
+   Günlük Nakit Akışı panelinde: Şimşek'e aktarılan finansman / firmanın kendi kasa ödemeleri / operasyon ödemeleri /
+   onaylı avans rezervi / proje kasası / Şimşek borcu — hepsi sunucudaki tek hesaptan (/finance/marka-mutabakat).
+   Her kart kaynak hareketlere açılır. Borç ayrıştırması: önizleme → uygula (tek işlem) → gerekçeli geri alma (ters kayıt).
+   Sabit tutar yok; rakamlar kaynak kayıtlardan gelir. Excel aynı hesaptan sunucuda üretilir. */
+function MarkaMutabakatBolumu({ marka, markaAd, yenile, onDegisti }) {
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [kesim, setKesim] = useState(""); // boş = şimdi
+  const [detay, setDetay] = useState(null); // açık kart anahtarı
+  const [onizleme, setOnizleme] = useState(null); // { yukleniyor, veri, hata, uygulaniyor }
+  const [acik, setAcik] = useState(true);
+  const fk = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 });
+  const para = (n) => `${Number(n) < 0 ? "−" : ""}₺${fk(Math.abs(Number(n || 0)))}`;
+  const tTR = (t) => String(t || "").slice(0, 10).split("-").reverse().join(".");
+  const kisa = altMarkaKisa(marka);
+  const yukle = async () => {
+    setYukleniyor(true); setErr("");
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-mutabakat?marka=${marka}${kesim ? `&kesim=${encodeURIComponent(new Date(kesim).toISOString())}` : ""}`, { headers: _auth });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Mutabakat alınamadı");
+      setD(j);
+    } catch (e) { setErr(e.message); setD(null); } finally { setYukleniyor(false); }
+  };
+  useEffect(() => { yukle(); }, [kesim, yenile]); // eslint-disable-line
+  const onizle = async () => {
+    setOnizleme({ yukleniyor: true });
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-borc-aktarim/onizle`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ marka, kesim: kesim ? new Date(kesim).toISOString() : undefined }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Önizleme alınamadı");
+      setOnizleme({ veri: j });
+    } catch (e) { setOnizleme({ hata: e.message }); }
+  };
+  const uygula = async () => {
+    const v = onizleme?.veri; if (!v || !v.oneri || v.oneri.borc <= 0) return;
+    if (!window.confirm(`Şimşek'e borç kaydı oluşturulacak: ₺${fk(v.oneri.borc)} (kesim ${tTR(v.kesim_gun)}).\n\nProje kasasından düşer, gider sayılmaz; ${v.degisiklikler.length} değişiklik tek işlemde uygulanır. Devam?`)) return;
+    setOnizleme((o) => ({ ...o, uygulaniyor: true }));
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-borc-aktarim`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ marka, kesim: v.kesim, onizleme_anahtari: v.onizleme_anahtari }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Aktarım uygulanamadı");
+      setOnizleme(null); await yukle(); onDegisti && onDegisti();
+      alert(`Aktarım #${j.aktarim.id} uygulandı: Şimşek'e borç ₺${fk(j.aktarim.borc_tutar)} (borç kaydı #${j.borc_id}).`);
+    } catch (e) { setOnizleme((o) => ({ ...o, uygulaniyor: false, hata: e.message })); }
+  };
+  const geriAl = async () => {
+    if (!d?.aktarim) return;
+    const gerekce = prompt(`Aktarım #${d.aktarim.id} (borç ₺${fk(d.aktarim.borc_tutar)}) geri alınacak.\nTers kayıt oluşturulur, geçmiş silinmez. Gerekçe (zorunlu):`);
+    if (gerekce == null) return;
+    try {
+      const r = await fetch(`${API_BASE}/finance/marka-borc-aktarim/${d.aktarim.id}/geri-al`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ gerekce }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || "Geri alınamadı");
+      await yukle(); onDegisti && onDegisti();
+    } catch (e) { alert(e.message); }
+  };
+  const excelUrl = tokenliUrl(`${API_BASE}/finance/marka-mutabakat/excel?marka=${marka}${kesim ? `&kesim=${encodeURIComponent(new Date(kesim).toISOString())}` : ""}`);
+  if (yukleniyor && !d) return <div style={{ fontSize: "12px", color: "#64748b", margin: "6px 0 14px" }}>Finansman mutabakatı hesaplanıyor…</div>;
+  if (err) return <div style={{ fontSize: "12px", color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px", padding: "8px 12px", margin: "6px 0 14px" }}>Finansman mutabakatı yüklenemedi: {err}</div>;
+  if (!d) return null;
+  const o = d.ozet, mu = d.mutabakat;
+  const KART = [
+    { k: "finansman_simsek", g: "Finansman", ad: `${kisa}'dan Şimşek'e aktarılan`, v: o.finansman_simsek, c: "#1e3a5f", alt: `${d.detay.finansman_simsek.length} kasa girişi` },
+    { k: "firma_odeme", g: "Finansman", ad: `${kisa}'nın kendi kasasından ödediği`, v: o.firma_odeme, c: "#9a3412", alt: mu.uyumlu ? "ödeme kayıtlarıyla eşleşti" : `⚠ eşleşmeyen ₺${fk(mu.firma_eslesmeyen)}` },
+    { k: "toplam_odeme", g: "Ödemeler", ad: "Toplam gerçekleşmiş operasyon ödemesi", v: o.toplam_odeme, c: "#b91c1c", alt: `${d.detay.toplam_odeme.length} hareket` },
+    { k: "simsek_odeme", g: "Ödemeler", ad: "Şimşek üzerinden yapılan ödemeler", v: o.simsek_odeme, c: "#b91c1c", alt: "toplam ödeme − firmanın kendi ödemeleri" },
+    { k: "rezerv", g: "Ödemeler", ad: "Ödenmeyi bekleyen onaylı iş avansı rezervi", v: o.rezerv, c: "#b45309", alt: `${o.rezerv_adet} talep${o.rezerv_disi > 0 ? ` · onaycı dışı ₺${fk(o.rezerv_disi)} rezerve girmedi` : ""}` },
+    { k: "kalan_once", g: "Kasa", ad: "Borç ayrılmadan önce kalan", v: o.kalan_once, c: "#0f172a", alt: "Şimşek'e aktarılan − Şimşek üzerinden ödenen" },
+    { k: "proje_kasasi", g: "Kasa", ad: "Borç ayrıştırması sonrası proje kasası", v: o.proje_kasasi, c: o.proje_kasasi < 0 ? "#b91c1c" : "#15803d", alt: d.aktarim ? `aktarım #${d.aktarim.id} uygulandı` : "aktarım henüz uygulanmadı" },
+    { k: "kullanilabilir", g: "Kasa", ad: "Rezerv dışında kullanılabilir proje bakiyesi", v: o.kullanilabilir, c: o.kullanilabilir < 0 ? "#b91c1c" : "#15803d", alt: o.acik > 0 ? `⚠ finansman açığı ₺${fk(o.acik)}` : "proje kasası − rezerv" },
+    { k: "borc_anapara", g: "Şimşek Borcu", ad: "Şimşek'e verilen borç anaparası", v: o.borc_anapara, c: "#92400e", alt: `alacaklı ${kisa} · borçlu Şimşek` },
+    { k: "borc_geri", g: "Şimşek Borcu", ad: "Şimşek'ten alınan gerçek geri ödemeler", v: o.borc_geri, c: "#166534", alt: `proje kasasına ₺${fk(o.geri_hesap.PROJE_KASASI)} · firma hesabına ₺${fk(o.geri_hesap.FIRMA_HESABI)}` },
+    { k: "borc_kalan", g: "Şimşek Borcu", ad: "Kalan Şimşek borcu", v: o.borc_kalan, c: "#92400e", alt: "anapara − geri ödemeler" },
+  ];
+  if (o.acik > 0) KART.splice(8, 0, { k: "acik", g: "Kasa", ad: "Finansman açığı", v: o.acik, c: "#b91c1c", alt: "rezerv proje kasasını aşıyor" });
+  const gruplar = [...new Set(KART.map((k) => k.g))];
+  const th = { padding: "7px 10px", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textAlign: "left", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#f8fafc" };
+  const td = { padding: "7px 10px", fontSize: "12.5px", borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+  const tdR = { ...td, textAlign: "right", fontWeight: 700, whiteSpace: "nowrap" };
+  const tablo = (basliklar, satirlar) => (
+    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "760px" }}>
+      <thead><tr>{basliklar.map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+      <tbody>{satirlar.length ? satirlar : <tr><td colSpan={basliklar.length} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: "20px" }}>Kayıt yok</td></tr>}</tbody>
+    </table>
+  );
+  const detayIcerik = () => {
+    const k = detay; const D = d.detay;
+    const ref = (x) => <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: "11px", color: "#475569" }}>{x}</span>;
+    if (k === "finansman_simsek") return tablo(["Tarih", "Kaynak işlem", "Açıklama", "Dekont", "Tutar"], D.finansman_simsek.map((x) => <tr key={x.id}><td style={td}>{tTR(x.tarih)}</td><td style={td}>{ref(x.ref)}</td><td style={td}>{x.aciklama}</td><td style={td}>{x.belge_url ? <a href={x.belge_url} target="_blank" rel="noreferrer">📎</a> : "—"}</td><td style={tdR}>{para(x.tutar)}</td></tr>));
+    if (k === "firma_odeme") return tablo(["Tarih", "Kasa girişi", "Açıklama", "Tutar", "Eşleşen ödeme kaydı", "Durum"], D.firma_odeme.map((x) => <tr key={x.id} style={{ background: x.eslesen_odeme ? undefined : "#fef2f2" }}><td style={td}>{tTR(x.tarih)}</td><td style={td}>{ref(x.ref)}</td><td style={td}>{x.aciklama}</td><td style={tdR}>{para(x.tutar)}</td>
+      <td style={td}>{x.eslesen_odeme ? <>{ref(x.eslesen_odeme.ref)} · {tTR(x.eslesen_odeme.tarih)} · {x.eslesen_odeme.kisi} · {para(x.eslesen_odeme.tutar)}</> : "—"}</td><td style={{ ...td, fontWeight: 700, color: x.eslesen_odeme ? "#15803d" : "#b91c1c" }}>{x.eslesen_odeme ? "Eşleşti" : "EŞLEŞMEDİ"}</td></tr>));
+    if (k === "toplam_odeme" || k === "simsek_odeme") { const L = D.toplam_odeme.filter((x) => k === "toplam_odeme" || x.odeyen_kasa === "SIMSEK");
+      return tablo(["Tarih", "Kategori", "Kişi / Tedarikçi", "Açıklama", "Kaynak işlem", "Ödeyen kasa", "Tutar"], L.map((x, i) => <tr key={i}><td style={td}>{tTR(x.tarih)}</td><td style={td}>{x.tip}</td><td style={td}>{x.kisi}</td><td style={{ ...td, color: "#475569" }}>{x.aciklama}</td><td style={td}>{ref(x.ref)}</td><td style={td}>{x.odeyen_kasa === "FIRMA" ? `${kisa} kendi hesabı` : "Proje kasası (Şimşek)"}</td><td style={tdR}>{para(x.tutar)}</td></tr>)); }
+    if (k === "rezerv") { const sat = (a, dis) => <tr key={a.id} style={{ background: dis ? "#fffbeb" : undefined }}><td style={td}>{a.kisi}</td><td style={td}>{a.talep_no}</td><td style={td}>{a.firma}</td><td style={{ ...td, color: "#475569" }}>{a.aciklama}</td><td style={td}>{tTR(a.onay_tarihi)}</td><td style={td}>{a.onaylayan_ad}</td><td style={tdR}>{para(a.onaylanan)}</td><td style={tdR}>{para(a.odenen)}</td><td style={{ ...tdR, color: "#b45309" }}>{para(a.kalan)}</td></tr>;
+      return <>{tablo(["Kişi", "Talep No", "Firma", "Açıklama", "Onay Tarihi", "Onaylayan", "Onaylanan", "Ödenen", "Kalan"], [...D.rezerv.map((a) => sat(a, false)), ...D.rezerv_disi.map((a) => sat(a, true))])}
+        {D.rezerv_disi.length > 0 && <div style={{ fontSize: "11.5px", color: "#92400e", marginTop: "8px" }}>Sarı satırlar: direktör onayı belirlenen onaycıya ({(D.onaycilar || []).map((u) => u.ad).join(", ") || "—"}) ait değil ya da onaycı kaydı yok — rezerve alınmadı.</div>}</>; }
+    if (["kalan_once", "proje_kasasi", "kullanilabilir", "acik"].includes(k)) return tablo(["Kontrol", "Hesaplanan", "Beklenen", "Sonuç"], mu.kontroller.map((x, i) => <tr key={i}><td style={td}>{x.ad}</td><td style={tdR}>{para(x.sol)}</td><td style={tdR}>{para(x.sag)}</td><td style={{ ...td, fontWeight: 700, color: x.ok ? "#15803d" : "#b91c1c" }}>{x.ok ? "OK" : "FARK"}</td></tr>));
+    const TIP_AD = { BORC: "Borç verildi", ODEME: "Geri ödeme", BORC_IPTAL: "Ters kayıt (borç iptali)", ODEME_IPTAL: "Ters kayıt (geri ödeme iptali)" };
+    const L = D.borc.filter((b) => k === "borc_anapara" ? b.tip.startsWith("BORC") : k === "borc_geri" ? b.tip.startsWith("ODEME") : true);
+    return tablo(["Tarih", "Kayıt", "Hareket", "Kaynak", "Kasa etkisi", "Hesap", "Açıklama", "Tutar"], L.map((b) => <tr key={b.id} style={{ color: b.tip.endsWith("IPTAL") ? "#64748b" : undefined }}><td style={td}>{tTR(b.tarih)}</td><td style={td}>{ref(`marka_borc #${b.id}`)}</td><td style={td}>{TIP_AD[b.tip] || b.tip}</td><td style={td}>{b.kaynak}</td>
+      <td style={td}>{b.kasa_hareketi ? (b.tip.startsWith("BORC") ? "Proje kasasından çıktı" : "Proje kasasına girdi") : "Kasa dışı (defter)"}</td><td style={td}>{b.hesap === "FIRMA_HESABI" ? `${kisa} hesabı` : (b.hesap === "PROJE_KASASI" || b.kasa_hareketi) ? "Proje kasası" : "—"}</td><td style={{ ...td, color: "#475569" }}>{b.aciklama}</td><td style={tdR}>{b.tip.endsWith("IPTAL") ? "−" : ""}{para(b.tutar)}</td></tr>));
+  };
+  const modal = (baslik, icerik, kapat, genis) => (
+    <div onClick={kapat} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px", width: `min(${genis ? 1140 : 900}px, 97vw)`, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 25px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", padding: "14px 20px", background: "linear-gradient(135deg,#1e3a5f,#2d5a8f)" }}>
+          <div style={{ fontWeight: 800, fontSize: "15px", color: "#fff" }}>{baslik}</div>
+          <button onClick={kapat} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: "9px", padding: "7px 12px", cursor: "pointer", fontWeight: 700, color: "#fff" }}>✕</button>
+        </div>
+        <div style={{ overflow: "auto", padding: "12px 16px 18px" }}>{icerik}</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", padding: "12px 16px", marginBottom: "18px", boxShadow: "0 4px 16px rgba(0,0,0,0.04)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: "15px", color: "#0f172a", cursor: "pointer" }} onClick={() => setAcik((a) => !a)}>{acik ? "▾" : "▸"} 📊 Finansman & Mutabakat — {kisa} ↔ Şimşek</div>
+          <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>
+            {tTR(d.devir)} devrinden kesim {new Date(d.kesim).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })} · kaynak kayıtlardan hesaplanır ·
+            <b style={{ color: mu.uyumlu ? "#15803d" : "#b91c1c" }}> {mu.uyumlu ? "mutabakat uyumlu" : `mutabakat farkı ₺${fk(mu.fark)}`}</b>
+            {o.fon_disi > 0 && <span> · fon dışı ₺{fk(o.fon_disi)} hesap dışı</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ fontSize: "11px", color: "#64748b" }}>Kesim <input type="datetime-local" value={kesim} onChange={(e) => setKesim(e.target.value)} style={{ padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: "7px", fontSize: "11.5px" }} /></label>
+          {kesim && <button onClick={() => setKesim("")} style={{ padding: "4px 8px", background: "#f3f4f6", border: "none", borderRadius: "7px", fontSize: "11px", cursor: "pointer" }}>şimdi</button>}
+          {d.aktarim
+            ? <button onClick={geriAl} title={`Aktarım #${d.aktarim.id} · ${tTR(d.aktarim.kesim_gun)} · ${d.aktarim.olusturan || ""}`} style={{ padding: "6px 12px", background: "#fff7ed", color: "#9a3412", border: "1px solid #fdba74", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>↶ Aktarımı Geri Al (#{d.aktarim.id})</button>
+            : <button onClick={onizle} style={{ padding: "6px 12px", background: "#92400e", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>🤝 Borç Ayrıştırması — Önizle</button>}
+          <a href={excelUrl} target="_blank" rel="noreferrer" style={{ padding: "6px 12px", background: "#166534", color: "#fff", borderRadius: "8px", fontSize: "12px", fontWeight: 800, textDecoration: "none", whiteSpace: "nowrap" }}>📥 Mutabakat Excel</a>
+        </div>
+      </div>
+      {acik && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "10px", marginTop: "12px" }}>
+        {gruplar.map((g) => KART.filter((k) => k.g === g).map((k, i) => (
+          <div key={k.k} onClick={() => setDetay(k.k)} title="Kaynak hareketleri gör"
+            style={{ background: "#fafafa", border: "1px solid #e5e7eb", borderLeft: `4px solid ${k.c}`, borderRadius: "10px", padding: "9px 12px", cursor: "pointer" }}>
+            {i === 0 && <div style={{ fontSize: "9.5px", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em" }}>{g}</div>}
+            <div style={{ fontSize: "11px", color: "#475569", fontWeight: 600, minHeight: "28px" }}>{k.ad}</div>
+            <div style={{ fontSize: "18px", fontWeight: 800, color: k.c, marginTop: "2px" }}>{para(k.v)}</div>
+            <div style={{ fontSize: "10.5px", color: "#94a3b8", marginTop: "2px" }}>{k.alt}</div>
+          </div>
+        )))}
+      </div>}
+      {detay && modal(KART.find((k) => k.k === detay)?.ad || detay, detayIcerik(), () => setDetay(null), true)}
+      {onizleme && modal("🤝 Borç Ayrıştırması — Önizleme", (() => {
+        if (onizleme.yukleniyor) return <div style={{ color: "#64748b" }}>Hesaplanıyor…</div>;
+        if (onizleme.hata && !onizleme.veri) return <div style={{ color: "#b91c1c" }}>{onizleme.hata}</div>;
+        const v = onizleme.veri; const oz = v.ozet;
+        return (<>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 20px", fontSize: "13px" }}>
+            {[["Şimşek'e aktarılan finansman", oz.finansman_simsek], [`${kisa}'nın kendi ödemeleri (ödemelere dahil)`, oz.firma_odeme], ["Toplam operasyon ödemesi", oz.toplam_odeme], ["Şimşek üzerinden ödenen", oz.simsek_odeme],
+              ["Borç öncesi kalan", oz.kalan_once], ["Onaylı ödenmemiş avans rezervi (R)", oz.rezerv], ["Proje kasasında bırakılacak (rezerv)", Math.min(oz.proje_kasasi, oz.rezerv)]].map(([a, b]) => <div key={a} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed #e5e7eb", padding: "3px 0" }}><span>{a}</span><b>{para(b)}</b></div>)}
+          </div>
+          <div style={{ marginTop: "12px", background: v.oneri && v.oneri.borc > 0 ? "#fffbeb" : "#fef2f2", border: `1px solid ${v.oneri && v.oneri.borc > 0 ? "#fcd34d" : "#fecaca"}`, borderRadius: "10px", padding: "10px 14px" }}>
+            <div style={{ fontWeight: 800, fontSize: "14px", color: "#92400e" }}>{v.oneri && v.oneri.borc > 0 ? `Şimşek'e borç olarak ayrılacak: ${para(v.oneri.borc)}` : `Finansman açığı: ${para(v.oneri?.acik || 0)} — borç kaydı oluşturulmaz`}</div>
+            <div style={{ fontSize: "12px", color: "#78350f", marginTop: "2px" }}>Alacaklı: {markaAd} · Borçlu: Şimşek · "Şimşek'in {markaAd}'a borcu" · proje kasasından çıkar, gider / kâr-zarar kalemi değildir · kesim {new Date(v.kesim).toLocaleString("tr-TR")}</div>
+          </div>
+          {(v.uyarilar || []).map((u, i) => <div key={i} style={{ marginTop: "8px", fontSize: "12px", color: "#92400e", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px", padding: "6px 10px" }}>⚠ {u}</div>)}
+          <div style={{ fontWeight: 800, fontSize: "12.5px", color: "#1e3a5f", margin: "14px 0 6px" }}>Değişecek kayıtlar ({v.degisiklikler.length}) — şu an hiçbir şey yazılmadı</div>
+          {tablo(["Tür", "Kayıt", "Tarih", "Tutar", "Açıklama / yeni değer"], v.degisiklikler.map((x, i) => <tr key={i}><td style={td}>{x.tur === "KASA_KAYNAK" ? "Kasa girişi kaynağı" : "Yeni borç kaydı"}</td><td style={td}>{x.kayit}</td><td style={td}>{tTR(x.tarih)}</td><td style={tdR}>{para(x.tutar)}</td><td style={{ ...td, color: "#475569" }}>{x.tur === "KASA_KAYNAK" ? `${x.aciklama} → ${x.yeni}` : x.aciklama}</td></tr>))}
+          {onizleme.hata && <div style={{ color: "#b91c1c", marginTop: "8px", fontSize: "12.5px" }}>{onizleme.hata}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" }}>
+            <button onClick={() => setOnizleme(null)} style={{ padding: "8px 14px", background: "#f3f4f6", border: "none", borderRadius: "9px", fontWeight: 700, cursor: "pointer" }}>Vazgeç</button>
+            <button onClick={uygula} disabled={onizleme.uygulaniyor || !v.oneri || v.oneri.borc <= 0 || !!v.aktarim}
+              style={{ padding: "8px 16px", background: (!v.oneri || v.oneri.borc <= 0 || v.aktarim) ? "#cbd5e1" : "#92400e", color: "#fff", border: "none", borderRadius: "9px", fontWeight: 800, cursor: "pointer" }}>{onizleme.uygulaniyor ? "Uygulanıyor…" : "Uygula (tek işlem)"}</button>
+          </div>
+        </>);
+      })(), () => !onizleme.uygulaniyor && setOnizleme(null), true)}
+    </div>
+  );
+}
 function MarkaNakitPanel({ currentUser }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -2314,6 +2490,8 @@ function MarkaNakitPanel({ currentUser }) {
           </div>
         </div>
       </div>
+      {/* 26.10.2026 (Orhan): finansman ayrıştırması, onaylı avans rezervi ve Şimşek borcu — sunucudaki tek hesaptan */}
+      <MarkaMutabakatBolumu marka={marka} markaAd={markaAd} yenile={`${borc.alinan}|${borc.odenen}|${kasa.toplam}|${pk?.kalan ?? ""}`} onDegisti={() => { loadBorc(); loadKasa(); }} />
       <div style={{ display: "flex", gap: "12px", marginBottom: "18px", flexWrap: "wrap" }}>
         {[[`${ayBaslik} Toplam`, ayToplam, "#991b1b"], ["Bugün", bugunT, "#1e3a5f"], [`Genel Toplam (${devirMetni(currentUser).slice(3)}'dan beri)`, toplamGenel, "#b45309"]].map(([l, v, c]) => (
           <div key={l} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `5px solid ${c}`, borderRadius: "12px", padding: "12px 20px", minWidth: "180px" }}>
@@ -2978,8 +3156,10 @@ function MarkaNakitPanel({ currentUser }) {
               {borc.rows.map(r => (
                 <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "9px 10px", borderBottom: "1px solid #f1f5f9" }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: "14px", color: r.tip === "ODEME" ? "#166534" : "#92400e" }}>
-                      {r.tip === "ODEME" ? "↩ Geri ödeme " : "＋ Borç "}₺{fk(r.tutar)}
+                    <div style={{ fontWeight: 700, fontSize: "14px", color: r.tip === "ODEME" ? "#166534" : String(r.tip).endsWith("IPTAL") ? "#64748b" : "#92400e" }}>
+                      {({ ODEME: "↩ Geri ödeme ", BORC_IPTAL: "⟲ Ters kayıt (borç iptali) −", ODEME_IPTAL: "⟲ Ters kayıt (geri ödeme iptali) −" })[r.tip] || "＋ Borç "}₺{fk(r.tutar)}
+                      {r.kaynak && r.kaynak !== "MANUEL" && <span style={{ marginLeft: "6px", fontSize: "10px", fontWeight: 800, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "6px", padding: "1px 6px", verticalAlign: "middle" }}>{r.kaynak === "AKTARIM" ? "aktarım" : "ters kayıt"}</span>}
+                      {r.tip === "ODEME" && <span style={{ marginLeft: "6px", fontSize: "10px", color: "#64748b" }}>{r.hesap === "FIRMA_HESABI" || (!r.hesap && !r.kasa_hareketi) ? `→ ${altMarkaKisa(marka)} hesabı` : "→ proje kasası"}</span>}
                     </div>
                     <div style={{ fontSize: "11.5px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.tarih}{r.aciklama ? ` · ${r.aciklama}` : ""}</div>
                   </div>
@@ -3018,7 +3198,7 @@ function MarkaNakitPanel({ currentUser }) {
                         }} />
                     </label>
                   )}
-                  <button
+                  {(!r.kaynak || r.kaynak === "MANUEL") ? <button
                     onClick={async () => {
                       if (!window.confirm(`₺${fk(r.tutar)} tutarındaki ${r.tip === "ODEME" ? "geri ödeme" : "borç"} kaydı silinsin mi?`)) return;
                       try {
@@ -3030,6 +3210,7 @@ function MarkaNakitPanel({ currentUser }) {
                     }}
                     style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", padding: "4px 10px", fontSize: "11px", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}
                   >🗑 Sil</button>
+                  : <span title="Aktarım / ters kayıt satırı silinmez; düzeltme Finansman & Mutabakat → Aktarımı Geri Al (gerekçeli ters kayıt)" style={{ fontSize: "11px", color: "#94a3b8", flexShrink: 0 }}>🔒 kilitli</span>}
                 </div>
               ))}
               {borc.rows.length === 0 && <div style={{ padding: "20px", textAlign: "center", color: "#9ca3af" }}>Henüz borç kaydı yok</div>}
