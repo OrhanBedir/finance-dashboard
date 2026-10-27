@@ -819,6 +819,68 @@ function getRegion(siteCode = "", projectCode = "") {
   return "Tanımsız";
 }
 
+/* ═══ SÜRÜMLÜ BoQ KATALOĞU İÇE ALMA (27.10.2026) — JSON (uret_katalog.py çıktısı: {surum, kalemler[]}) → önizleme → onay ═══ */
+function BoqKatalogIceAlma() {
+  const [dosya, setDosya] = useState(null); const [surum, setSurum] = useState("BOQ2026"); const [on, setOn] = useState(null); const [mesaj, setMesaj] = useState(""); const [mesgul, setMesgul] = useState(false);
+  const [durum, setDurum] = useState(null);
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}`, "Content-Type": "application/json" };
+  const durumYukle = async () => { try { const d = await fetchJson(`${API_BASE}/boq/surumler`, { withAuth: true }); if (d?.ok) setDurum(d); } catch {} };
+  useEffect(() => { durumYukle(); }, []);
+  const oku = async () => { const t = await dosya.text(); const j = JSON.parse(t); const kalemler = Array.isArray(j) ? j : j.kalemler; return { surum: j.surum || surum, kalemler }; };
+  const onizle = async () => {
+    if (!dosya) { setMesaj("❌ Katalog JSON dosyası seçin"); return; }
+    setMesgul(true); setMesaj(""); setOn(null);
+    try { const g = await oku(); setSurum(g.surum);
+      const r = await fetch(`${API_BASE}/boq/katalog/onizle`, { method: "POST", headers: _auth, body: JSON.stringify(g) }); const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || (d.hatalar || []).join("; ") || "Önizleme alınamadı"); setOn(d); }
+    catch (e) { setMesaj(`❌ ${e.message}`); } finally { setMesgul(false); }
+  };
+  const iceAl = async () => {
+    if (!on) return;
+    const o = on.ozet;
+    if (!window.confirm(`${o.surum_ad}\n${o.okunan} kalem okundu (${o.benzersiz_kod} kod), ${o.kodsuz} kodsuz atlanacak, ${o.eksik_fiyat} fiyatsız, ${o.tekrar_kod} tekrar kod.\nMevcut ${on.mevcut_kayit_sayisi} kayıt bu sürümde değiştirilecek; öteki sürüme dokunulmaz. İçe alınsın mı?`)) return;
+    setMesgul(true);
+    try { const g = await oku(); const r = await fetch(`${API_BASE}/boq/katalog/ice-al`, { method: "POST", headers: _auth, body: JSON.stringify({ ...g, onizleme_anahtari: on.onizleme_anahtari, onay: true }) });
+      const d = await r.json().catch(() => ({})); if (!r.ok || d.ok === false) throw new Error(d.error || "İçe alınamadı");
+      setMesaj(`✅ ${d.eklenen} kalem içe alındı (${d.ozet?.surum}); ${d.kodsuz_atlanan || 0} kodsuz satır atlandı.`); setOn(null); await durumYukle(); }
+    catch (e) { setMesaj(`❌ ${e.message}`); } finally { setMesgul(false); }
+  };
+  const Say = ({ ad, n, kotu }) => <span style={{ display: "inline-block", margin: "2px 6px 2px 0", padding: "2px 9px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: kotu && n ? "#fee2e2" : "#f1f5f9", color: kotu && n ? "#b91c1c" : "#334155" }}>{ad}: {n}</span>;
+  return (
+    <div style={{ marginTop: 16, borderTop: "1px dashed #cbd5e1", paddingTop: 14 }}>
+      <div style={{ fontWeight: 800, fontSize: 13.5, color: "#0f172a", marginBottom: 6 }}>🗂 Sürümlü BoQ Kataloğu (2025 / 2026) — önizleyip içe al</div>
+      <div style={{ fontSize: 11.5, color: "#64748b", marginBottom: 8 }}>Eski fiyatların üzerine yazılmaz: her sürüm ayrı tutulur; aynı kod sürümler arasında farklı açıklama/fiyat taşıyabilir. Boş fiyat sıfır sayılmaz.</div>
+      {durum && <div style={{ marginBottom: 8 }}>{durum.surumler.map((v) => <Say key={v.kod} ad={v.ad} n={v.hazir ? `${v.kod_sayisi} kod · ${v.fiyatli} fiyatlı` : "içe alınmadı"} kotu={!v.hazir} />)}</div>}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input type="file" accept=".json" onChange={(e) => { setDosya(e.target.files?.[0] || null); setOn(null); }} />
+        <button type="button" className="tab" disabled={mesgul} onClick={onizle} style={{ padding: "8px 14px" }}>{mesgul ? "…" : "Önizle"}</button>
+        {on && on.ok && <button type="button" className="tab" disabled={mesgul} onClick={iceAl} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff" }}>İçe al ({on.ozet.surum})</button>}
+      </div>
+      {mesaj && <div style={{ marginTop: 8, fontSize: 12.5 }}>{mesaj}</div>}
+      {on && (
+        <div style={{ marginTop: 10, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", fontSize: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>{on.ozet.surum_ad} — önizleme (anahtar {on.onizleme_anahtari})</div>
+          <Say ad="Okunan kalem" n={on.ozet.okunan} /><Say ad="Benzersiz kod" n={on.ozet.benzersiz_kod} /><Say ad="Bölgeli satır" n={on.ozet.bolgeli} />
+          <Say ad="Tekrar kod" n={on.ozet.tekrar_kod} kotu /><Say ad="Kodsuz (atlanır)" n={on.ozet.kodsuz} kotu /><Say ad="Eksik fiyat" n={on.ozet.eksik_fiyat} kotu /><Say ad="Şüpheli fiyat" n={on.ozet.supheli_fiyat} kotu />
+          <Say ad="Eksik birim" n={on.ozet.eksik_birim} kotu /><Say ad="Şüpheli birim" n={on.ozet.supheli_birim} kotu /><Say ad="Eksik para birimi" n={on.ozet.eksik_para_birimi} kotu />
+          <Say ad={`${on.diger_surum || "öteki sürüm"}e göre değişen`} n={on.ozet.diger_surume_gore_degisen} /><Say ad="Yalnız bu sürümde" n={on.ozet.yalniz_bu_surumde} /><Say ad="Mevcut kayda göre değişen" n={on.ozet.mevcut_kayda_gore_degisen} /><Say ad="TE↔PA çift kapsamlı kod" n={on.ozet.cok_kapsamli_kod} />
+          <div style={{ marginTop: 6, color: "#475569" }}>Para birimi dağılımı: {Object.entries(on.ozet.para_dagilimi || {}).map(([k, n]) => `${k}: ${n}`).join(" · ")}</div>
+          {on.kodsuz?.length > 0 && <div style={{ marginTop: 6, color: "#b91c1c" }}>Kodsuz satırlar (Excel'de S-Bom kodu yok): {on.kodsuz.slice(0, 8).map((k) => `${k.aciklama.slice(0, 50)} [${k.ref}]`).join(" · ")}{on.kodsuz.length > 8 ? " …" : ""}</div>}
+          {on.tekrar_kodlar?.length > 0 && <div style={{ marginTop: 6, color: "#b91c1c" }}>Tekrarlanan kodlar: {on.tekrar_kodlar.slice(0, 10).map((t) => `${t.kod}${t.bolge ? "/" + t.bolge : ""}×${t.adet}`).join(", ")}</div>}
+          {on.degisen?.length > 0 && (
+            <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
+                <thead><tr>{["Kod", "Bölge", "Fark", "Eski fiyat", "Yeni fiyat", "Eski açıklama", "Yeni açıklama"].map((h) => <th key={h} style={{ textAlign: "left", padding: "3px 6px", borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr></thead>
+                <tbody>{on.degisen.slice(0, 200).map((d, i) => <tr key={i}><td style={{ padding: "3px 6px", fontFamily: "monospace" }}>{d.kod}</td><td style={{ padding: "3px 6px" }}>{d.bolge || "-"}</td><td style={{ padding: "3px 6px" }}>{d.fark.join(", ")}</td><td style={{ padding: "3px 6px" }}>{d.eski.fiyat ?? "-"} {d.eski.para || ""}</td><td style={{ padding: "3px 6px" }}>{d.yeni.fiyat ?? "-"} {d.yeni.para || ""}</td><td style={{ padding: "3px 6px", color: "#64748b" }}>{String(d.eski.aciklama || "").slice(0, 60)}</td><td style={{ padding: "3px 6px" }}>{String(d.yeni.aciklama || "").slice(0, 60)}</td></tr>)}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BoQUploadInline({ onClose, onUploaded }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -917,6 +979,8 @@ function BoQUploadInline({ onClose, onUploaded }) {
         </div>
 
         {message && <div className="entryMessage">{message}</div>}
+        {/* 27.10.2026: sürümlü katalog (2025 / 2026) önizleme + içe alma — eski /boq/upload kod listesine dokunmaz */}
+        <BoqKatalogIceAlma />
       </div>
     </div>
   );
@@ -4184,6 +4248,95 @@ function ErcTaseronPanel() {
   );
 }
 
+/* ═══ TEKNO_2KX HAKEDİŞ — REFERANS KARŞILAŞTIRMASI (27.10.2026) ═══════════════════════════════════════════════
+   Referans: AHY döneminde belirlenen 2KX PAKET fiyatları (Orhan 27.10.2026: "güncel fiyatları taşeronlara daha belirlemedik").
+   Saha | İş kalemi | Mevcut bedel | Referans | Hesaplanan | Fark | Gerekçe + eksik eşleşmeler; geçmiş kayıt değişmez. */
+function Tekno2kxKarsilastirma({ marka, isAdmin }) {
+  const [v, setV] = useState(null); const [err, setErr] = useState(""); const [acik, setAcik] = useState(false); const [uyg, setUyg] = useState(false);
+  const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
+  const yukle = async () => {
+    try { const r = await fetch(`${API_BASE}/finance/marka-tekno-ikikx-karsilastirma?marka=${marka}`, { headers: _auth }); const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || "Karşılaştırma alınamadı"); setV(d); setErr(""); } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { yukle(); }, []); // eslint-disable-line
+  const tl = (n) => Number(n || 0).toLocaleString("tr-TR", { maximumFractionDigits: 0 });
+  const excel = () => {
+    if (!v) return;
+    exportStandardExcel({ title: "TEKNO_2KX — Referans Karşılaştırması (AHY paket fiyatları)", sheetName: "Karşılaştırma", fileBase: "TEKNO_2KX_Hakedis_Karsilastirma",
+      headers: ["Saha", "Tip", "Item", "İş kalemi", "Adet", "Birim", "HW fiyat", "Mevcut bedel", "Referans birim", "Referans tür", "Hesaplanan", "Fark", "QC", "Gerekçe"],
+      colWidths: [20, 12, 13, 50, 7, 7, 12, 14, 14, 10, 14, 12, 6, 70], numericCols: [6, 7, 8, 10, 11],
+      rows: [...v.satirlar.map((s) => [s.site, s.tip, s.item_code, s.kalem, s.adet, s.birim || "", s.hw_fiyat ?? "", s.mevcut, s.referans_birim, s.referans_tur, s.hesaplanan, s.fark, s.qc, s.gerekce]),
+             ...v.eksik.map((s) => [s.site, s.tip, s.item_code, s.kalem, s.adet, "", s.hw_fiyat ?? "", s.mevcut, "", "EKSİK", "", "", s.qc, s.gerekce])] });
+  };
+  const uygula = async () => {
+    if (!v || !v.duzeltme_onizleme.length) return;
+    if (!window.confirm(`${v.duzeltme_onizleme.length} saha için TEKNO_2KX hakediş düzeltmesi taseron_hakedis'e yazılacak (geçmiş fatura/ödeme/QC değişmez). Onaylıyor musunuz?`)) return;
+    setUyg(true);
+    try { const r = await fetch(`${API_BASE}/finance/marka-tekno-ikikx-karsilastirma/uygula`, { method: "POST", headers: { ..._auth, "Content-Type": "application/json" }, body: JSON.stringify({ onay: true, satirlar: v.duzeltme_onizleme }) });
+      const d = await r.json().catch(() => ({})); if (!r.ok || d.ok === false) throw new Error(d.error || "Uygulanamadı"); alert(`${d.uygulanan} saha düzeltmesi yazıldı`); await yukle(); }
+    catch (e) { alert(e.message); } finally { setUyg(false); }
+  };
+  if (err) return <div style={{ marginBottom: 14, color: "#b91c1c", fontSize: 12.5 }}>TEKNO_2KX karşılaştırması: {err}</div>;
+  if (!v) return null;
+  const th = { fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.05em", color: "#475569", padding: "7px 8px", borderBottom: "1px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap", background: "#f8fafc" };
+  const td = { padding: "6px 8px", borderBottom: "1px solid #e2e8f0", textAlign: "right", fontSize: 12, whiteSpace: "nowrap" };
+  return (
+    <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 14, marginBottom: 16, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", flexWrap: "wrap", cursor: "pointer" }} onClick={() => setAcik((p) => !p)}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a" }}>{acik ? "▾" : "▸"} 🔁 TEKNO_2KX Hakediş — Referans Karşılaştırması</div>
+        <div style={{ fontSize: 11.5, color: "#64748b" }}>{v.satir_sayisi} kalem · {v.saha_sayisi} saha · mevcut ₺{tl(v.toplam.mevcut)} · hesaplanan ₺{tl(v.toplam.hesaplanan)} · fark ₺{tl(v.toplam.fark)} · referansı olmayan {v.eksik.length} kalem</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={excel} style={{ border: "1px solid #e2e8f0", background: "#fff", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>Excel</button>
+        </div>
+      </div>
+      {acik && (
+        <div style={{ padding: "10px 16px 14px" }}>
+          <div style={{ fontSize: 11.5, color: "#475569", marginBottom: 8 }}>Kaynak: {v.kaynak}. {v.kapsam_notu}. Huawei BoQ fiyatı (müşteri) ile taşeron bedeli ayrıdır; BoQ sürümü taşeron fiyatını değiştirmez. Şimşek–2KX seed fiyatı yalnız bilgi amaçlıdır, uygulanmaz.</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100 }}>
+              <thead><tr>{["Saha", "İş kalemi", "Adet", "Mevcut bedel", "Referans anlaşma bedeli", "Hesaplanan bedel", "Fark", "QC", "Gerekçe"].map((h, i) => <th key={h} style={{ ...th, textAlign: i < 2 || i === 8 ? "left" : "right" }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {v.satirlar.map((s, i) => (
+                  <tr key={i} style={{ background: Math.abs(s.fark) >= 1 ? "#fffbeb" : "transparent" }}>
+                    <td style={{ ...td, textAlign: "left", fontFamily: "monospace", fontWeight: 700 }}>{s.site}<div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "inherit" }}>{s.tip}</div></td>
+                    <td style={{ ...td, textAlign: "left", whiteSpace: "normal", minWidth: 260 }}><span style={{ fontFamily: "monospace", fontSize: 11 }}>{s.item_code}</span> {s.kalem}</td>
+                    <td style={td}>{s.adet} {s.birim || ""}</td>
+                    <td style={td}>₺{tl(s.mevcut)}</td>
+                    <td style={td}>₺{tl(s.referans_birim)} <span style={{ fontSize: 10, color: "#94a3b8" }}>{s.referans_tur}</span></td>
+                    <td style={{ ...td, fontWeight: 700 }}>₺{tl(s.hesaplanan)}</td>
+                    <td style={{ ...td, color: Math.abs(s.fark) >= 1 ? "#b45309" : "#94a3b8", fontWeight: 700 }}>{Math.abs(s.fark) >= 1 ? `₺${tl(s.fark)}` : "—"}</td>
+                    <td style={td}>{s.qc}</td>
+                    <td style={{ ...td, textAlign: "left", whiteSpace: "normal", fontSize: 11, color: "#475569", minWidth: 280 }}>{s.gerekce}{s.simsek_2kx_seed_bilgi != null ? ` · (bilgi: Şimşek–2KX seed ₺${tl(s.simsek_2kx_seed_bilgi)}, uygulanmadı)` : ""}</td>
+                  </tr>
+                ))}
+                {v.eksik.map((s, i) => (
+                  <tr key={"e" + i} style={{ background: "#fef2f2" }}>
+                    <td style={{ ...td, textAlign: "left", fontFamily: "monospace", fontWeight: 700 }}>{s.site}<div style={{ fontSize: 10, color: "#94a3b8", fontFamily: "inherit" }}>{s.tip}</div></td>
+                    <td style={{ ...td, textAlign: "left", whiteSpace: "normal", minWidth: 260 }}><span style={{ fontFamily: "monospace", fontSize: 11 }}>{s.item_code}</span> {s.kalem}</td>
+                    <td style={td}>{s.adet}</td>
+                    <td style={td}>₺{tl(s.mevcut)}</td>
+                    <td style={{ ...td, color: "#b91c1c", fontWeight: 700 }}>referans yok</td>
+                    <td style={td}>—</td><td style={td}>—</td><td style={td}>{s.qc}</td>
+                    <td style={{ ...td, textAlign: "left", whiteSpace: "normal", fontSize: 11, color: "#991b1b", minWidth: 280 }}>{s.gerekce}{s.simsek_2kx_seed_bilgi != null ? ` · (bilgi: Şimşek–2KX seed ₺${tl(s.simsek_2kx_seed_bilgi)}, uygulanmadı)` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {v.duzeltme_onizleme.length > 0 && (
+            <div style={{ marginTop: 10, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "8px 12px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#b45309" }}>Geçmiş düzeltme önizlemesi — {v.duzeltme_onizleme.length} saha (taseron_hakedis saha bazlı kayıt; uygulanmadı)</div>
+              {v.duzeltme_onizleme.map((d) => <div key={d.site_code} style={{ fontSize: 11.5, color: "#475569" }}>{d.site_code}: ₺{tl(d.mevcut)} → ₺{tl(d.hakedis_bedeli)}</div>)}
+              {isAdmin && <button type="button" disabled={uyg} onClick={uygula} style={{ marginTop: 6, border: "none", background: "#b45309", color: "#fff", borderRadius: 8, padding: "5px 12px", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>{uyg ? "Uygulanıyor…" : "Onayla ve uygula (admin)"}</button>}
+            </div>
+          )}
+          {!v.duzeltme_onizleme.length && <div style={{ marginTop: 8, fontSize: 12, color: "#15803d", fontWeight: 700 }}>✓ Mevcut hakediş katmanı referans anlaşmayla aynı sonucu veriyor — saha bazlı düzeltme gerekmiyor.{v.eksik.length ? ` Referansı olmayan ${v.eksik.length} kalem yukarıda listelendi.` : ""}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MarkaTaseronPanel({ currentUser }) {
   const [data, setData] = useState({ faturalar: [], odemeler: [] });
   // Uzun tablolar: ilk 10 satır görünür, "daha göster" ile açılır; açıkken
@@ -4554,6 +4707,9 @@ function MarkaTaseronPanel({ currentUser }) {
           </div>
         );
       })()}
+
+      {/* 27.10.2026: TEKNO_2KX referans karşılaştırması (yalnız Teknocenter markası) */}
+      {marka === "TEKNO" && <Tekno2kxKarsilastirma marka={marka} isAdmin={["admin", "platform_admin"].includes(String(currentUser?.role || "").toLowerCase())} />}
 
       {/* Fatura listesi — Taşeron Hesabı'ndaki taşeron filtresi bu listeye de uygulanır (09.09.2026) */}
       {(() => {
@@ -7940,7 +8096,189 @@ function SahaFaturaKontrolKarti({ site }) {
   );
 }
 
-function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
+/* ═══ BoQ SÜRÜM KARTI (27.10.2026, Orhan — Teknocenter) ═══════════════════════════════════════════════════════
+   İki seçenek: "2025 BoQ — Eski fiyat listesi" / "2026 BoQ — 12 Ekim 2026 ve sonrası". Öneri sunucudan gelir
+   (GET /master/saha-kalemler meta.boq_oneri: sahanın GERÇEK malzeme geliş tarihi; 12.10.2026 00:00 Europe/Istanbul sınırı).
+   Tarihe aykırı seçimde gerekçe zorunlu (sunucu da ister; seçim+gerekçe+kullanıcı+zaman boq_secim_log'a yazılır). */
+function BoqSurumKarti({ oneri, surumler = [], secim, onSecim, saltOkunur = false }) {
+  const onerilen = oneri?.onerilen || null;
+  const liste = surumler.length ? surumler : [
+    { kod: "BOQ2025", ad: "2025 BoQ — Eski fiyat listesi", kisa: "2025 BoQ" },
+    { kod: "BOQ2026", ad: "2026 BoQ — 12 Ekim 2026 ve sonrası", kisa: "2026 BoQ" }];
+  const aykiri = !!(secim?.surum && onerilen && secim.surum !== onerilen);
+  const dogrulanamadi = oneri && oneri.durum !== "OK";
+  return (
+    <div style={{ padding:"10px 16px 12px", borderBottom:"1px solid #e2e8f0", background:"#fff" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:8 }}>
+        <div style={{ fontSize:11, fontWeight:800, color:"#0f172a", textTransform:"uppercase", letterSpacing:"0.06em" }}>BoQ sürümü <span style={{ color:"#dc2626" }}>*</span></div>
+        <div style={{ fontSize:11.5, color: dogrulanamadi ? "#b45309" : "#64748b" }}>
+          {oneri ? (dogrulanamadi ? "⚠ Malzeme geliş tarihi doğrulanamadı; BoQ seçimini kontrol edin." + (oneri.gerekce ? ` (${oneri.gerekce})` : "") : oneri.gerekce) : "Sürüm önerisi yükleniyor…"}
+          {oneri?.enh_farkli && oneri.enh?.surum && <span style={{ marginLeft:6, color:"#7c3aed" }}>· ENH malzemesi {oneri.enh.tarih ? oneri.enh.tarih.split("-").reverse().join(".") : ""} → ENH kalemleri için {oneri.enh.surum === "BOQ2026" ? "2026" : "2025"} BoQ</span>}
+        </div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:10 }}>
+        {liste.map((v) => {
+          const secili = secim?.surum === v.kod, oner = onerilen === v.kod;
+          return (
+            <button type="button" key={v.kod} disabled={saltOkunur} onClick={() => onSecim({ surum: v.kod, gerekce: secim?.surum === v.kod ? secim.gerekce : "" })}
+              style={{ textAlign:"left", cursor: saltOkunur ? "default" : "pointer", borderRadius:12, padding:"10px 14px", background: secili ? "#eff6ff" : "#f8fafc",
+                       border: secili ? "2px solid #2563eb" : "1.5px solid #e2e8f0", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ width:18, height:18, borderRadius:"50%", border: secili ? "6px solid #2563eb" : "2px solid #cbd5e1", background:"#fff", flexShrink:0 }} />
+              <span style={{ flex:1 }}>
+                <span style={{ display:"block", fontWeight:800, fontSize:13, color:"#0f172a" }}>{v.ad}</span>
+                <span style={{ display:"block", fontSize:11, color:"#64748b", marginTop:2 }}>
+                  {v.hazir === false ? "Katalog henüz içe alınmadı — fiyat anlık görüntüsü yazılamaz" : v.kalem ? `${v.kod_sayisi || v.kalem} kalem · ${v.fiyatli || 0} fiyatlı` : v.kaynak || ""}
+                </span>
+              </span>
+              {oner && <span style={{ background:"#dcfce7", color:"#166534", borderRadius:999, padding:"2px 9px", fontSize:10.5, fontWeight:800 }}>Önerilen</span>}
+            </button>
+          );
+        })}
+      </div>
+      {aykiri && (
+        <div style={{ marginTop:8, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"8px 12px" }}>
+          <div style={{ fontSize:12, color:"#b45309", fontWeight:700 }}>⚠ Seçim malzeme geliş tarihine aykırı — gerekçe zorunlu (yalnız yetkili kullanıcı kaydedebilir; seçim, gerekçe, kullanıcı ve zaman kaydedilir).</div>
+          <input value={secim?.gerekce || ""} onChange={(e) => onSecim({ ...secim, gerekce: e.target.value })} placeholder="Gerekçe (ör. Huawei PM onayıyla yeni BoQ uygulanacak)"
+            style={{ marginTop:6, width:"100%", boxSizing:"border-box", padding:"7px 10px", border:"1.5px solid #fcd34d", borderRadius:8, fontSize:12.5 }} />
+        </div>
+      )}
+      {!secim?.surum && <div style={{ marginTop:6, fontSize:11.5, color:"#dc2626", fontWeight:600 }}>PR oluşturmak için bir BoQ sürümü seçin.</div>}
+    </div>
+  );
+}
+
+/* ═══ TSSR ve BoQ KONTROLÜ (27.10.2026) — Akıllı Kontrol alanına eklenen bölüm ═══════════════════════════════
+   GET /po/tssr-boq-kontrol?site=&surum= : yapay zekâ TSSR bulguları + seçili BoQ kataloğu + PR/PO kalemleri birlikte
+   değerlendirilir. "Talebe ekle" kullanıcı işlemidir (gride YENİ satır olarak eklenir, Kaydet'e kadar DB'ye yazılmaz).
+   Uyarılar gerekçeyle "dikkate alınmadı" olarak kaydedilebilir (POST …/karar). Yapay zekâ çalışmazsa "TSSR kontrolü
+   tamamlanamadı" gösterilir — "sorun yok" denmez, form verisi korunur. */
+function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = false }) {
+  const [veri, setVeri] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(false);
+  const [hata, setHata] = useState("");
+  const [acik, setAcik] = useState(true);
+  const [gerekceler, setGerekceler] = useState({});
+  const yukle = useCallback(async (yenile = false) => {
+    const s = String(siteCode || "").trim().toUpperCase();
+    if (!s || s.length < 4) { setVeri(null); return; }
+    setYukleniyor(true); setHata("");
+    try {
+      const d = await fetchJson(`${API_BASE}/po/tssr-boq-kontrol?site=${encodeURIComponent(s)}${surum ? `&surum=${surum}` : ""}${yenile ? "&yenile=1" : ""}`, { withAuth: true });
+      if (d && d.ok) setVeri(d); else { setVeri(null); setHata(d?.error || "TSSR kontrolü tamamlanamadı"); }
+    } catch (e) { setVeri(null); setHata(e.message || "TSSR kontrolü tamamlanamadı"); }
+    finally { setYukleniyor(false); }
+  }, [siteCode, surum]);
+  useEffect(() => { const t = setTimeout(() => yukle(false), 700); return () => clearTimeout(t); }, [yukle]);
+  const karar = async (anahtar, k, gerekce) => {
+    try {
+      const d = await fetchJson(`${API_BASE}/po/tssr-boq-kontrol/karar`, { method: "POST", withAuth: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site: String(siteCode).toUpperCase(), anahtar, karar: k, gerekce }) });
+      if (!d?.ok) throw new Error(d?.error || "Kaydedilemedi");
+      await yukle(false);
+    } catch (e) { alert(`Karar kaydedilemedi: ${e.message}`); }
+  };
+  const fiyat = (a) => a.birim_fiyat === null || a.birim_fiyat === undefined ? "fiyat yok" : `${Number(a.birim_fiyat).toLocaleString("tr-TR")} ${a.para_birimi || ""}`;
+  const R = { kontrol: { cizgi:"#fde68a", ink:"#b45309", zemin:"#fffbeb" }, oneri: { cizgi:"#c7d2fe", ink:"#4338ca", zemin:"#eef2ff" }, yok: { cizgi:"#e2e8f0", ink:"#64748b", zemin:"#f8fafc" } };
+  const belge = veri?.tssr_belge;
+  return (
+    <div style={{ marginBottom:12, background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"12px 14px" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <div style={{ fontWeight:800, fontSize:13, color:"#0f172a", cursor:"pointer" }} onClick={() => setAcik((p) => !p)}>{acik ? "▾" : "▸"} 🧠 TSSR ve BoQ Kontrolü</div>
+        <div style={{ fontSize:11.5, color:"#64748b" }}>Yapay zekâ TSSR incelemesi + {veri?.surum_ad || (surum ? surum : "seçili BoQ")} kataloğu · öneriler kaynak sayfaya bağlı</div>
+        {yukleniyor && <span style={{ fontSize:11, color:"#94a3b8" }}>inceleniyor…</span>}
+        <div style={{ marginLeft:"auto", display:"flex", gap:6, flexWrap:"wrap" }}>
+          {belge && <span title={`${belge.dosya}${belge.revizyon ? " · " + belge.revizyon : ""} · ${belge.sayfa_sayisi || "?"} sayfa · ${belge.kaynak === "onbellek" ? "önbellekten" : "yeni okundu"}`}
+            style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#ede9fe", color:"#6d28d9" }}>
+            TSSR {belge.tarih ? belge.tarih.split("-").reverse().join(".") : ""}{belge.revizyon ? ` · ${belge.revizyon}` : ""} · {belge.is_sayisi} iş{belge.revizyon_sayisi > 1 ? ` · ${belge.revizyon_sayisi} revizyon` : ""}</span>}
+          {veri && veri.tssr_durumu !== "TAMAM" && <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#fee2e2", color:"#b91c1c" }}>TSSR kontrolü tamamlanamadı</span>}
+          {veri && veri.katalog_hazir === false && <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#f1f5f9", color:"#64748b" }}>Katalog içe alınmamış</span>}
+          <button type="button" onClick={() => yukle(true)} disabled={yukleniyor || saltOkunur} title="TSSR'ı yeniden okut (yeni dosya/revizyon yüklendiyse)"
+            style={{ border:"1px solid #e2e8f0", background:"#f8fafc", color:"#475569", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>TSSR'ı yeniden oku</button>
+        </div>
+      </div>
+      {!acik ? null : hata ? (
+        <div style={{ marginTop:8, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"8px 12px", fontSize:12.5, color:"#b91c1c", fontWeight:600 }}>TSSR kontrolü tamamlanamadı: {hata}. PR verileri korunuyor; "sorun yok" anlamına gelmez.</div>
+      ) : !veri ? null : (
+        <div style={{ marginTop:8 }}>
+          {veri.tssr_mesaj && <div style={{ fontSize:12, color: veri.tssr_durumu === "TAMAM" ? "#64748b" : "#b45309", marginBottom:6 }}>{veri.tssr_mesaj}{veri.tssr_hata ? ` (${veri.tssr_hata})` : ""}</div>}
+          {(veri.tssr_belgeler || []).some((b) => b.durum === "HATA") && (
+            <div style={{ fontSize:11.5, color:"#b91c1c", marginBottom:6 }}>Okunamayan belge: {veri.tssr_belgeler.filter((b) => b.durum === "HATA").map((b) => `${b.dosya} (${b.hata})`).join("; ")}</div>
+          )}
+          {/* Uyarılar */}
+          {(veri.uyarilar || []).length > 0 && (
+            <div style={{ background:R.kontrol.zemin, border:`1px solid ${R.kontrol.cizgi}`, borderRadius:10, padding:"10px 10px 5px", marginBottom:8 }}>
+              <div style={{ fontSize:11, fontWeight:800, color:R.kontrol.ink, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Yanlış / eksik talep uyarıları · {veri.uyarilar.length}</div>
+              {veri.uyarilar.map((u) => (
+                <div key={u.anahtar} style={{ background:"#fff", border:`1px solid ${R.kontrol.cizgi}`, borderRadius:9, padding:"7px 10px", marginBottom:5, opacity: u.karar ? 0.6 : 1 }}>
+                  <div style={{ display:"flex", gap:8, alignItems:"flex-start", flexWrap:"wrap" }}>
+                    <span style={{ fontSize:10, fontWeight:800, borderRadius:5, padding:"1px 6px", background: u.seviye === "KONTROL" ? "#fef3c7" : "#e0e7ff", color: u.seviye === "KONTROL" ? "#b45309" : "#4338ca" }}>{u.seviye === "KONTROL" ? "Kontrol gerekli" : "Öneri"}</span>
+                    <span style={{ fontSize:10, fontWeight:700, color:"#94a3b8" }}>{u.tip}</span>
+                    <div style={{ flex:1, minWidth:200, fontSize:12.5, color:"#0f172a", fontWeight:600 }}>{u.mesaj}</div>
+                  </div>
+                  {u.dayanak && <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2, fontStyle:"italic" }}>Dayanak: {u.dayanak}</div>}
+                  {u.karar ? (
+                    <div style={{ fontSize:11, color:"#64748b", marginTop:4 }}>Dikkate alınmadı — {u.karar.gerekce} ({u.karar.kullanici}, {String(u.karar.zaman).slice(0, 10)})
+                      {!saltOkunur && <button type="button" onClick={() => karar(u.anahtar, "GERI_AL", "")} style={{ marginLeft:8, border:"none", background:"transparent", color:"#2563eb", cursor:"pointer", fontSize:11 }}>geri al</button>}</div>
+                  ) : !saltOkunur && (
+                    <div style={{ display:"flex", gap:6, marginTop:5, alignItems:"center", flexWrap:"wrap" }}>
+                      {u.item_code && u.tip === "EKSIK" && <button type="button" onClick={() => onTalebeEkle && onTalebeEkle(u.item_code, u.item_description, 1)}
+                        style={{ border:"none", background:"#4338ca", color:"#fff", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>+ Talebe ekle</button>}
+                      <input value={gerekceler[u.anahtar] || ""} onChange={(e) => setGerekceler((p) => ({ ...p, [u.anahtar]: e.target.value }))} placeholder="Dikkate almama gerekçesi"
+                        style={{ flex:1, minWidth:180, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:7, fontSize:11.5 }} />
+                      <button type="button" onClick={() => karar(u.anahtar, "DIKKATE_ALINMADI", gerekceler[u.anahtar] || "")}
+                        style={{ border:"1px solid #e2e8f0", background:"#f8fafc", color:"#475569", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Dikkate alma</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* TSSR işleri → BoQ önerileri */}
+          {(veri.oneriler || []).length > 0 && (
+            <div style={{ background:R.oneri.zemin, border:`1px solid ${R.oneri.cizgi}`, borderRadius:10, padding:"10px 10px 5px", marginBottom:8 }}>
+              <div style={{ fontSize:11, fontWeight:800, color:R.oneri.ink, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>TSSR'da istenen işler → {veri.surum_ad || "BoQ"} kalemleri · {veri.oneriler.length}</div>
+              {veri.oneriler.map((o) => (
+                <div key={o.anahtar} style={{ background:"#fff", border:`1px solid ${R.oneri.cizgi}`, borderRadius:9, padding:"7px 10px", marginBottom:5 }}>
+                  <div style={{ fontSize:12.5, color:"#0f172a", fontWeight:700 }}>
+                    {o.is.sira}. {o.is.tur_tr} — {o.is.ekipman || "?"}{o.is.bant ? ` · ${o.is.bant}` : ""}{o.is.teknoloji ? ` · ${o.is.teknoloji}` : ""}
+                    <span style={{ marginLeft:8, fontSize:10.5, fontWeight:700, borderRadius:5, padding:"1px 6px", background: o.miktar_belgede ? "#dcfce7" : "#f1f5f9", color: o.miktar_belgede ? "#166534" : "#64748b" }}>
+                      {o.miktar_belgede ? `belgede miktar: ${o.is.miktar_ham} ${o.is.birim || ""}` : "belgede miktar yok"}</span>
+                  </div>
+                  <div style={{ fontSize:11.5, color:"#475569", marginTop:2 }}>{o.is.aciklama}</div>
+                  <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2, fontStyle:"italic" }}>
+                    <a href={o.dayanak.url} target="_blank" rel="noreferrer" style={{ color:"#6d28d9" }}>{o.dayanak.dosya}</a> · sayfa {o.dayanak.sayfa || "?"}{o.dayanak.bolum ? ` · ${o.dayanak.bolum}` : ""}: “{o.dayanak.alinti}”
+                  </div>
+                  {o.adaylar.length ? o.adaylar.map((a, j) => (
+                    <div key={a.boq_kod} style={{ display:"flex", gap:8, alignItems:"flex-start", marginTop:6, padding:"6px 8px", borderRadius:7, background: j === 0 ? "#f5f3ff" : "#fafafa", border:"1px solid #ede9fe", flexWrap:"wrap" }}>
+                      <div style={{ flex:1, minWidth:220 }}>
+                        <span style={{ fontFamily:"monospace", fontWeight:800, color:"#4338ca" }}>{a.boq_kod}</span>
+                        <span style={{ color:"#0f172a", marginLeft:6 }}>{a.aciklama}</span>
+                        <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>{a.birim || "?"} · {fiyat(a)}{a.bolge ? ` · ${a.bolge}` : ""} · {a.surum}{j > 0 ? " · alternatif" : ""}
+                          {a.pr_var && <span style={{ marginLeft:6, background:"#dbeafe", color:"#1d4ed8", borderRadius:5, padding:"0 6px", fontSize:10, fontWeight:700 }}>PR'da var ({a.pr_qty})</span>}
+                          {a.po_var && <span style={{ marginLeft:6, background:"#dcfce7", color:"#166534", borderRadius:5, padding:"0 6px", fontSize:10, fontWeight:700 }}>PO açık ({a.po_qty}{a.po_no ? " · " + a.po_no : ""})</span>}
+                        </div>
+                        <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2 }}>{a.gerekce}{a.kaynak ? ` · Katalog kaynağı: ${a.kaynak}` : ""}</div>
+                      </div>
+                      {!saltOkunur && !a.pr_var && <button type="button" onClick={() => onTalebeEkle && onTalebeEkle(a.boq_kod, a.aciklama, o.is.miktar || 1)}
+                        style={{ border:"none", background:"#4338ca", color:"#fff", borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>+ Talebe ekle</button>}
+                    </div>
+                  )) : <div style={{ marginTop:5, fontSize:12, color:"#b45309", fontWeight:600 }}>Eşleşme doğrulanamadı — {o.mesaj}</div>}
+                  {o.mevcut_not && <div style={{ fontSize:11, color:"#b45309", marginTop:4 }}>⚠ {o.mevcut_not}</div>}
+                </div>
+              ))}
+              <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:4 }}>TSSR'da bulunması faturalanabilirlik ya da müşteri onayı kanıtı değildir; "Talebe ekle" gride satır ekler, Kaydet'e kadar kayıt yapılmaz.</div>
+            </div>
+          )}
+          {veri.tssr_durumu === "TAMAM" && !(veri.uyarilar || []).length && (veri.oneriler || []).every((o) => o.adaylar.some((a) => a.pr_var)) && (
+            <div style={{ fontSize:12.5, color:"#15803d", fontWeight:700 }}>✓ TSSR'daki işlerin tümünün PR'da karşılığı var; uyarı yok.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSecim, saltOkunur = false }) {
   const [data, setData] = useState({ rows: [], meta: {} });
   const [yukleniyor, setYukleniyor] = useState(false);
   const [duzenleme, setDuzenleme] = useState({}); // { item_code: { pr_qty, done_qty } }
@@ -7978,11 +8316,15 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
     setYukleniyor(true); setHata("");
     try {
       const d = await fetchJson(`${API_BASE}/master/saha-kalemler?site=${encodeURIComponent(s)}`);
-      if (d && d.ok) { setData({ rows: d.rows || [], meta: d.meta || {} }); setDuzenleme({}); setEkstraKalemler([]); }
+      if (d && d.ok) {
+        setData({ rows: d.rows || [], meta: d.meta || {} }); setDuzenleme({}); setEkstraKalemler([]);
+        // 27.10.2026: önerilen BoQ sürümü (malzeme geliş tarihi) — kullanıcı henüz seçmediyse otomatik; doğrulanamadıysa boş kalır
+        if (setBoqSecim) setBoqSecim((p) => (p && p.surum && p.site === s ? p : { surum: d.meta?.boq_oneri?.onerilen || "", gerekce: "", site: s, onerilen: d.meta?.boq_oneri?.onerilen || "" }));
+      }
       else setHata(d?.error || "Kalemler getirilemedi");
     } catch (e) { setHata(e.message || "Kalemler getirilemedi"); }
     finally { setYukleniyor(false); }
-  }, []);
+  }, [setBoqSecim]);
 
   useEffect(() => {
     const t = setTimeout(() => yukle(siteCode), 500);
@@ -8125,16 +8467,29 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
 
   const kaydet = async () => {
     if (!bekleyen.length) { alert("Değişiklik yok"); return; }
+    // 27.10.2026: BoQ sürümü zorunlu; aykırı seçimde gerekçe zorunlu (sunucu da doğrular)
+    if (!boqSecim?.surum) { alert("BoQ sürümü seçilmeden PR kaydedilemez — 2025 / 2026 BoQ seçeneğinden birini seçin."); return; }
+    if (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen && !String(boqSecim.gerekce || "").trim()) { alert("Seçilen BoQ sürümü malzeme geliş tarihine aykırı — gerekçe yazın."); return; }
     setKaydediyor(true);
     try {
-      const d = await fetchJson(`${API_BASE}/master/saha-kalemler/kaydet`, {
-        method: "POST", withAuth: true, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ site: String(siteCode || "").toUpperCase(), kalemler: bekleyen }),
-      });
+      const govde = { site: String(siteCode || "").toUpperCase(), kalemler: bekleyen, boq_surum: boqSecim.surum, boq_secim_gerekce: boqSecim.gerekce || "" };
+      const istek = async (b) => {
+        const r = await fetch(`${API_BASE}/master/saha-kalemler/kaydet`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || ""}` }, body: JSON.stringify(b) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok && !j.surum_catisma) throw new Error(j.error || `HTTP ${r.status}`);
+        return j;
+      };
+      let d = await istek(govde);
+      if (!d?.ok && d?.surum_catisma) {
+        // Kalem farklı sürümle kayıtlı: eski kod/fiyat sessizce taşınmaz, karşılaştırma gösterilip onay alınır
+        const satir = d.surum_catisma.map((c) => `${c.item_code}: kayıtlı ${c.kayitli.surum} ${c.kayitli.fiyat ?? "-"} ${c.kayitli.para || ""} → yeni ${c.yeni.surum} ${c.yeni.fiyat ?? "-"} ${c.yeni.para || ""}`).join("\n");
+        if (!window.confirm(`Bu kalemler farklı bir BoQ sürümüyle kayıtlı. Yeni sürümün fiyat/açıklaması yazılsın mı?\n\n${satir}`)) { setKaydediyor(false); return; }
+        d = await istek({ ...govde, surum_degisim_onayi: true });
+      }
       if (!d?.ok) throw new Error(d?.error || "Kaydedilemedi");
       window.dispatchEvent(new Event("dataUpdated"));
       await yukle(siteCode);
-      alert(`Kaydedildi — ${d.guncellenen} güncellendi, ${d.eklenen} yeni kalem eklendi.`);
+      alert(`Kaydedildi — ${d.guncelenen ?? d.guncellenen} güncellendi, ${d.eklenen} yeni kalem eklendi (${boqSecim.surum}).${d.boq_uyari ? "\n" + d.boq_uyari : ""}`);
     } catch (e) { alert(`Kayıt hatası: ${e.message}`); }
     finally { setKaydediyor(false); }
   };
@@ -8191,6 +8546,9 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
             {(data.meta?.bolge || data.meta?.il) && <span>Bölge <b style={{ color:"#0f172a" }}>{data.meta.bolge || data.meta.il}</b></span>}
             {data.meta?.project_code && <span>Proje <b style={{ color:"#0f172a" }}>{data.meta.project_code}</b></span>}
             {data.meta?.rf_subcon    && <span>Subcon <b style={{ color:"#0f172a" }}>{data.meta.rf_subcon}</b></span>}
+            {boqSecim?.surum && <span style={{ background: boqSecim.surum === "BOQ2026" ? "#dcfce7" : "#fef3c7", color: boqSecim.surum === "BOQ2026" ? "#166534" : "#b45309", borderRadius:999, padding:"2px 10px", fontWeight:800, fontSize:11 }}
+              title={boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen ? `Tarihe aykırı seçim · gerekçe: ${boqSecim.gerekce || "yazılmadı"}` : "Malzeme geliş tarihine göre önerilen sürüm"}>
+              {boqSecim.surum === "BOQ2026" ? "2026 BoQ" : "2025 BoQ"}{boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen ? " ⚠" : ""}</span>}
           </div>
           <div style={{ display:"flex", gap:8, marginLeft:"auto", flexWrap:"wrap", alignItems:"center" }}>
             <span style={S.chip}>Kalem <b>{rows.length}</b></span>
@@ -8218,6 +8576,10 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
             </button>
           </div>
         </div>
+
+        {/* BoQ sürüm kartı (27.10.2026) */}
+        {setBoqSecim && <BoqSurumKarti oneri={data.meta?.boq_oneri} surumler={data.meta?.boq_surumler || []} secim={boqSecim} saltOkunur={saltOkunur}
+          onSecim={(v) => setBoqSecim({ ...v, site: String(siteCode || "").toUpperCase(), onerilen: data.meta?.boq_oneri?.onerilen || "" })} />}
 
         {/* Tablo */}
         <div style={{ overflowX:"auto", maxHeight:"56vh", overflowY:"auto" }}>
@@ -8266,6 +8628,9 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
                       <td style={{ ...S.td, textAlign:"left", fontFamily:"monospace", fontSize:12, color:"#0f172a" }}>
                         {r.item_code}
                         {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
+                        {r.boq_surum && <span title={`PR'a yazılan sürüm · ${r.boq_birim_fiyat != null ? Number(r.boq_birim_fiyat).toLocaleString("tr-TR") + " " + (r.boq_para_birimi || "") : "fiyat yok"}${r.boq_birim ? " / " + r.boq_birim : ""}${r.boq_secim_gerekce ? " · gerekçe: " + r.boq_secim_gerekce : ""}`}
+                          style={{ marginLeft:6, background: r.boq_surum === "BOQ2026" ? "#dcfce7" : "#fef3c7", color: r.boq_surum === "BOQ2026" ? "#166534" : "#b45309", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700, fontFamily:"inherit" }}>
+                          {r.boq_surum === "BOQ2026" ? "2026" : "2025"}{boqSecim?.surum && r.boq_surum !== boqSecim.surum ? " ≠" : ""}</span>}
                         {asistanUyari[r.item_code] && (
                           <div title={asistanUyari[r.item_code].mesaj} style={{ marginTop:3, fontSize:10, color:"#dc2626", fontWeight:700, fontFamily:"inherit", whiteSpace:"nowrap" }}>
                             ⚠ {asistanUyari[r.item_code].kisa || "Talep etme"}
@@ -8336,6 +8701,12 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [] }) {
           )}
         </div>
       </div>
+
+      {/* ═══ TSSR ve BoQ KONTROLÜ (27.10.2026) — yapay zekâ TSSR + seçili sürüm kataloğu ═══ */}
+      {String(siteCode || "").length >= 6 && (
+        <TssrBoqKontrolPaneli siteCode={siteCode} surum={boqSecim?.surum || ""} saltOkunur={saltOkunur}
+          onTalebeEkle={(kod, aciklama, adet) => prEkle(kod, aciklama, adet)} />
+      )}
 
       {/* ═══ AKILLI ASİSTAN — belge kuralları + TSSR analizi (02.09.2026) ═══ */}
       {rows.length > 0 && (asistan || asistanYukleniyor) && (() => {
@@ -8601,6 +8972,8 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showBoqUpload, setShowBoqUpload] = useState(false);
+  // 27.10.2026: seçili BoQ sürümü (grid kartından; modal kalem listesi ve PR kaydı bu sürüme bağlı)
+  const [boqSecim, setBoqSecim] = useState({ surum: "", gerekce: "", site: "", onerilen: "" });
   // Üst menü "Daha Fazla" → HW QC / BoQ / Rollout yüklemeleri (02.09.2026)
   useEffect(() => {
     if (!actionTrigger) return;
@@ -8691,9 +9064,11 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
     }
   };
 
-  const loadItems = async () => {
+  const loadItems = async (surum = boqSecim.surum, site = siteSearchCode) => {
     try {
-      const data = await fetchJson(`${API_BASE}/lookup/items`);
+      // 27.10.2026: sürüm seçiliyse kalem kodu/açıklama/birim/fiyat o sürümün kataloğundan (bölge: saha kodundan)
+      const qs = surum ? `?surum=${encodeURIComponent(surum)}&site=${encodeURIComponent(String(site || "").toUpperCase())}` : "";
+      const data = await fetchJson(`${API_BASE}/lookup/items${qs}`);
 
       const cleaned = (data.rows || []).filter(
         (x) => x.item_code && x.item_description,
@@ -8711,7 +9086,10 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
             item_code: String(item.item_code).trim(),
             item_description: String(item.item_description).trim(),
             currency: item.currency || null,
-            unit_price: item.unit_price || null,
+            unit_price: item.unit_price ?? null,
+            unit: item.unit || null,
+            surum: item.surum || null,
+            kaynak: item.kaynak || "",
           });
         }
       });
@@ -8981,12 +9359,16 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
     return list.slice(0, 30);
   }, [itemOptions, itemDescriptionSearch]);
 
+  // 27.10.2026: sürüm/saha değişince kalem listesi o sürümden yenilenir
+  useEffect(() => { loadItems(boqSecim.surum, siteSearchCode); }, [boqSecim.surum]); // eslint-disable-line
+
   const handleOpenEntryModal = () => {
     if (!yeniKayitIzni) return;
     if (!siteSearchCode) {
       alert("Önce Site Code gir");
       return;
     }
+    if (!boqSecim.surum) { alert("Önce BoQ sürümünü seçin (saha kartındaki 2025 / 2026 BoQ seçeneği)."); return; }
 
     setForm((prev) => ({
       ...prev,
@@ -9103,6 +9485,10 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
       }
     }
 
+    // 27.10.2026: BoQ sürümü zorunlu; aykırı seçimde gerekçe zorunlu
+    if (!boqSecim.surum) { alert("BoQ sürümü seçilmeden PR kaydedilemez — saha kartından 2025 / 2026 BoQ seçin."); setSaving(false); return; }
+    if (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen && !String(boqSecim.gerekce || "").trim()) { alert("Seçilen BoQ sürümü malzeme geliş tarihine aykırı — saha kartında gerekçe yazın."); setSaving(false); return; }
+
     try {
       // Normalize subcon name to UPPERCASE
       const normalizedSubcon = (form.subcon_name || "").trim().toUpperCase();
@@ -9121,6 +9507,8 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
         qc_durum: form.qc_durum,
         kabul_durum: form.kabul_durum,
         kabul_not: form.kabul_not,
+        boq_surum: boqSecim.surum || null,
+        boq_secim_gerekce: boqSecim.gerekce || null,
       };
 
       // Save new subcon to master list if not already there (PO talebi modunda taşeron listesi değişmez)
@@ -9486,6 +9874,9 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
       <SahaKalemGridi
         siteCode={siteSearchCode}
         oneriler={sahaOneri?.oneriler || []}
+        boqSecim={boqSecim}
+        setBoqSecim={setBoqSecim}
+        saltOkunur={saltOkunur && !poTalep}
         onVeriGir={async (r) => {
           if (saltOkunur && r.master_id) { alert("Bu kalem kayıtlı — değiştirme yetkiniz yok. Yalnız kaydı olmayan kalem için PO talebi açabilirsiniz."); return; }
           if (!yeniKayitIzni) return;
@@ -9736,8 +10127,15 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
 
               {/* SECTION 2 – İş Kalemi */}
               <div style={{ background: "#fff", borderRadius: 14, padding: "16px 20px", marginBottom: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", borderLeft: "4px solid #8b5cf6" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a5f", marginBottom: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 16 }}>📋</span> İş Kalemi
+                  {/* 27.10.2026: seçili BoQ sürümü — kalem listesi ve fiyat bu sürümden */}
+                  <span style={{ marginLeft: 8, background: boqSecim.surum === "BOQ2026" ? "#dcfce7" : boqSecim.surum ? "#fef3c7" : "#fee2e2", color: boqSecim.surum === "BOQ2026" ? "#166534" : boqSecim.surum ? "#b45309" : "#b91c1c", borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 800 }}>
+                    {boqSecim.surum === "BOQ2026" ? "2026 BoQ — 12 Ekim 2026 ve sonrası" : boqSecim.surum === "BOQ2025" ? "2025 BoQ — Eski fiyat listesi" : "BoQ sürümü seçilmedi"}
+                  </span>
+                  {(() => { const k = itemOptions.find((x) => x.item_code === form.item_code); return k && k.surum ? (
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{k.unit || "?"} · {k.unit_price == null ? "fiyat yok" : `${Number(k.unit_price).toLocaleString("tr-TR")} ${k.currency || ""}`}{k.kaynak ? ` · ${k.kaynak}` : ""}</span>
+                  ) : null; })()}
                 </div>
                 {/* Item Description – full width search bar */}
                 <div style={{ position: "relative", marginBottom: 12 }} ref={itemDescriptionBoxRef}>
@@ -40007,6 +40405,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       "power_plan_start_date","power_actual_end_date",
       "abonelik_actual_end_date","tt_horizon_actual_end_date",
       "pac_actual_end_date","tamamlanma_tarihi","suzme_date",
+      "malzeme_gelis_tarihi","enh_malzeme_gelis_tarihi",
     ];
     const norm = { ...raw };
     for (const f of DATE_FIELDS) {
@@ -40028,6 +40427,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     site_physical_type: existingRow.site_physical_type || "",
     project_code: existingRow.project_code || "",
     malzeme_status: existingRow.malzeme_status || "",
+    // 27.10.2026: gerçek malzeme geliş tarihi (RF / ENH) — BoQ sürüm önerisinin tek kaynağı
+    malzeme_gelis_tarihi: existingRow.malzeme_gelis_tarihi || "",
+    enh_malzeme_gelis_tarihi: existingRow.enh_malzeme_gelis_tarihi || "",
     il: existingRow.il || "",
 
     rf_subcon: existingRow.rf_subcon || "",
@@ -40467,7 +40869,10 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           {input("Project Code", "project_code")}
           {input("Malzeme Status", "malzeme_status")}
           {input("İl", "il")}
+          {input("Malzeme Geliş Tarihi (RF)", "malzeme_gelis_tarihi", "date")}
+          {input("ENH Malzeme Geliş Tarihi", "enh_malzeme_gelis_tarihi", "date")}
         </div>
+        <div style={{ fontSize:"11px", color:"#64748b", margin:"4px 0 0" }}>Malzeme geliş tarihi = malzemenin sahaya/depoya GERÇEK varış günü (Excel yükleme ya da kayıt tarihi değil). 12.10.2026 öncesi → 2025 BoQ, 12.10.2026 ve sonrası → 2026 BoQ önerilir.</div>
 
         {/* ===== RF ===== */}
         <div style={{ margin:"14px 0 0", padding:"14px 16px", background:"#f8fafc", borderRadius:"12px", border:"1px solid #e2e8f0" }}>
