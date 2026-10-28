@@ -449,9 +449,14 @@ function utf8Name(name) {
 }
 
 function subconScope(req) {
-  const name = String(req.user?.subcon_name || "").trim();
-  if (!name) return null;
   const role = String(req.user?.role || "").toLowerCase();
+  let name = String(req.user?.subcon_name || "").trim();
+  // 28.10.2026 (Orhan): alt marka yönetim hesabı (ör. TEKNO direktörü) firma adı boş açılırsa
+  // kapsamsız kalıp tüm şirket verisini görüyordu — firma adı yoksa marka adına kilitlenir.
+  if (!name && req.user?.hw_yukleme === false && role !== "platform_admin" && role !== "user" && altMarkaMi(req.user?.marka)) {
+    name = markaProfil(req.user.marka).ad;
+  }
+  if (!name) return null;
   if (role === "subcon") return name;
   if (req.user?.hw_yukleme === false) return name; // alt marka tam paneli (info@ahyelektrik.com)
   if (!["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur"].includes(role)) return name;
