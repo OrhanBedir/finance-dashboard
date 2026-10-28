@@ -39,6 +39,8 @@ async function tabloHazirla(pool) {
     updated_at TIMESTAMPTZ DEFAULT NOW())`);
   await pool.query(`CREATE TABLE IF NOT EXISTS saha_rota_onbellek (
     anahtar TEXT PRIMARY KEY, mesafe_m NUMERIC, sure_s NUMERIC, servis TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`);
+  // 28.10.2026: güzergâh çizgisi (haritada yolu çizmek için; [[lng,lat],…], 5 ondalık)
+  await pool.query(`ALTER TABLE saha_rota_onbellek ADD COLUMN IF NOT EXISTS geometri JSONB`);
   _tablo = true;
 }
 
@@ -81,23 +83,40 @@ async function bursaDeposu(pool) {
   return { dogrulandi: true, id: d.id, ad: d.ad, adres: d.adres, lat, lng, kaynak: "ofis_depo kaydı (Haritadan Gör ile girilen konum)" };
 }
 
-// Karayolu mesafesi — yalnız ROTA_SERVIS_URL tanımlıysa (OSRM uyumlu: {url}/route/v1/driving/lng,lat;lng,lat). Önbellekli.
+// Güzergâh çizgisi: OSRM GeoJSON LineString → [[lng,lat],…] (5 ondalık ≈ 1 m; geçersiz nokta atılır)
+function cizgiAl(geo) {
+  const k = Array.isArray(geo?.coordinates) ? geo.coordinates : [];
+  return k.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+    .map(([lng, lat]) => [Math.round(lng * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]);
+}
+
+// Karayolu mesafesi + güzergâh — yalnız ROTA_SERVIS_URL tanımlıysa (OSRM uyumlu: {url}/route/v1/driving/lng,lat;lng,lat). Önbellekli.
+// Servise yalnız iki koordinat gider (depo + saha); güzergâh "simplified" (haritada çizmeye yeter, birkaç yüz nokta).
 async function karayolu(pool, a, b, { fetchFn = fetch } = {}) {
   const url = process.env.ROTA_SERVIS_URL;
   if (!url) return { durum: "KAPALI", mesaj: "Karayolu mesafesi hesaplanmadı: yönlendirme servisi yapılandırılmadı (yalnız kuş uçuşu gösteriliyor)." };
   await tabloHazirla(pool);
   const anahtar = [a.lat, a.lng, b.lat, b.lng].map((x) => Number(x).toFixed(5)).join(",");
-  const c = (await pool.query(`SELECT mesafe_m, sure_s, servis FROM saha_rota_onbellek WHERE anahtar = $1`, [anahtar])).rows[0];
-  if (c) return { durum: "OK", km: Number(c.mesafe_m) / 1000, dakika: Number(c.sure_s) / 60, servis: c.servis, onbellek: true };
+  const c = (await pool.query(`SELECT mesafe_m, sure_s, servis, geometri FROM saha_rota_onbellek WHERE anahtar = $1`, [anahtar])).rows[0];
+  // Güzergâhı olmayan eski önbellek kaydı (28.10 öncesi) bir kez yeniden sorulur
+  if (c && Array.isArray(c.geometri) && c.geometri.length > 1)
+    return { durum: "OK", km: Number(c.mesafe_m) / 1000, dakika: Number(c.sure_s) / 60, servis: c.servis, cizgi: c.geometri, onbellek: true };
   try {
-    const r = await fetchFn(`${url.replace(/\/$/, "")}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`);
+    const r = await fetchFn(`${url.replace(/\/$/, "")}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=simplified&geometries=geojson`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const rt = j?.routes?.[0];
     if (!rt) throw new Error("rota bulunamadı");
-    await pool.query(`INSERT INTO saha_rota_onbellek (anahtar, mesafe_m, sure_s, servis) VALUES ($1,$2,$3,$4) ON CONFLICT (anahtar) DO NOTHING`, [anahtar, rt.distance, rt.duration, url]);
-    return { durum: "OK", km: rt.distance / 1000, dakika: rt.duration / 60, servis: url, onbellek: false };
-  } catch (e) { return { durum: "HATA", mesaj: `Yönlendirme servisi yanıt vermedi (${e.message}) — karayolu mesafesi gösterilemiyor.` }; }
+    const cizgi = cizgiAl(rt.geometry);
+    await pool.query(`INSERT INTO saha_rota_onbellek (anahtar, mesafe_m, sure_s, servis, geometri, updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
+        ON CONFLICT (anahtar) DO UPDATE SET mesafe_m=EXCLUDED.mesafe_m, sure_s=EXCLUDED.sure_s, servis=EXCLUDED.servis, geometri=EXCLUDED.geometri, updated_at=NOW()`,
+      [anahtar, rt.distance, rt.duration, url, cizgi.length > 1 ? JSON.stringify(cizgi) : null]);
+    return { durum: "OK", km: rt.distance / 1000, dakika: rt.duration / 60, servis: url, cizgi: cizgi.length > 1 ? cizgi : null, onbellek: false };
+  } catch (e) {
+    // Servis o an yanıt vermezse eski (güzergâhsız) önbellek değeri yine gösterilir
+    if (c) return { durum: "OK", km: Number(c.mesafe_m) / 1000, dakika: Number(c.sure_s) / 60, servis: c.servis, cizgi: null, onbellek: true };
+    return { durum: "HATA", mesaj: `Yönlendirme servisi yanıt vermedi (${e.message}) — karayolu mesafesi gösterilemiyor.` };
+  }
 }
 
-module.exports = { TR_KUTU, tssrKonumu, tssrdenKonumYaz, kusUcusuKm, bursaDeposu, karayolu, tabloHazirla };
+module.exports = { TR_KUTU, tssrKonumu, tssrdenKonumYaz, kusUcusuKm, bursaDeposu, karayolu, cizgiAl, tabloHazirla };
