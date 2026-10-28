@@ -7,6 +7,8 @@
 // Belirsiz durumda kesin "yanlış talep" denmez: "Kontrol gerekli" / "Olası kapsam uyuşmazlığı".
 // TSSR'da bulunması faturalanabilirlik ya da müşteri onayı kanıtı değildir; "Talebe ekle" kullanıcı işlemidir.
 
+const PK = require("./paketKapsam");
+const SK = require("./sahaKimlik");
 const isoGun = (v) => { if (!v) return null; if (typeof v === "string") return v.slice(0, 10); const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
 const BANTLAR = ["NR700", "NR3500", "NR2100", "NR1800", "L700", "L800", "L900", "L1800", "L2100", "L2600", "U900", "U2100", "G900", "G1800", "2600", "3500", "700", "800", "900", "1800", "2100"];
 const bantCikar = (s) => {
@@ -136,11 +138,89 @@ function karsitKalipVarMi(is, prAciklama) {
   return null;
 }
 
+/* ═══ PAKET ÖNCELİKLİ DEĞERLENDİRME (28.10.2026) ═══════════════════════════════════════════════════════════════
+   1) TSSR teknik kapsamındaki bantlardan seçili BoQ sürümünün paket ailesi seçilir (paketKapsam.paketSec).
+   2) Her TSSR işi etiketlenir; seçilen paket(ler)in SOW'unda dahilse "PAKETE_DAHIL" (SOW satır + hücre dayanağı),
+      SOW'da açıkça hariçse "EK_TALEP" (ayrı kalem önerilebilir), SOW'da hiç geçmiyorsa "EK_ADAY" (kapsam dayanağı yok →
+      Kontrol gerekli; aday kalem yalnız bilgi). Bant ilavesinin kendisi "PAKET" satırıdır.
+   3) Fiyat yalnız katalogdan; katalog boşsa "Katalog kullanıma hazır değil; paket eşleştirmesi tamamlanamadı."
+   Paketin SITE birimi ekipman adediyle çarpılmaz (3 RRU ≠ 3 paket). */
+const KATALOG_YOK_MESAJ = "Katalog kullanıma hazır değil; paket eşleştirmesi tamamlanamadı.";
+function paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel }) {
+  const sec = PK.paketSec(surum, S);
+  const kapsamGetir = (kod) => PK.paketKapsami(surum, kod);
+  const paketler = sec.paketler.map((p) => {
+    const secenekler = (p.kodlar || []).map((kod) => {
+      const kap = kapsamGetir(kod), kat = katMap[kod];
+      return { kod, baslik: kap?.baslik_en || kat?.aciklama_en || "", baslik_tr: kap?.baslik_tr || "", birim: kat?.birim || kap?.birim || "",
+        birim_fiyat: kat && kat.birim_fiyat !== null && kat.birim_fiyat !== undefined ? Number(kat.birim_fiyat) : null, para_birimi: kat?.para_birimi || "", bolge: kat?.bolge || "",
+        katalog_kaynak: kat ? `${kat.kaynak_dosya || ""} · ${kat.kaynak_sayfa || ""} · ${kat.kaynak_satir || ""}` : "", katalogda: !!kat,
+        sow_kaynak: kap?.kaynak || null, sow_var: !!kap, anten_revizyonu: kap ? kap.anten_revizyonu : null, ayni_ziyaret: kap ? kap.ayni_ziyaret : null,
+        rru_araligi: kap?.rru_araligi || null, anten_araligi: kap?.anten_araligi || null, rru_sokum_ust: kap?.rru_sokum_ust || null,
+        pr_var: !!prMap[kod], pr_qty: prMap[kod] ? Number(prMap[kod].pr_qty ?? 0) : null, po_var: !!poMap[kod], po_no: poMap[kod]?.po_no || "" };
+    });
+    let durum = p.durum, mesaj = "";
+    if (secenekler.length && !katalogHazir) { durum = "KATALOG_YOK"; mesaj = KATALOG_YOK_MESAJ; }
+    else if (secenekler.length && secenekler.every((x) => !x.katalogda)) { durum = "KATALOGDA_YOK"; mesaj = `Paket kodu seçili ${surum} kataloğunda fiyatlı bulunamadı — fiyat doğrulanamadı.`; }
+    const antenD = p.anten?.dayanak;
+    return { ...p, durum, mesaj, secenekler,
+      tssr_dayanak: { dosya: guncel.dosya_adi, url: guncel.belge_url, kapak_sayfa: S.kapak?.sayfa || 1, teknik_kapsam: S.kapak?.teknik_kapsam || "", anten_sayfa: antenD?.sayfa || null, anten_alinti: antenD?.alinti || "" } };
+  });
+  const kullanilan = paketler.filter((p) => ["ACIK", "ALTERNATIF", "KATALOG_YOK", "KATALOGDA_YOK"].includes(p.durum) && p.secenekler.length);
+  // Etiket bir pakette dahil mi? ALTERNATIF pakette tüm seçeneklerde dahilse dahil sayılır
+  const dahilBul = (et) => {
+    for (const p of kullanilan) {
+      const kaps = p.secenekler.map((x) => kapsamGetir(x.kod)).filter(Boolean);
+      if (kaps.length && kaps.every((k) => k.dahil[et])) return { paket_kod: p.secenekler[0].kod, paket_bant: p.bant, sow: kaps[0].dahil[et][0], kaynak: kaps[0].kaynak, alternatifli: kaps.length > 1 };
+    }
+    return null;
+  };
+  const haricBul = (et) => {
+    for (const p of kullanilan) for (const x of p.secenekler) { const k = kapsamGetir(x.kod); if (k && k.haric[et]) return { paket_kod: x.kod, sow: k.haric[et][0], kaynak: k.kaynak }; }
+    return null;
+  };
+  const sektor = S.sektor_sayisi || {};
+  const isler = (S.isler || []).map((is, i) => {
+    const et = PK.isEtiketleri(is);
+    const base = { sira: i + 1, tur: is.tur, ekipman: is.ekipman, aciklama: is.aciklama, bant: is.bant, miktar: is.miktar, miktar_ham: is.miktar_ham, birim: is.birim, etiketler: et,
+      etiket_adlari: et.map((x) => PK.ETIKET_AD[x] || x), tssr_dayanak: { dosya: guncel.dosya_adi, url: guncel.belge_url, sayfa: is.sayfa, bolum: is.bolum, alinti: is.dayanak } };
+    // Sektör başına miktar → toplam (sektör sayısı belgede doğrulanmışsa; hesap ve iki kaynak gösterilir)
+    if (is.sektor_basina && is.miktar !== null) {
+      base.miktar_hesabi = sektor.deger
+        ? { sektor_basina: is.miktar, sektor_sayisi: sektor.deger, toplam: is.miktar * sektor.deger, kaynak_1: `sayfa ${is.sayfa || "?"}: ${is.dayanak}`, kaynak_2: `sayfa ${sektor.sayfa || "?"}: ${sektor.dayanak}` }
+        : { sektor_basina: is.miktar, sektor_sayisi: null, toplam: null, not: "Sektör sayısı belgede doğrulanamadı — toplam hesaplanmadı" };
+    }
+    if (et.includes("BANT_ILAVESI")) {
+      const p = paketler.find((x) => SK.kapsamIfadeleri(is.bant || is.aciklama).some((b) => SK.bantSinifi(b) === SK.bantSinifi(x.bant)));
+      return { ...base, durum: "PAKET", paket_bant: p?.bant || "", paket_kodlari: p ? p.secenekler.map((x) => x.kod) : [], neden: p ? "Bu iş paketin kendisidir (bant ilavesi)" : "Bant ilavesi için paket ailesi bulunamadı — Kontrol gerekli" };
+    }
+    if (!et.length) return { ...base, durum: "KONTROL", neden: "İş türü/ekipman paket kapsamıyla karşılaştırılamadı — Kontrol gerekli" };
+    const dahil = et.map(dahilBul), haric = et.map(haricBul);
+    if (kullanilan.length && dahil.every(Boolean)) {
+      const r = { ...base, durum: "PAKETE_DAHIL", paket_kod: dahil[0].paket_kod, sow_dayanaklari: et.map((e, j) => ({ etiket: PK.ETIKET_AD[e] || e, no: dahil[j].sow.no, metin: dahil[j].sow.metin, hucre: dahil[j].kaynak?.sow_hucre, sayfa: dahil[j].kaynak?.sayfa, dosya: dahil[j].kaynak?.dosya, paket_kod: dahil[j].paket_kod })),
+        neden: `Seçili paket SOW'unda geçiyor — ayrıca talep edilmez.` };
+      // Adet aralığı: paket "1-4 pcs RRU" kapsar; TSSR'da daha fazlası yazıyorsa kontrol
+      if (et.includes("RRU_MONTAJ")) {
+        const kap = kapsamGetir(dahil[et.indexOf("RRU_MONTAJ")].paket_kod);
+        const adet = r.miktar_hesabi?.toplam ?? is.miktar;
+        if (kap?.rru_araligi && adet !== null && adet > kap.rru_araligi.max) { r.durum = "KONTROL"; r.neden = `Paket ${kap.rru_araligi.min}-${kap.rru_araligi.max} RRU kurulumunu kapsıyor; TSSR'da ${adet} RRU yazıyor — fazlası için kapsam kontrol edilmeli.`; }
+      }
+      return r;
+    }
+    const hrc = haric.find(Boolean);
+    if (hrc) return { ...base, durum: "EK_TALEP", neden: `Paket SOW'u bu işi açıkça hariç tutuyor (${hrc.paket_kod} · ${hrc.kaynak?.sayfa} ${hrc.kaynak?.sow_hucre} satır ${hrc.sow.no}: "${hrc.sow.metin}") — ayrı kalem talep edilebilir.`, sow_haric: { ...hrc.sow, hucre: hrc.kaynak?.sow_hucre, paket_kod: hrc.paket_kod } };
+    if (kullanilan.length && dahil.some(Boolean)) return { ...base, durum: "KONTROL", neden: `İşin bir kısmı paket SOW'unda geçiyor (${et.filter((e, j) => dahil[j]).map((e) => PK.ETIKET_AD[e] || e).join(", ")}), bir kısmı geçmiyor (${et.filter((e, j) => !dahil[j]).map((e) => PK.ETIKET_AD[e] || e).join(", ")}) — Kontrol gerekli.` };
+    return { ...base, durum: kullanilan.length ? "EK_ADAY" : "PAKETSIZ", neden: kullanilan.length ? "Seçili paket SOW'unda bu iş geçmiyor; ayrı kalem için kapsam dayanağı doğrulanmadı — Kontrol gerekli." : "" };
+  });
+  return { paketler, isler, bantlar: sec.bantlar || [], anten: sec.anten || null, notlar: sec.notlar || [], katalog_hazir: katalogHazir };
+}
+
 /* kontrol({ site, tssr, katalog, surum, surumOneri, prRows, poRows, kararlar })
    tssr: tssrOkuma.sahaTssrAnaliz çıktısı; katalog: boq_katalog satırları (seçilen sürüm, bölge)
    prRows: [{item_code, item_description, pr_qty, done_qty, boq_surum, created_at}] ; poRows: [{item_code, requested_qty, po_no}]
    kararlar: [{anahtar, karar, gerekce, kullanici, zaman}] (dikkate alınmayanlar) */
-function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows = [], kararlar = [] }) {
+function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows = [], kararlar = [], katalogHazir = null }) {
+  if (katalogHazir === null) katalogHazir = Array.isArray(katalog) && katalog.length > 0;
   const oneriler = [], uyarilar = [];
   const prMap = {}; prRows.forEach((r) => { prMap[String(r.item_code).trim()] = r; });
   const poMap = {}; poRows.forEach((r) => { poMap[String(r.item_code).trim()] = r; });
@@ -168,12 +248,23 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
     return sonuc;
   }
   const S = guncel.sonuc;
-  sonuc.tssr_belge = { dosya: guncel.dosya_adi, url: guncel.belge_url, tarih: S.belge_tarihi, revizyon: S.revizyon, site_id: S.site_id, proje: S.proje,
-    sayfa_sayisi: S.sayfa_sayisi, eksik_sayfalar: S.eksik_sayfalar, revizyon_sayisi: tssr.revizyon_sayisi, is_sayisi: S.isler.length, model: S.model, kaynak: guncel.kaynak };
-  // TSSR çoğu zaman yalnız kök kodu yazar (KA3737 ↔ KA3737_NR700_LC900_MWA) — kök kod eşleşmesi farklılık sayılmaz
-  const kok = (x) => String(x || "").toUpperCase().split("_")[0];
-  if (S.site_id && site && S.site_id !== site && kok(S.site_id) !== kok(site)) uyarilar.push({ tip: "SAHA", seviye: "KONTROL", anahtar: "tssr|saha", item_code: "",
-    mesaj: `TSSR belgesindeki saha kodu (${S.site_id}) seçili sahadan (${site}) farklı görünüyor — doğru belge mi kontrol edin.`, dayanak: `${guncel.dosya_adi} sayfa 1` });
+  const kapak = S.kapak || {};
+  sonuc.tssr_belge = { dosya: guncel.dosya_adi, url: guncel.belge_url, tarih: kapak.hazirlama_tarihi || S.belge_tarihi, revizyon: kapak.belge_surumu || S.revizyon, site_id: kapak.site_id || S.site_id, proje: S.proje,
+    saha_adi: kapak.saha_adi || "", teknik_kapsam: kapak.teknik_kapsam || "", belge_surumu: kapak.belge_surumu || "", survey_tarihi: kapak.survey_tarihi || null, hazirlayan_firma: kapak.hazirlayan_firma || "",
+    kapak_sayfa: kapak.sayfa || null, sayfa_sayisi: S.sayfa_sayisi, eksik_sayfalar: S.eksik_sayfalar, revizyon_sayisi: tssr.revizyon_sayisi, is_sayisi: S.isler.length, model: S.model, kaynak: guncel.kaynak,
+    konum: S.konum || null, sektor_sayisi: S.sektor_sayisi || null, mevcut_ekipman: S.mevcut_ekipman || [] };
+  // Fiziksel saha eşlemesi (sahaKimlik): TSSR "KA3737" ↔ iş kaydı "KA3737_NR700_MWA" aynı saha; KA3737 ≠ KA37370.
+  // Yalnız tam metin farkı uyarı sebebi değildir; gerçek uyumsuzlukta uyarı, iş kapsamı farkında ayrı kontrol notu.
+  const tssrSite = kapak.site_id || S.site_id;
+  const esl = tssrSite ? SK.ayniFizikselSaha(tssrSite, site) : { ayni: null, neden: "TSSR'da Site ID okunamadı" };
+  const kapUyum = SK.isKapsamUyumu(site, kapak.teknik_kapsam || S.proje || "");
+  sonuc.saha_eslesme = { fiziksel_id: SK.fizikselSaha(site)?.fiziksel_id || null, tssr_site_id: tssrSite || "", is_kodu: site, durum: esl.ayni === true ? "AYNI" : esl.ayni === false ? "FARKLI" : "BELIRSIZ", neden: esl.neden, kapsam_uyumu: kapUyum };
+  if (esl.ayni === false) uyarilar.push({ tip: "SAHA", seviye: "KONTROL", anahtar: "tssr|saha", item_code: "",
+    mesaj: `TSSR başka bir fiziksel sahaya ait görünüyor: belgede ${tssrSite}, seçili iş kaydı ${site} (${esl.neden}). Doğru belge mi kontrol edin.`, dayanak: `${guncel.dosya_adi} sayfa ${kapak.sayfa || 1}` });
+  else if (esl.ayni === null && tssrSite) uyarilar.push({ tip: "SAHA", seviye: "KONTROL", anahtar: "tssr|saha", item_code: "",
+    mesaj: `TSSR saha kimliği doğrulanamadı (${esl.neden}).`, dayanak: `${guncel.dosya_adi} sayfa ${kapak.sayfa || 1}` });
+  if (esl.ayni === true && kapUyum.durum === "FARKLI") uyarilar.push({ tip: "KAPSAM", seviye: "KONTROL", anahtar: "tssr|is_kapsami", item_code: "",
+    mesaj: `Aynı fiziksel saha (${sonuc.saha_eslesme.fiziksel_id}), ama TSSR teknik kapsamı (${kapak.teknik_kapsam}) seçili iş kaydının kapsamıyla (${kapUyum.is.join(", ")}) örtüşmüyor — bu TSSR aynı sahadaki başka bir iş kaydına ait olabilir.`, dayanak: `${guncel.dosya_adi} sayfa ${kapak.sayfa || 1}` });
   if (S.eksik_sayfalar && S.eksik_sayfalar.length) uyarilar.push({ tip: "TSSR", seviye: "KONTROL", anahtar: "tssr|eksik_sayfa", item_code: "",
     mesaj: `TSSR'ın ${S.eksik_sayfalar.join(", ")}. sayfaları okunamadı — bulgular eksik olabilir.`, dayanak: guncel.dosya_adi });
   // 2) TSSR revizyonu, PR'ın dayandığından yeni
@@ -184,22 +275,28 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
       mesaj: `Güncel TSSR (${S.belge_tarihi}${S.revizyon ? " · " + S.revizyon : ""}) ${eskiPr.length} PR kaleminin girildiği tarihten yeni — PR'ı güncel revizyona göre kontrol edin.`, dayanak: guncel.dosya_adi });
   }
 
-  // 3) Her TSSR işi için katalogdan karşılık
+  // 3) Paket öncelikli değerlendirme, ardından paket dışındaki işler için kalem karşılığı
+  const paket = paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel });
+  sonuc.paket = paket;
   const prEslesen = new Set();
   const eslesmeler = S.isler.map((is) => kalemBul(katalog || [], is));
-  // Bant ilavesi / co-located paketi açıkça eşleşmişse RRU kurulumu paket kapsamında olabilir (KA3737: NR700 paketi + 3 RRU5526et):
-  // ayrı RRU kalemi "eksik talep" sayılmaz, kontrol notu düşülür
-  const paketIs = S.isler.findIndex((is, i) => eslesmeler[i].durum === "ACIK" && /band addition|co-located site|band modernization/i.test(eslesmeler[i].adaylar[0]?.aciklama_en || ""));
-  const paketKalem = paketIs >= 0 ? eslesmeler[paketIs].adaylar[0] : null;
   S.isler.forEach((is, i) => {
     const anahtar = `is|${i + 1}|${is.tur}|${(is.ekipman || "").slice(0, 20)}`;
     const dayanak = { dosya: guncel.dosya_adi, url: guncel.belge_url, sayfa: is.sayfa, bolum: is.bolum, alinti: is.dayanak };
-    const es = eslesmeler[i];
-    const paketKapsami = !!paketKalem && i !== paketIs && /\bRRU\b|\bRFU\b|jumper|cold shrink|fiber|f\/o|dc kablo|power cable/i.test(`${is.ekipman} ${is.aciklama}`) && ["MONTAJ", "ILAVE"].includes(is.tur);
+    const pd = paket.isler[i] || {};
+    // Pakete dahil iş ya da bant ilavesinin kendisi → ayrı kalem önerilmez (paketin içindeki iş tekrar talep ettirilmez)
+    const paketKapsami = ["PAKETE_DAHIL", "PAKET"].includes(pd.durum);
+    const kanitsizEk = pd.durum === "EK_ADAY"; // SOW'da geçmiyor ama kapsam dayanağı da yok → yalnız kontrol
+    const es = paketKapsami ? { durum: pd.durum, adaylar: [] } : eslesmeler[i];
     const karar = kararMap[anahtar] || null;
     const o = { anahtar, is: { sira: i + 1, tur: is.tur, tur_tr: TUR_TR[is.tur] || is.tur, aciklama: is.aciklama, teknoloji: is.teknoloji, bant: is.bant, ekipman: is.ekipman,
         miktar: is.miktar, miktar_ham: is.miktar_ham, birim: is.birim, anten_cozumu: antenCozumu(is) }, dayanak, miktar_belgede: is.miktar !== null, durum: es.durum, adaylar: [], karar };
-    if (paketKapsami) o.paket_notu = `${paketKalem.kod} (${paketKalem.aciklama_en}) paketi bu işi kapsıyor olabilir — ayrı kalem açmadan önce paket SOW'unu kontrol edin.`;
+    o.paket_durumu = pd.durum || null;
+    if (pd.durum === "PAKETE_DAHIL") o.paket_notu = `Pakete dahil: ${pd.paket_kod} SOW ${pd.sow_dayanaklari?.[0]?.hucre || ""} satır ${pd.sow_dayanaklari?.[0]?.no || "?"} — "${pd.sow_dayanaklari?.[0]?.metin || ""}". Ayrıca talep edilmez.`;
+    if (pd.durum === "PAKET") o.paket_notu = `Bu iş paketin kendisidir (${(pd.paket_kodlari || []).join(" / ") || "paket bulunamadı"}).`;
+    if (kanitsizEk) o.paket_notu = "Seçili paket SOW'unda bu iş geçmiyor; ayrı kalem için kapsam dayanağı doğrulanmadı — aday kalemler yalnız bilgi amaçlıdır (Kontrol gerekli).";
+    if (pd.durum === "EK_TALEP") o.paket_notu = pd.neden;
+    if (pd.miktar_hesabi) o.miktar_hesabi = pd.miktar_hesabi;
     if (es.durum === "ACIK" || es.durum === "ALTERNATIF") {
       o.adaylar = es.adaylar.map((a, j) => {
         const pr = prMap[a.kod], po = poMap[a.kod];
@@ -223,12 +320,16 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
       }
       // TSSR işi var, PR karşılığı yok (paket kapsamındaki RRU/jumper/kablo işleri hariç — onlar için yalnız paket notu)
       if (!o.adaylar.some((a) => a.pr_var) && !karar && !paketKapsami) {
-        uyarilar.push({ tip: "EKSIK", seviye: es.durum === "ACIK" ? "ONERI" : "KONTROL", anahtar: `eksik|${anahtar}`, item_code: es.durum === "ACIK" ? ilk.boq_kod : "", item_description: es.durum === "ACIK" ? ilk.aciklama : "",
+        uyarilar.push({ tip: "EKSIK", seviye: es.durum === "ACIK" && !kanitsizEk ? "ONERI" : "KONTROL", anahtar: `eksik|${anahtar}`, item_code: es.durum === "ACIK" ? ilk.boq_kod : "", item_description: es.durum === "ACIK" ? ilk.aciklama : "",
           mesaj: es.durum === "ACIK"
             ? `TSSR sayfa ${is.sayfa || "?"}'de ${is.ekipman || ""} ${TUR_TR[is.tur] || ""} belirtiliyor; PR'da karşılık gelen kalem yok. ${ilk.boq_kod} kalemini kontrol edin.`
             : `TSSR sayfa ${is.sayfa || "?"}'de ${is.ekipman || ""} ${TUR_TR[is.tur] || ""} belirtiliyor; PR'da karşılık yok ve birden fazla aday kalem var — doğru kalemi seçin.`,
           dayanak: `${guncel.dosya_adi} sayfa ${is.sayfa || "?"}: “${is.dayanak}”` });
       }
+    } else if (paketKapsami) {
+      o.mesaj = o.paket_notu;
+    } else if (!katalogHazir) {
+      o.mesaj = KATALOG_YOK_MESAJ;
     } else {
       o.mesaj = es.durum === "BANT_UYUSMAZ"
         ? `Eşleşme doğrulanamadı — katalogda benzer kalemler var ama bant/teknoloji (${is.bant || is.teknoloji || "?"}) uyuşmuyor; tahminle başka banda çevrilmedi.`
@@ -261,13 +362,35 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
         mesaj: `${r.item_code} kalemi seçili ${surum} kataloğunda yok — başka sürüme ait ya da kaldırılmış olabilir.`, dayanak: "" });
     }
   }
+  // 4b) Paket ↔ PR/PO: önerilen paket PR'da yok; pakete dahil bir kalem PR'da ayrıca talep edilmiş (mükerrer olabilir)
+  const paketKodlari = new Set(paket.paketler.flatMap((p) => p.secenekler.map((x) => x.kod)));
+  for (const p of paket.paketler) {
+    if (!["ACIK", "ALTERNATIF"].includes(p.durum)) continue;
+    const varOlan = p.secenekler.find((x) => x.pr_var || x.po_var);
+    if (!varOlan) uyarilar.push({ tip: "PAKET", seviye: p.durum === "ACIK" ? "ONERI" : "KONTROL", anahtar: `paket|${p.bant}`, item_code: p.durum === "ACIK" ? p.secenekler[0].kod : "", item_description: p.secenekler[0]?.baslik || "",
+      mesaj: p.durum === "ACIK" ? `${p.bant}: ${p.secenekler[0].kod} paketi adayı, PR'da yok. ${p.neden}` : `${p.bant}: birden fazla paket seçeneği var (${p.secenekler.map((x) => x.kod).join(" / ")}) — ${p.neden}`,
+      dayanak: `${guncel.dosya_adi} sayfa ${p.tssr_dayanak?.kapak_sayfa || 1} (teknik kapsam ${p.tssr_dayanak?.teknik_kapsam || "-"})${p.tssr_dayanak?.anten_sayfa ? ` · anten dayanağı sayfa ${p.tssr_dayanak.anten_sayfa}` : ""}` });
+  }
+  const anaKapsamlar = paket.paketler.filter((p) => ["ACIK", "ALTERNATIF"].includes(p.durum)).map((p) => PK.paketKapsami(surum, p.secenekler[0].kod)).filter(Boolean);
+  if (anaKapsamlar.length) for (const r of prRows) {
+    const kod = String(r.item_code || "").trim();
+    if (!kod || paketKodlari.has(kod)) continue;
+    const et = PK.katalogEtiketleri(String(r.item_description || katMap[kod]?.aciklama_en || ""));
+    if (!et.length) continue;
+    const kap = anaKapsamlar.find((k) => et.every((e) => k.dahil[e]));
+    if (kap) uyarilar.push({ tip: "DAHIL_MUKERRER", seviye: "KONTROL", anahtar: `dahil|${kod}`, item_code: kod, item_description: r.item_description || "",
+      mesaj: `${kod} (${r.item_description || katMap[kod]?.aciklama_en || ""}) önerilen ${kap.kod} paketinin SOW'unda geçiyor (${et.map((e) => PK.ETIKET_AD[e] || e).join(", ")}) — ayrıca talep edilmesi mükerrer olabilir.`,
+      dayanak: `${kap.kaynak.dosya} · ${kap.kaynak.sayfa} ${kap.kaynak.sow_hucre}: "${kap.dahil[et[0]][0].metin}"` });
+  }
+
   // Dikkate alınmayan kararları uyarılara işle
   uyarilar.forEach((u) => { if (kararMap[u.anahtar]) u.karar = kararMap[u.anahtar]; });
   const sira = { KONTROL: 0, ONERI: 1 };
   uyarilar.sort((a, b) => (sira[a.seviye] ?? 9) - (sira[b.seviye] ?? 9));
-  sonuc.ozet = { is_sayisi: S.isler.length, acik: oneriler.filter((o) => o.durum === "ACIK").length, alternatif: oneriler.filter((o) => o.durum === "ALTERNATIF").length,
+  sonuc.ozet = { paket_sayisi: paket.paketler.filter((p) => ["ACIK", "ALTERNATIF"].includes(p.durum)).length, pakete_dahil: paket.isler.filter((x) => x.durum === "PAKETE_DAHIL").length,
+    ek_talep: paket.isler.filter((x) => ["EK_TALEP", "EK_ADAY"].includes(x.durum)).length, kontrol: uyarilar.filter((u) => u.seviye === "KONTROL" && !u.karar).length, is_sayisi: S.isler.length, acik: oneriler.filter((o) => o.durum === "ACIK").length, alternatif: oneriler.filter((o) => o.durum === "ALTERNATIF").length,
     dogrulanamayan: oneriler.filter((o) => !["ACIK", "ALTERNATIF"].includes(o.durum)).length, uyari: uyarilar.length, dikkate_alinmayan: uyarilar.filter((u) => u.karar).length };
   return sonuc;
 }
 
-module.exports = { kontrol, kalemBul, bantCikar, bantUyumu, antenCozumu, ESLEME, TUR_TR };
+module.exports = { kontrol, paketDegerlendir, kalemBul, bantCikar, bantUyumu, antenCozumu, ESLEME, TUR_TR, KATALOG_YOK_MESAJ };

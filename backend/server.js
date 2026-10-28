@@ -564,6 +564,9 @@ const boqKatalog = require("./boqKatalog");
 const tssrOkuma = require("./tssrOkuma");
 const prKontrol = require("./prKontrol");
 const teknoHakedis = require("./teknoHakedis");
+// 28.10.2026 (Orhan): fiziksel saha kimliği ↔ iş kaydı, saha konumu / depo mesafesi (Rollout haritası)
+const sahaKimlik = require("./sahaKimlik");
+const sahaKonum = require("./sahaKonum");
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
@@ -1231,7 +1234,7 @@ app.use((req, res, next) => {
 const IZIN_OKUMA_YOLLARI = {
   isg_goruntule: [/^\/hr\/personel\/\d+\/(isg|belgeler)$/, /^\/hr\/isg\/(matris|uyarilar)$/, /^\/hr\/isg-egitim-turleri$/, /^\/hr\/excel\/isg$/],
   puantaj_goruntule: [/^\/hr\/puantaj$/, /^\/hr\/puantaj\/ozet$/, /^\/hr\/excel\/puantaj$/, /^\/hr\/ekipler$/],
-  rollout_goruntule: [/^\/rollout\/list$/, /^\/rollout\/summary$/, /^\/rollout\/is-kolu$/, /^\/rollout\/is-kolu\/tanim$/, /^\/rollout\/is-kolu\/site\/[^/]+$/,
+  rollout_goruntule: [/^\/rollout\/list$/, /^\/rollout\/summary$/, /^\/rollout\/harita(\/rota)?$/, /^\/rollout\/is-kolu$/, /^\/rollout\/is-kolu\/tanim$/, /^\/rollout\/is-kolu\/site\/[^/]+$/,
     /^\/is-atama\/(liste|yetkim|is-yuku|kategoriler)$/],
   rollout_excel: [/^\/export\/excel$/],
   gunluk_is_goruntule: [/^\/master\/list-detailed$/, /^\/master\/by-site$/, /^\/master\/site-suggest$/, /^\/master\/saha-kalemler$/, /^\/master\/saha-kalem$/,
@@ -3273,7 +3276,7 @@ app.get("/po/eksik-girisler", authMiddleware, async (req, res) => {
     } catch {}
     await new Promise((res) => setTimeout(res, 2000));
   }
-  try { await boqKatalog.tabloHazirla(pool); await tssrOkuma.tabloHazirla(pool);
+  try { await boqKatalog.tabloHazirla(pool); await tssrOkuma.tabloHazirla(pool); await sahaKonum.tabloHazirla(pool);
     await pool.query(`CREATE TABLE IF NOT EXISTS pr_kontrol_karar (id SERIAL PRIMARY KEY, site_code TEXT, anahtar TEXT, karar TEXT, gerekce TEXT, kullanici TEXT, zaman TIMESTAMPTZ DEFAULT NOW())`);
     console.log("✅ BoQ katalog / TSSR analiz tabloları hazır");
   } catch (e) { console.error("BoQ katalog tablo hatası:", e.message); }
@@ -3379,19 +3382,15 @@ app.get("/po/tssr-analiz", authMiddleware, async (req, res) => {
     const rp = await pool.query(`SELECT tssr_belge_url FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]);
     const urls = String(rp.rows[0]?.tssr_belge_url || "").split("\n").map((x) => x.trim()).filter(Boolean);
     const a = await tssrOkuma.sahaTssrAnaliz(pool, site, { urls, yenile: String(req.query.yenile || "") === "1", kullanici: String(req.user?.email || ""), xlsxOku: tssrXlsxMetin });
+    if (a.guncel?.sonuc) await sahaKonum.tssrdenKonumYaz(pool, site, a.guncel.sonuc, a.guncel.belge_url).catch((e) => console.warn("saha konum:", e.message));
     res.json({ ok: true, ...a });
   } catch (e) { console.error("TSSR ANALIZ ERROR:", e.message); res.status(e.http || 500).json({ ok: false, error: e.message }); }
 });
-// TSSR + seçilen BoQ + PR/PO + günlük iş girişleri → öneriler ve yanlış/eksik talep uyarıları
-app.get("/po/tssr-boq-kontrol", authMiddleware, async (req, res) => {
-  try {
-    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
-    if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
-    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
-    const kp = await sahaKapsamKontrol(req, site);
-    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+// TSSR + seçilen BoQ + PR/PO + günlük iş girişleri → paket önerileri ve yanlış/eksik talep uyarıları.
+// TEK analiz: "TSSR ve BoQ Kontrolü" kartı ve "Akıllı Asistan" aynı sonucu kullanır (iki ayrı öneri motoru yok).
+async function tssrBoqDegerlendir(req, site, { surum: surumIstek = null, yenile = false } = {}) {
     const oneri = await boqKatalog.surumOner(pool, site);
-    const S = boqKatalog.surumBul(req.query.surum) || (oneri.onerilen ? boqKatalog.surumBul(oneri.onerilen) : null);
+    const S = boqKatalog.surumBul(surumIstek) || (oneri.onerilen ? boqKatalog.surumBul(oneri.onerilen) : null);
     const bolge = getRegionFromSiteCode(site);
     const [rp, mw, po, kr] = await Promise.all([
       pool.query(`SELECT tssr_belge_url FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]),
@@ -3403,13 +3402,27 @@ app.get("/po/tssr-boq-kontrol", authMiddleware, async (req, res) => {
     ]);
     const urls = String(rp.rows[0]?.tssr_belge_url || "").split("\n").map((x) => x.trim()).filter(Boolean);
     let tssr = null, tssrHata = "";
-    try { tssr = await tssrOkuma.sahaTssrAnaliz(pool, site, { urls, yenile: String(req.query.yenile || "") === "1", kullanici: String(req.user?.email || ""), xlsxOku: tssrXlsxMetin }); }
+    try { tssr = await tssrOkuma.sahaTssrAnaliz(pool, site, { urls, yenile, kullanici: String(req.user?.email || ""), xlsxOku: tssrXlsxMetin }); }
     catch (e) { tssrHata = e.message; tssr = { belgeler: [], guncel: null, tamamlandi: false, hata: e.message, belge_sayisi: urls.length }; }
-    const katalog = S && (await boqKatalog.katalogVarMi(pool, S.kod)) ? await boqKatalog.katalogAra(pool, { surum: S.kod, bolge, limit: 2000 }) : [];
-    const sonuc = prKontrol.kontrol({ site, tssr, katalog, surum: S ? S.kod : null, surumOneri: oneri, prRows: mw.rows, poRows: po.rows, kararlar: kr.rows });
-    sonuc.katalog_hazir = katalog.length > 0; sonuc.surum_ad = S ? S.ad : null; sonuc.surum_oneri = oneri; sonuc.bolge = boqKatalog.bolgeNormalize(bolge);
-    sonuc.tssr_belgeler = (tssr.belgeler || []).map((b) => ({ dosya: b.dosya_adi, url: b.belge_url, durum: b.durum, hata: b.hata || "", kaynak: b.kaynak, guncel: !!b.guncel, tarih: b.sonuc?.belge_tarihi || null, revizyon: b.sonuc?.revizyon || "", sayfa: b.sonuc?.sayfa_sayisi || null, is_sayisi: b.sonuc?.isler?.length ?? null }));
+    if (tssr.guncel?.sonuc) await sahaKonum.tssrdenKonumYaz(pool, site, tssr.guncel.sonuc, tssr.guncel.belge_url).catch((e) => console.warn("saha konum:", e.message));
+    const katalogHazir = !!(S && (await boqKatalog.katalogVarMi(pool, S.kod)));
+    const katalog = katalogHazir ? await boqKatalog.katalogAra(pool, { surum: S.kod, bolge, limit: 2000 }) : [];
+    const sonuc = prKontrol.kontrol({ site, tssr, katalog, katalogHazir, surum: S ? S.kod : null, surumOneri: oneri, prRows: mw.rows, poRows: po.rows, kararlar: kr.rows });
+    sonuc.katalog_hazir = katalogHazir; sonuc.surum_ad = S ? S.ad : null; sonuc.surum_oneri = oneri; sonuc.bolge = boqKatalog.bolgeNormalize(bolge);
+    sonuc.tssr_belgeler = (tssr.belgeler || []).map((b) => ({ dosya: b.dosya_adi, url: b.belge_url, durum: b.durum, hata: b.hata || "", kaynak: b.kaynak, guncel: !!b.guncel,
+      tarih: b.sonuc?.kapak?.hazirlama_tarihi || b.sonuc?.belge_tarihi || null, revizyon: b.sonuc?.kapak?.belge_surumu || b.sonuc?.revizyon || "", teknik_kapsam: b.sonuc?.kapak?.teknik_kapsam || "",
+      sayfa: b.sonuc?.sayfa_sayisi || null, is_sayisi: b.sonuc?.isler?.length ?? null }));
     if (tssrHata) sonuc.tssr_hata = tssrHata;
+    return { sonuc, tssr };
+}
+app.get("/po/tssr-boq-kontrol", authMiddleware, async (req, res) => {
+  try {
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const kp = await sahaKapsamKontrol(req, site);
+    if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
+    const { sonuc } = await tssrBoqDegerlendir(req, site, { surum: req.query.surum, yenile: String(req.query.yenile || "") === "1" });
     res.json({ ok: true, ...sonuc });
   } catch (e) { console.error("TSSR BOQ KONTROL ERROR:", e.message); res.status(e.http || 500).json({ ok: false, error: e.message }); }
 });
@@ -3613,7 +3626,9 @@ const COLOC_DAHIL_MESAJ = "Co-Located paketine dahil (BoQ), ayrıca talep edilme
 const BELGE_KALEM_KURALLARI = [
   { tip: "TSSR", etiket: "TSSR", subcon: "tssr_subcon",
     veri: ["tssr_plan_start_date", "tssr_actual_end_date", "tssr_belge_url"],
-    kalemler: [{ kod: "8812184870", zorunlu: true, adet: 1, ad: "Survey" }] },
+    // 28.10.2026 (Orhan): TSSR'ı hazırlayan firma tek başına Survey ücreti hakkı doğurmaz → "Kontrol gerekli" (zorunlu değil)
+    kalemler: [{ kod: "8812184870", zorunlu: false, adet: 1, ad: "Survey",
+      mesaj: "TSSR kaydı var — Survey ücreti TSSR'ı hazırlayan firmadan tek başına doğmaz; sözleşme/SOW kapsamı ve gerekli onay doğrulanmadan talep etme (Kontrol gerekli)." }] },
   { tip: "BTK", etiket: "BTK", subcon: "btk_subcon",
     veri: ["btk_plan_start_date", "btk_actual_end_date", "btk_approved", "btk_belge_url"],
     kalemler: [{ kod: "8812184919", zorunlu: true, adet: 1, ad: "TK Permission Document" },
@@ -3816,7 +3831,7 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
             bulgular.push({ tip: kal.zorunlu ? "EKSIK" : "ONERI", kaynak: k.tip, item_code: kal.kod, adet: kal.adet,
               mesaj: kal.zorunlu
                 ? `${k.etiket} Şimşek tarafında hazırlanmış${subcon ? ` (${subcon})` : ""} — "${kal.ad}" kalemini talep etmelisin.`
-                : `${k.etiket} Şimşek tarafında — "${kal.ad}" kalemi genelde birlikte açılır, kontrol et.` });
+                : kal.mesaj || `${k.etiket} Şimşek tarafında — "${kal.ad}" kalemi genelde birlikte açılır, kontrol et.` });
           }
         }
       }
@@ -3825,7 +3840,38 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
     // ── 2) TSSR içerik analizi ───────────────────────────────────────────────
     const tssr = { var: false, okundu: false, kaynak_url: "", hata: "", tespitler: [] };
     const tssrUrls = String(rollout?.tssr_belge_url || "").split("\n").map((s) => s.trim()).filter(Boolean);
-    if (tssrUrls.length) {
+    // 28.10.2026: yapay zekâ TSSR analizi varsa Akıllı Asistan AYNI paket değerlendirmesini kullanır (TSSR ve BoQ Kontrolü ile
+    // çelişen ikinci motor oluşmaz); eski metin kalıbı motoru yalnız yapay zekâ okuması yoksa / başarısızsa yedek olarak çalışır.
+    let aiKullanildi = false;
+    if (tssrUrls.length && !taseronMu(req.user) && (await sahaKapsamKontrol(req, site)).ok) {
+      try {
+        const { sonuc: d, tssr: aiT } = await tssrBoqDegerlendir(req, site, { surum: req.query.surum });
+        if (aiT?.guncel?.sonuc) {
+          aiKullanildi = true;
+          Object.assign(tssr, { var: true, okundu: true, kaynak: "YAPAY_ZEKA", kaynak_url: aiT.guncel.belge_url, teknik_kapsam: d.tssr_belge?.teknik_kapsam || "", surum: d.surum,
+            tespitler: (d.paket?.paketler || []).map((p) => ({ anahtar: `${p.bant} paketi`, kalemler: p.secenekler.map((x) => ({ kod: x.kod, adet: 1 })), not: p.neden })) });
+          for (const p of d.paket?.paketler || []) {
+            if (!["ACIK", "ALTERNATIF"].includes(p.durum) || p.secenekler.some((x) => x.pr_var)) continue;
+            const ilk = p.secenekler[0];
+            bulgular.push({ tip: "TSSR", kaynak: "TSSR", item_code: p.durum === "ACIK" ? ilk.kod : "", adet: p.durum === "ACIK" ? 1 : 0,
+              mesaj: p.durum === "ACIK" ? `TSSR incelendi (${d.tssr_belge?.teknik_kapsam || p.bant}): ${p.bant} için ${ilk.kod} paketi adayı — ${p.neden}`
+                : `TSSR incelendi: ${p.bant} için paket seçenekleri ${p.secenekler.map((x) => x.kod).join(" / ")} — ${p.neden}`,
+              alinti: p.tssr_dayanak?.anten_alinti || "" });
+          }
+          for (const o of d.oneriler || []) {
+            if (o.paket_durumu !== "EK_TALEP" || o.durum !== "ACIK" || o.adaylar?.[0]?.pr_var) continue;
+            bulgular.push({ tip: "TSSR", kaynak: "TSSR", item_code: o.adaylar[0].boq_kod, adet: o.is.miktar || 1, mesaj: `TSSR incelendi: "${o.is.aciklama}" paket kapsamı dışında — ${o.paket_notu}`, alinti: o.dayanak?.alinti || "" });
+          }
+          for (const u of d.uyarilar || []) {
+            if (u.tip === "DAHIL_MUKERRER" && u.item_code && !u.karar) bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: u.item_code, adet: 0, kisa: "Pakete dahil olabilir", mesaj: u.mesaj });
+          }
+          // Kafes kulede vinç: eski kesin kural korunur (TSSR kule tipi yapay zekâdan)
+          if (/kafes|lattice/i.test(aiT.guncel.sonuc.kule_tipi || "") && prSet.has("8818249053"))
+            bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "8818249053", adet: 0, kisa: "Kafes kule — vinç talep etme", mesaj: "TSSR'a göre saha KAFES KULE — kafes kulede vinç talep edilmez, PR'daki vinç kalemini kontrol et." });
+        } else if (aiT?.hata) tssr.ai_hata = aiT.hata;
+      } catch (e) { tssr.ai_hata = e.message; }
+    }
+    if (tssrUrls.length && !aiKullanildi) {
       tssr.var = true;
       tssr.kaynak_url = tssrUrls[0];
       try {
@@ -12737,6 +12783,79 @@ app.get("/export/excel", async (req, res) => {
     console.error("EXPORT ERROR:", err);
     res.status(500).send("Export hatası: " + err.message);
   }
+});
+
+/* ═══ ROLLOUT SAHA HARİTASI (28.10.2026, Orhan) ═══════════════════════════════════════════════════════════════════
+   Kapsam /rollout/list ile aynı: alt marka (Teknocenter) MARKA ROLLOUT KAPSAMI'ndan geçer (başka firmanın sahası pin ya da arama
+   sonucu olarak dönmez). Bir fiziksel saha = tek pin (sahaKimlik); o sahadaki iş kayıtları (NR700/NR3500/TRP…) ayrı listelenir.
+   Konum saha_konum'dan (TSSR koordinatı; eksikse önbellekteki TSSR analizinden doldurulur — model çağrısı yapılmaz).
+   2026 kapsamı yalnız GERÇEKLEŞEN iş tarihlerinden (kurulum başlangıç/bitiş, on-air, QC kapanış, ENH bitiş); tarih yoksa
+   "tarih eksik" olarak ayrı işaretlenir, sessizce 2026 sayılmaz. Bursa deposu ofis_depo kaydından; mesafe kuş uçuşu. */
+const HARITA_TARIH_ALANLARI = ["installation_actual_start_date", "installation_actual_end_date", "onair_date", "qc_closed_date", "enh_actual_end_date"];
+const _gun = (v) => { if (!v) return null; if (v instanceof Date) return v.toISOString().slice(0, 10); const t = String(v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null; };
+app.get("/rollout/harita", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const K = await rolloutKapsam(req);
+    const rows = K ? markaRolloutMaskele(K, await markaRolloutSatirlari(K)) : (await pool.query(`SELECT * FROM rollout_progress`)).rows;
+    await sahaKonum.tabloHazirla(pool);
+    const gruplar = {}; let fizikselOlmayan = 0;
+    for (const r of rows) {
+      const f = sahaKimlik.fizikselSaha(r.site_code);
+      if (!f) { fizikselOlmayan++; continue; }
+      (gruplar[f.fiziksel_id] = gruplar[f.fiziksel_id] || { fiziksel_id: f.fiziksel_id, isler: [] }).isler.push(r);
+    }
+    const ids = Object.keys(gruplar);
+    const konumGetir = async () => (ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []);
+    let konumlar = await konumGetir();
+    const eksik = ids.filter((id) => !konumlar.some((k) => k.fiziksel_id === id));
+    if (eksik.length) {
+      const kodlar = eksik.flatMap((id) => gruplar[id].isler.map((r) => String(r.site_code || "").toUpperCase().trim()));
+      const a = await pool.query(`SELECT DISTINCT ON (site_code) site_code, belge_url, sonuc FROM tssr_ai_analiz WHERE site_code = ANY($1) AND durum IN ('HAZIR','KISMI') ORDER BY site_code, updated_at DESC`, [kodlar]).catch(() => ({ rows: [] }));
+      let yazildi = 0;
+      for (const x of a.rows) { if (await sahaKonum.tssrdenKonumYaz(pool, x.site_code, x.sonuc, x.belge_url).catch(() => null)) yazildi++; }
+      if (yazildi) konumlar = await konumGetir();
+    }
+    const kMap = Object.fromEntries(konumlar.map((k) => [k.fiziksel_id, k]));
+    const depo = await sahaKonum.bursaDeposu(pool);
+    const sahalar = ids.sort().map((id) => {
+      const g = gruplar[id];
+      const isler = g.isler.map((r) => {
+        const tarihler = HARITA_TARIH_ALANLARI.map((k) => _gun(r[k])).filter(Boolean).sort();
+        return { site_code: r.site_code, site_type: r.site_type || "", bolge: r.bolge || "", il: r.il || "", project_code: r.project_code || "", rf_subcon: r.rf_subcon || "",
+          gerceklesen_2026: tarihler.some((t) => t >= "2026-01-01" && t <= "2026-12-31"), son_gerceklesen: tarihler[tarihler.length - 1] || null, tarih_yok: !tarihler.length };
+      });
+      const k = kMap[id];
+      const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [], belge_url: k.belge_url, sayfa: k.sayfa, ham: k.ham } : null;
+      const kullanilabilir = konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
+      return { fiziksel_id: id, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
+        isler, is_2026: isler.some((x) => x.gerceklesen_2026), tarih_eksik: isler.every((x) => x.tarih_yok),
+        konum, konum_durumu: !k ? "YOK" : k.lat === null ? "YALNIZ_ADRES" : k.dogruluk,
+        kus_ucusu_km: depo.dogrulandi && kullanilabilir ? Math.round(sahaKonum.kusUcusuKm(depo, konum) * 10) / 10 : null };
+    });
+    res.json({ ok: true, kapsam: K ? K.ad : null, depo, sahalar, fiziksel_olmayan: fizikselOlmayan, rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
+      ozet: { saha: sahalar.length, konumlu: sahalar.filter((x) => x.konum).length, is_2026: sahalar.filter((x) => x.is_2026).length, tarih_eksik: sahalar.filter((x) => x.tarih_eksik).length } });
+  } catch (e) { console.error("ROLLOUT HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Seçili saha → Bursa deposu: kuş uçuşu + (yalnız servis yapılandırılmışsa) karayolu. Kapsam dışı saha 403.
+app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const id = String(req.query.fiziksel_id || "").toUpperCase().trim();
+    if (!id) return res.status(400).json({ ok: false, error: "fiziksel_id zorunlu" });
+    const K = await rolloutKapsam(req);
+    if (K) {
+      const sahalar = await markaRolloutSahalar(K);
+      if (![...sahalar].some((sc) => sahaKimlik.fizikselSaha(sc)?.fiziksel_id === id)) return res.status(403).json({ ok: false, error: "Bu saha firma kapsamınızda değil" });
+    }
+    await sahaKonum.tabloHazirla(pool);
+    const k = (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = $1`, [id])).rows[0];
+    const depo = await sahaKonum.bursaDeposu(pool);
+    if (!depo.dogrulandi) return res.json({ ok: true, depo, kus_ucusu_km: null, karayolu: { durum: "DEPO_YOK", mesaj: depo.mesaj } });
+    if (!k || k.lat === null || !["KESIN", "CELISKILI"].includes(k.dogruluk)) return res.json({ ok: true, depo, kus_ucusu_km: null, karayolu: { durum: "KONUM_YOK", mesaj: "Saha konumu doğrulanmadı — mesafe hesaplanmadı." } });
+    const s = { lat: Number(k.lat), lng: Number(k.lng) };
+    res.json({ ok: true, depo, kus_ucusu_km: Math.round(sahaKonum.kusUcusuKm(depo, s) * 10) / 10, karayolu: await sahaKonum.karayolu(pool, depo, s) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.get("/rollout/list", authMiddleware, async (req, res) => {
