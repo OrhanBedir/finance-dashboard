@@ -1925,24 +1925,110 @@ async function markaRolloutSahalar(K) {
   const r = await pool.query(`SELECT DISTINCT UPPER(TRIM(r.site_code)) AS sc FROM rollout_progress r WHERE ${K.sql("r", 1)}`, K.params);
   return new Set((r.rows || []).map((x) => x.sc));
 }
-// Satır maskesi: başka firmanın iş kolu alanları boşaltılır, finansal alanlar silinir
+// İş kolu sahipliği: BEN (firmanın), DIGER (başka firmanın), YOK (sahibi belirsiz). Taşeron alanı boş iş kolu üst iş
+// kolunu izler. Maske, yazma kapısı ve iş atama kapsamı AYNI kuralı kullanır (28.10.2026).
+function markaRolloutSahiplik(K, r) {
+  const sahip = {};
+  for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
+    const v = String(r?.[L.subcon] || "").trim();
+    const kendi = v && v !== "N/A" && v !== "__NA__";
+    sahip[L.kolu] = kendi ? (K.esle(v) ? "BEN" : "DIGER") : (L.ust ? sahip[L.ust] : "YOK");
+  }
+  return sahip;
+}
+// Alan → iş kolu (iş kolu listesinde olmayan iki malzeme tarihi de eklenir). Eşleşmeyen alan = ortak saha bilgisi.
+const ROLLOUT_EK_KOL_ALANI = { malzeme_gelis_tarihi: "rf", enh_malzeme_gelis_tarihi: "enh" };
+const _rolloutAlanKolu = (() => {
+  const m = { ...ROLLOUT_EK_KOL_ALANI };
+  for (const L of ROLLOUT_IS_KOLU_ALANLARI) { m[L.subcon] = L.kolu; for (const a of L.alanlar) m[a] = L.kolu; }
+  return m;
+})();
+const markaRolloutAlanKolu = (alan) => _rolloutAlanKolu[alan] || null;
+// Alt marka bu alanı yazabilir mi: yalnız kendi iş kolunun alanı; finansal alan ve ortak saha bilgisi (proje kodu, saha tipi,
+// bölge, malzeme durumu) firma hesabından değiştirilmez. Kendi iş kolunun taşeron alanı yalnız yine firmasına ait bir ada
+// çevrilebilir (iş kolunu başka firmaya devretmek / boşaltıp kapsamı genişletmek olmaz).
+function markaRolloutYazilabilir(K, sahip, alan, yeniDeger) {
+  if (ROLLOUT_MARKA_GIZLI.includes(alan)) return false;
+  const kolu = markaRolloutAlanKolu(alan);
+  if (!kolu || sahip[kolu] !== "BEN") return false;
+  if (ROLLOUT_SUBCON_ALANLARI.includes(alan)) return K.esle(yeniDeger);
+  return true;
+}
+// Satır maskesi: başka firmanın iş kolu alanları boşaltılır, finansal alanlar silinir. _kol_sahip ekrana hangi iş kolunun
+// düzenlenebileceğini söyler (başka firmanın adı verilmez, yalnız BEN / DIGER / YOK).
 function markaRolloutMaskele(K, rows) {
   return (rows || []).map((r) => {
     const c = { ...r };
     for (const k of ROLLOUT_MARKA_GIZLI) delete c[k];
-    const sahip = {};
-    for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
-      const v = String(r[L.subcon] || "").trim();
-      const kendi = v && v !== "N/A" && v !== "__NA__";
-      sahip[L.kolu] = kendi ? (K.esle(v) ? "BEN" : "DIGER") : (L.ust ? sahip[L.ust] : "YOK");
-    }
+    const sahip = markaRolloutSahiplik(K, r);
     for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
       if (sahip[L.kolu] === "BEN") continue;
       if (L.subcon in c) c[L.subcon] = null;
       for (const a of L.alanlar) if (a in c) c[a] = null;
+      for (const [a, k] of Object.entries(ROLLOUT_EK_KOL_ALANI)) if (k === L.kolu && a in c) c[a] = null;
     }
+    c._kol_sahip = sahip;
     return c;
   });
+}
+// Kaydın ham satırı (tarihler YYYY-MM-DD metni): yazma kapısı ve işlem geçmişi için
+async function rolloutHamSatir({ id, site }) {
+  const r = id != null
+    ? await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r WHERE r.id = $1`, [Number(id)])
+    : await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r WHERE UPPER(TRIM(r.site_code)) = $1 ORDER BY r.id LIMIT 1`,
+      [String(site || "").replace(/\s+/g, "").toUpperCase()]);
+  return r.rows[0]?.j || null;
+}
+// Rollout işlem geçmişi: yalnız değişen alanlar (önceki / yeni). Finansal alanlar alt marka kaydında zaten yok.
+function rolloutFark(eski, yeni) {
+  const e = {}, y = {};
+  const n = (v) => (v === undefined || v === "" ? null : (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) ? v.slice(0, 10) : v));
+  for (const k of new Set([...Object.keys(eski || {}), ...Object.keys(yeni || {})])) {
+    if (["updated_at", "created_at", "id"].includes(k)) continue;
+    const a = n(eski?.[k]), b = n(yeni?.[k]);
+    if (JSON.stringify(a) !== JSON.stringify(b)) { e[k] = a; y[k] = b; }
+  }
+  return { eski: e, yeni: y, degisti: Object.keys(y).length > 0 };
+}
+// İş atama alt marka kapsamı: her saha firmanın kapsamında + kategorinin yazdığı iş kolu (başlangıç / bitiş kolonu)
+// firmaya ait olmalı. Kolonu olmayan kategori (ör. Clean Up) için sahada firmanın en az bir iş kolu yeterli.
+// on: { kat: Map(kod → kolonlar), satir: Map(site → [ham satır]) } — liste süzgecinde tek sorguyla doldurulur.
+async function markaIsAtamaUygun(K, kategori, sites, on = null) {
+  if (!K || !K.goruntule) return { ok: false, hata: "Rollout görüntüleme yetkiniz yok" };
+  const list = [...new Set((sites || []).map((s) => String(s || "").replace(/\s+/g, "").toUpperCase()).filter(Boolean))];
+  if (!list.length) return { ok: false, hata: "Saha seçilmedi" };
+  const kat = on?.kat ? on.kat.get(kategori) : (await pool.query(`SELECT baslangic_kolonu, bitis_kolonu FROM is_kategori WHERE kod = $1`,
+    [String(kategori || "")]).catch(() => ({ rows: [] }))).rows[0];
+  const kollar = [...new Set([kat?.baslangic_kolonu, kat?.bitis_kolonu].map(markaRolloutAlanKolu).filter(Boolean))];
+  let satir = on?.satir;
+  if (!satir) {
+    const r = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, to_jsonb(r) AS j FROM rollout_progress r WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [list]);
+    satir = new Map(); for (const x of r.rows) (satir.get(x.sc) || satir.set(x.sc, []).get(x.sc)).push(x.j);
+  }
+  for (const sc of list) {
+    const uygun = (satir.get(sc) || []).some((j) => {
+      const s = markaRolloutSahiplik(K, j);
+      return kollar.length ? kollar.every((k) => s[k] === "BEN") : Object.values(s).includes("BEN");
+    });
+    if (!uygun) return { ok: false, hata: `${sc}: bu iş kolu firmanızın kapsamında değil` };
+  }
+  return { ok: true };
+}
+// Liste süzgeci: tek sorguyla kategori kolonları + saha satırları
+async function markaIsAtamaSuz(K, rows, email) {
+  const sites = [...new Set(rows.flatMap((a) => (a.site_codes || []).map((s) => String(s || "").replace(/\s+/g, "").toUpperCase())))];
+  const kat = new Map((await pool.query(`SELECT kod, baslangic_kolonu, bitis_kolonu FROM is_kategori`).catch(() => ({ rows: [] }))).rows.map((k) => [k.kod, k]));
+  const satir = new Map();
+  if (sites.length) {
+    const r = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, to_jsonb(r) AS j FROM rollout_progress r WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [sites]);
+    for (const x of r.rows) (satir.get(x.sc) || satir.set(x.sc, []).get(x.sc)).push(x.j);
+  }
+  const out = [];
+  for (const a of rows) {
+    const kendi = (a.personeller || []).some((p) => String(p?.email || "").toLowerCase().trim() === email);
+    if (kendi || (await markaIsAtamaUygun(K, a.kategori, a.site_codes, { kat, satir })).ok) out.push(a);
+  }
+  return out;
 }
 // Kapsamlı satırlar (liste / özet / Excel aynı sorgu): bölge süzgeci isteğe bağlı
 async function markaRolloutSatirlari(K, { region, orderBy } = {}) {
@@ -2011,10 +2097,24 @@ const MARKA_ROLLOUT_YAZMA = [
   ["POST", /^\/rollout\/update$/], ["POST", /^\/rollout\/\d+\/(enh-perakende|kabul-belgeleri|belge-url|enh-proje-belge-url)$/],
   ["DELETE", /^\/rollout\/\d+$/], ["POST", /^\/rollout\/is-kolu$/], ["PUT", /^\/rollout\/is-kolu\/\d+$/],
 ];
+// 28.10.2026: belge yükleme adresi (signed-upload-url) düzenleme yetkili firma hesabına açıldı — kayıt kapsamı + belge alanının
+// iş kolu kontrolü ayrıca yapılır (belge-url kaydı da aynı kuralla doğrulanır)
 const MARKA_ROLLOUT_KAPALI = [
   ["POST", /^\/rollout\/(add-site|upload|auto-sync-targets|is-kolu\/smartqc)$/], ["POST", /^\/rollout\/cleanup$/],
-  ["GET", /^\/rollout\/((enh-proje\/)?signed-upload-url|mismatch-check|missing-sites|fix-site-types)$/], ["GET", /^\/migrate$/],
+  ["GET", /^\/rollout\/(enh-proje\/signed-upload-url|mismatch-check|missing-sites|fix-site-types)$/], ["GET", /^\/migrate$/],
 ];
+// Belge türü (signed-upload-url ?type=) → rollout belge alanı
+const ROLLOUT_BELGE_TURU = { los: "los_belge_url", tssr: "tssr_belge_url", btk: "btk_belge_url", emr: "emr_belge_url", ysb: "ysb_belge_url",
+  pac: "pac_belge_url", enh_proje: "enh_proje_belge_url", kabul: "kabul_dosya_url", hasarsizlik: "hasarsizlik_belge_url",
+  memnuniyet: "memnuniyet_belge_url", fsc: "fsc_belge_url", enh_perakende_sozlesme: "enh_perakende_sozlesme_url" };
+// Kayıt kimliğiyle çalışan yazma ucunun dokunduğu alanlar (alt marka: hepsi kendi iş kolunda olmalı)
+function markaRolloutUcAlanlari(yol, body) {
+  if (/\/belge-url$/.test(yol)) return [String(body?.field || "")];
+  if (/\/enh-proje-belge-url$/.test(yol)) return ["enh_proje_belge_url"];
+  if (/\/kabul-belgeleri$/.test(yol)) return ["hasarsizlik_tarihi", "memnuniyet_tarihi", "memnuniyet_ayni_belge", "kabul_belge_not"];
+  if (/\/enh-perakende$/.test(yol)) return ["enh_perakende_tarihi", "enh_perakende_odeme_tarihi", "enh_perakende_tutar", "enh_tesisat_no", "enh_perakende_not"];
+  return null;
+}
 app.use(async (req, res, next) => {
   try {
     if (req.method === "OPTIONS") return next();
@@ -2028,15 +2128,55 @@ app.use(async (req, res, next) => {
     const m = req.method === "HEAD" ? "GET" : req.method;
     const red = (msg) => res.status(403).json({ ok: false, error: msg });
     if (MARKA_ROLLOUT_KAPALI.some(([mt, rx]) => mt === m && rx.test(yol))) return red("Bu işlem firma hesabına kapalı");
+    // Belge yükleme adresi: düzenleme yetkisi + kayıt kapsamı + belge alanı firmanın iş kolunda
+    if (m === "GET" && yol === "/rollout/signed-upload-url") {
+      if (!K.duzenle) return red("Rollout kayıtlarını yalnız görüntüleme yetkiniz var");
+      const j = await rolloutHamSatir({ id: req.query.rolloutId });
+      const alan = ROLLOUT_BELGE_TURU[String(req.query.type || "")];
+      if (!j || !(await markaRolloutKayitKapsamda(K, j.id))) return red("Bu kayıt firmanızın kapsamında değil");
+      if (!alan || !markaRolloutYazilabilir(K, markaRolloutSahiplik(K, j), alan)) return red("Bu belge başka firmanın iş koluna ait");
+      return next();
+    }
     if (MARKA_ROLLOUT_YAZMA.some(([mt, rx]) => mt === m && rx.test(yol))) {
       if (!K.duzenle) return red("Rollout kayıtlarını yalnız görüntüleme yetkiniz var");
       let mm;
-      if ((mm = yol.match(/^\/rollout\/(\d+)(\/|$)/))) { if (!(await markaRolloutKayitKapsamda(K, mm[1]))) return red("Bu kayıt firmanızın kapsamında değil"); }
+      if ((mm = yol.match(/^\/rollout\/(\d+)(\/|$)/))) {
+        if (!(await markaRolloutKayitKapsamda(K, mm[1]))) return red("Bu kayıt firmanızın kapsamında değil");
+        // 28.10.2026: kapsam "satırda bir iş kolu bizim" demek; alan düzeyinde de kendi iş kolu şart
+        const sahip = markaRolloutSahiplik(K, await rolloutHamSatir({ id: mm[1] }));
+        if (m === "DELETE") {
+          if (Object.values(sahip).includes("DIGER")) return red("Bu sahada başka firmaya ait iş kolu var; kayıt firma hesabından silinemez");
+        } else {
+          const alanlar = markaRolloutUcAlanlari(yol, req.body);
+          if (alanlar && alanlar.some((a) => !markaRolloutYazilabilir(K, sahip, a)))
+            return red(alanlar.some((a) => ROLLOUT_MARKA_GIZLI.includes(a)) ? "Finansal alanlar firma hesabından değiştirilemez" : "Bu alan başka firmanın iş koluna ait");
+        }
+      }
       else if (yol === "/rollout/update") {
         const sc = String(req.body?.site_code || "").replace(/\s+/g, "").toUpperCase();
-        const var_ = await pool.query(`SELECT 1 FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [sc]);
-        if (var_.rows[0]) { if (!(await markaRolloutSahaKapsamda(K, sc))) return red("Bu saha firmanızın kapsamında değil"); }
-        else if (!ROLLOUT_SUBCON_ALANLARI.some((k) => K.esle(req.body?.[k]))) return red("Yeni saha kaydında en az bir iş kolunun taşeronu firmanız olmalı");
+        const eski = await rolloutHamSatir({ site: sc });
+        if (eski) {
+          if (!(await markaRolloutSahaKapsamda(K, sc))) return red("Bu saha firmanızın kapsamında değil");
+          // Gövde mevcut kayıttan kurulur; yalnız firmanın kendi iş kolu alanları istekten alınır. Maskeli ekrandan gelen
+          // boş değerler başka firmanın alanını silemez; ortak saha bilgisi değişmez.
+          const sahip = markaRolloutSahiplik(K, eski), yeni = { ...eski, site_code: eski.site_code }, korunan = [];
+          for (const [k, v] of Object.entries(req.body || {})) {
+            if (k === "site_code" || k.startsWith("_")) continue;
+            if (markaRolloutYazilabilir(K, sahip, k, v)) yeni[k] = v;
+            else if (rolloutFark({ [k]: eski[k] }, { [k]: v }).degisti) korunan.push(k);
+          }
+          req.body = yeni; req.rolloutKorunan = korunan;
+        } else {
+          if (!ROLLOUT_SUBCON_ALANLARI.some((k) => K.esle(req.body?.[k]))) return red("Yeni saha kaydında en az bir iş kolunun taşeronu firmanız olmalı");
+          // Yeni kayıtta başka firmaya yazılmış iş kolunun alanları alınmaz
+          const sahip = markaRolloutSahiplik(K, req.body), yeni = {};
+          for (const [k, v] of Object.entries(req.body || {})) {
+            const kolu = markaRolloutAlanKolu(k);
+            if (ROLLOUT_MARKA_GIZLI.includes(k) || (kolu && sahip[kolu] !== "BEN")) continue;
+            yeni[k] = v;
+          }
+          req.body = yeni;
+        }
       } else if (yol === "/rollout/is-kolu") {
         if (!(await markaRolloutSahaKapsamda(K, req.body?.site_code))) return red("Bu saha firmanızın kapsamında değil");
       } else if ((mm = yol.match(/^\/rollout\/is-kolu\/(\d+)$/))) {
@@ -2054,6 +2194,58 @@ app.use(async (req, res, next) => {
     next();
   } catch (e) {
     console.error("[marka-rollout]", e.message);
+    res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
+  }
+});
+// ═══ MARKA İŞ ATAMA + CLEAN UP KAPSAMI (28.10.2026, Orhan) ═══════════════════════════════════════════════════════
+// Alt marka hesabı kimlikle çalışan iş atama (/is-atama/:id/…) ve Clean Up (/rollout/cleanup/:site|:id/…) uçlarında da
+// yalnız kendi kapsamına erişir: kayıttaki her saha firmanın kapsamında ve işin iş kolu firmaya ait olmalı. Kendisine
+// atanmış işi / Clean Up'ı (mobil "İşlerim") her zaman görür ve başlat / bitir yapabilir. Yazma, Rollout düzenleme izni ister.
+const CLEANUP_LISTE_YOLLARI = new Set(["atama-yetkim", "onay-bekleyen", "atananlarim", "personel-listesi"]);
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    if (!/^\/(is-atama|rollout\/cleanup)\//.test(yol) && !(yol === "/is-atama" && req.method === "POST")) return next();
+    const u = optionalAuth(req);
+    if (!u || !altMarkaKullanicisi(u) || !altMarkaMi(u.marka)) return next();
+    const K = req.markaRollout !== undefined ? req.markaRollout : await markaRolloutKapsami(req);
+    req.markaRollout = K;
+    const m = req.method === "HEAD" ? "GET" : req.method, email = _eposta(u);
+    const red = (msg) => res.status(403).json({ ok: false, error: msg });
+    const yazmaRed = () => (m !== "GET" && !K.duzenle ? red("Rollout kayıtlarını yalnız görüntüleme yetkiniz var") : null);
+    let mm;
+    if (yol === "/is-atama") {
+      const sites = (Array.isArray(req.body?.site_codes) ? req.body.site_codes : [req.body?.site_codes]).map(isAtamaSiteTemizle).filter(Boolean);
+      const uy = await markaIsAtamaUygun(K, String(req.body?.kategori || ""), sites);
+      return uy.ok ? (yazmaRed() || next()) : red(uy.hata);
+    }
+    if ((mm = yol.match(/^\/is-atama\/(\d+)(\/.*)?$/))) {
+      const a = (await pool.query(`SELECT id, kategori, site_codes, personeller FROM is_atama WHERE id = $1`, [Number(mm[1])]).catch(() => ({ rows: [] }))).rows[0];
+      if (!a) return next(); // uç 404 döner
+      const kendi = (a.personeller || []).some((p) => String(p?.email || "").toLowerCase().trim() === email);
+      if (kendi && (m === "GET" || /^\/(basla|bitir|ara-ver)$/.test(mm[2] || ""))) return next();
+      const uy = await markaIsAtamaUygun(K, a.kategori, a.site_codes);
+      return uy.ok ? (yazmaRed() || next()) : red(uy.hata);
+    }
+    if (!yol.startsWith("/rollout/cleanup/")) return next();
+    if ((mm = yol.match(/^\/rollout\/cleanup\/(\d+)(\/screenshot)?$/))) {
+      const c = (await pool.query(`SELECT site_code, atanan_email FROM rollout_cleanup WHERE id = $1`, [Number(mm[1])]).catch(() => ({ rows: [] }))).rows[0];
+      if (!c) return next();
+      if (String(c.atanan_email || "").toLowerCase().trim() === email && m !== "DELETE") return next();
+      if (!K.goruntule || !(await markaRolloutSahaKapsamda(K, c.site_code))) return red("Bu kayıt firmanızın kapsamında değil");
+      return yazmaRed() || next();
+    }
+    if ((mm = yol.match(/^\/rollout\/cleanup\/(?:site\/)?([^/]+)(\/.*)?$/)) && !CLEANUP_LISTE_YOLLARI.has(mm[1])) {
+      const site = decodeURIComponent(mm[1]);
+      const c = (await pool.query(`SELECT atanan_email FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = $1`, [site.replace(/\s+/g, "").toUpperCase()]).catch(() => ({ rows: [] }))).rows[0];
+      if (c && String(c.atanan_email || "").toLowerCase().trim() === email && !/^\/(atama|onayla|reddet)$/.test(mm[2] || "")) return next();
+      if (!K.goruntule || !(await markaRolloutSahaKapsamda(K, site))) return red("Bu saha firmanızın kapsamında değil");
+      return yazmaRed() || next();
+    }
+    next();
+  } catch (e) {
+    console.error("[marka-is-atama]", e.message);
     res.status(500).json({ ok: false, error: "Firma kapsamı doğrulanamadı" });
   }
 });
@@ -12274,6 +12466,7 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
   try {
     const data = req.body || {};
     if (!data.site_code) return res.status(400).json({ error: "site_code zorunlu" });
+    const eskiKayit = await rolloutHamSatir({ site: data.site_code }); // işlem geçmişi (28.10.2026)
 
     const autoRegion   = getRegionFromSiteCode(data.site_code);
     const autoSiteType = getSiteTypeFromSiteCode(data.site_code);
@@ -12420,7 +12613,14 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
       ]
     );
 
-    res.json({ ok: true, row: result.rows[0] });
+    const yeniKayit = await rolloutHamSatir({ id: result.rows[0].id });
+    const fark = rolloutFark(eskiKayit, yeniKayit);
+    if (!eskiKayit || fark.degisti)
+      await islemGecmisiYaz(req, "rollout", result.rows[0].id, eskiKayit ? "DUZENLEME" : "OLUSTURMA", fark.eski, fark.yeni, data.site_code);
+    // Firma hesabı: başka firmanın iş koluna / ortak saha bilgisine ait gönderilen değişiklikler uygulanmadı
+    const korunan = req.rolloutKorunan || [];
+    res.json({ ok: true, row: req.markaRollout ? markaRolloutMaskele(req.markaRollout, [result.rows[0]])[0] : result.rows[0],
+      ...(korunan.length ? { korunan_alanlar: korunan } : {}) });
   } catch (err) {
     console.error("ROLLOUT UPDATE ERROR:", err);
     res.status(500).json({ error: err.message });
@@ -12439,12 +12639,15 @@ app.post("/rollout/:id/enh-perakende", authMiddleware, async (req, res) => {
     const { enh_perakende_tarihi, enh_perakende_odeme_tarihi, enh_perakende_tutar, enh_tesisat_no, enh_perakende_not } = req.body || {};
     const d = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
     const tutar = enh_perakende_tutar === "" || enh_perakende_tutar == null ? null : Number(String(enh_perakende_tutar).replace(/\./g, "").replace(",", "."));
+    const eski = await rolloutHamSatir({ id: req.params.id });
     const r = await pool.query(
       `UPDATE rollout_progress SET enh_perakende_tarihi = $1, enh_perakende_odeme_tarihi = $2, enh_perakende_tutar = $3, enh_tesisat_no = $4, enh_perakende_not = $5,
          abonelik_actual_end_date = COALESCE(abonelik_actual_end_date, $2::date), updated_at = NOW()
        WHERE id = $6 RETURNING id`,
       [d(enh_perakende_tarihi), d(enh_perakende_odeme_tarihi), Number.isFinite(tutar) ? tutar : null, enh_tesisat_no || null, enh_perakende_not || null, req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    const fark = rolloutFark(eski, await rolloutHamSatir({ id: req.params.id }));
+    if (fark.degisti) await islemGecmisiYaz(req, "rollout", req.params.id, "ENH_PERAKENDE", fark.eski, fark.yeni);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -12453,11 +12656,14 @@ app.post("/rollout/:id/kabul-belgeleri", authMiddleware, async (req, res) => {
   try {
     const { hasarsizlik_tarihi, memnuniyet_tarihi, memnuniyet_ayni_belge, kabul_belge_not } = req.body || {};
     const d = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
+    const eski = await rolloutHamSatir({ id: req.params.id });
     const r = await pool.query(
       `UPDATE rollout_progress SET hasarsizlik_tarihi = $1, memnuniyet_tarihi = $2, memnuniyet_ayni_belge = $3, kabul_belge_not = $4, updated_at = NOW()
        WHERE id = $5 RETURNING id`,
       [d(hasarsizlik_tarihi), d(memnuniyet_tarihi), memnuniyet_ayni_belge === true || memnuniyet_ayni_belge === "true", kabul_belge_not || null, req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ ok: false, error: "Kayıt yok" });
+    const fark = rolloutFark(eski, await rolloutHamSatir({ id: req.params.id }));
+    if (fark.degisti) await islemGecmisiYaz(req, "rollout", req.params.id, "KABUL_BELGELERI", fark.eski, fark.yeni);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -12490,7 +12696,10 @@ app.post("/rollout/:id/belge-url", async (req, res) => {
   try {
     const { field, url } = req.body;
     if (!ROLLOUT_BELGE_FIELDS.includes(field)) return res.status(400).json({ error: "Geçersiz alan" });
+    const eski = await rolloutHamSatir({ id: req.params.id });
+    if (!eski) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     await pool.query(`UPDATE rollout_progress SET ${field}=$1 WHERE id=$2`, [url, req.params.id]);
+    await islemGecmisiYaz(req, "rollout", req.params.id, url ? "BELGE_EKLEME" : "BELGE_SILME", { [field]: eski[field] ?? null }, { [field]: url || null }, eski.site_code);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -12499,7 +12708,10 @@ app.post("/rollout/:id/belge-url", async (req, res) => {
 app.post("/rollout/:id/enh-proje-belge-url", async (req, res) => {
   try {
     const { url } = req.body;
+    const eski = await rolloutHamSatir({ id: req.params.id });
+    if (!eski) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     await pool.query("UPDATE rollout_progress SET enh_proje_belge_url=$1 WHERE id=$2", [url, req.params.id]);
+    await islemGecmisiYaz(req, "rollout", req.params.id, url ? "BELGE_EKLEME" : "BELGE_SILME", { enh_proje_belge_url: eski.enh_proje_belge_url ?? null }, { enh_proje_belge_url: url || null }, eski.site_code);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -12507,6 +12719,7 @@ app.post("/rollout/:id/enh-proje-belge-url", async (req, res) => {
 app.delete("/rollout/:id", authMiddleware, async (req, res) => {
   try {
     const id = req.params.id;
+    const eskiKayit = await rolloutHamSatir({ id });
 
     const result = await pool.query(
       `
@@ -12524,10 +12737,12 @@ app.delete("/rollout/:id", authMiddleware, async (req, res) => {
       });
     }
 
+    // Silinen kaydın tam içeriği geçmişte saklanır (geri getirme için)
+    await islemGecmisiYaz(req, "rollout", id, "SILME", eskiKayit, null, eskiKayit?.site_code);
     res.json({
       ok: true,
       message: "Rollout kaydı silindi",
-      deleted: result.rows[0],
+      deleted: req.markaRollout ? markaRolloutMaskele(req.markaRollout, [result.rows[0]])[0] : result.rows[0],
     });
   } catch (err) {
     console.error("ROLLOUT DELETE ERROR:", err);
@@ -12537,6 +12752,8 @@ app.delete("/rollout/:id", authMiddleware, async (req, res) => {
 // silinecek geçici yüklendi//
 app.get("/debug/rollout-last", async (req, res) => {
   try {
+    const du = optionalAuth(req); // 28.10.2026: tüm firmaların son kayıtları — firma / taşeron hesabına kapalı
+    if (!du || taseronMu(du) || altMarkaKullanicisi(du)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const result = await pool.query(`
       SELECT 
         id, bolge, site_type, project_code, site_code, il,
@@ -12835,7 +13052,10 @@ app.get("/rollout/harita", authMiddleware, async (req, res) => {
           gerceklesen_2026: tarihler.some((t) => t >= "2026-01-01" && t <= "2026-12-31"), son_gerceklesen: tarihler[tarihler.length - 1] || null, tarih_yok: !tarihler.length };
       });
       const k = kMap[id];
-      const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [], belge_url: k.belge_url, sayfa: k.sayfa, ham: k.ham } : null;
+      // 28.10.2026: konum kaynağı (TSSR belgesi / ham okuma) başka firmanın işinden geliyorsa alt markaya verilmez
+      const kaynakBizim = !K || isler.some((x) => String(x.site_code || "").toUpperCase().trim() === String(k?.kaynak_site_code || "").toUpperCase().trim());
+      const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [],
+        belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null, ham: kaynakBizim ? k.ham : null } : null;
       const kullanilabilir = konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
       return { fiziksel_id: id, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
         isler, is_2026: isler.some((x) => x.gerceklesen_2026), tarih_eksik: isler.every((x) => x.tarih_yok),
@@ -12953,7 +13173,8 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
     });
 
     const firma = { firma_sozluk: FB.sozluk, firma_markalar: FB.markalar };
-    if (K) return res.json({ ok: true, kapsam: K.kod, rows, ...firma });
+    // 28.10.2026: alan → iş kolu sözlüğü (ekran başka firmanın iş kolu alanlarını ve ortak saha bilgisini kilitler; sunucu ayrıca doğrular)
+    if (K) return res.json({ ok: true, kapsam: K.kod, rows, ...firma, alan_kollari: _rolloutAlanKolu, duzenle: K.duzenle });
     res.json({ ok: true, rows, ...firma });
   } catch (err) {
     console.error("ROLLOUT LIST ERROR:", err);
@@ -13191,8 +13412,11 @@ app.get("/rollout/cleanup/atananlarim", authMiddleware, async (req, res) => {
 // Atama için personel listesi (aktif kullanıcılar)
 app.get("/rollout/cleanup/personel-listesi", authMiddleware, async (req, res) => {
   try {
-    const r = await pool.query(`SELECT email, COALESCE(name,'') AS ad FROM public.users WHERE COALESCE(is_active,true) AND email IS NOT NULL ORDER BY name`);
-    res.json({ ok: true, rows: r.rows });
+    const r = await pool.query(`SELECT u.email, COALESCE(u.name,'') AS ad, UPPER(COALESCE((SELECT to_jsonb(p)->>'marka' FROM personel p
+      WHERE LOWER(TRIM(p.email)) = LOWER(TRIM(u.email)) LIMIT 1), u.marka, 'ERC')) AS _marka
+      FROM public.users u WHERE COALESCE(u.is_active,true) AND u.email IS NOT NULL ORDER BY u.name`);
+    const ak = altMarkaKapsam(req); // 28.10.2026: alt marka yalnız kendi bordro kümesi
+    res.json({ ok: true, rows: r.rows.filter((x) => !ak || ak.bordro.includes(x._marka)).map(({ _marka, ...x }) => x) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -13208,6 +13432,16 @@ app.get("/rollout/cleanup/personel-listesi", authMiddleware, async (req, res) =>
    yapabilir (lider şartı yok); sarf fotoğrafı şimdilik zorunlu değil;
    kişi günlük maliyeti = net maaş × 1,35 ÷ 22 (Faz 3'te kullanılacak). */
 const IS_ATAMA_ROLLER = ["admin", "platform_admin", "direktor", "pm", "rollout_mudur", "genel_mudur", "bolge_mudur"];
+// 28.10.2026: alt marka yalnız kendi bordro kümesindeki kişiye iş atar (ERC personeline atama yapamaz)
+async function isAtamaPersonelKapsamHatasi(req, kisiler) {
+  const ak = altMarkaKapsam(req);
+  if (!ak || !kisiler?.length) return null;
+  const r = await pool.query(`SELECT LOWER(TRIM(u.email)) AS email, UPPER(COALESCE((SELECT to_jsonb(p)->>'marka' FROM personel p
+    WHERE LOWER(TRIM(p.email)) = LOWER(TRIM(u.email)) LIMIT 1), u.marka, 'ERC')) AS marka
+    FROM public.users u WHERE LOWER(TRIM(u.email)) = ANY($1::text[])`, [kisiler.map((k) => k.email)]);
+  const disari = kisiler.filter((k) => !r.rows.some((x) => x.email === k.email && ak.bordro.includes(x.marka)));
+  return disari.length ? `Firmanızın personeli olmayan kişiye iş atanamaz: ${disari.map((k) => k.ad || k.email).join(", ")}` : null;
+}
 // 25.10.2026: dış taşeron hesabı yalnız KENDİ taşeronuna atanmış işte başla / çıkış yapabilir (taseron_id kalıcı kimlik)
 function taseronunIsiMi(req, row) {
   const u = req.user || {};
@@ -13217,6 +13451,10 @@ function isAtamaYetkiliMi(req) {
   const e = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
   if (req.user?.kullanici_tipi === "TASERON" || rol === "subcon") return false;
+  // 28.10.2026: alt marka (Teknocenter) hesabında iş atama = yönetim rolü + Rollout düzenleme izni (salt okunur kullanıcı
+  // atama yapamaz). Saha / iş kolu kapsamı MARKA İŞ ATAMA kapısında ayrıca doğrulanır.
+  if (altMarkaKullanicisi(req.user) && altMarkaMi(req.user?.marka))
+    return IS_ATAMA_ROLLER.includes(rol) && req.izinler?.rollout_goruntule === true && req.izinler?.rollout_duzenle === true;
   return CLEANUP_ATAMA_YETKI.includes(e) || IS_ATAMA_ROLLER.includes(rol);
 }
 // rollout_progress'te tarih yazılmasına izin verilen kolonlar (SQL'e ad gömüldüğü için beyaz liste)
@@ -13344,6 +13582,12 @@ const orgPanel = orgEkip.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMa
 const omnixPanel = omnixProfil.kur(app, {
   pool, authMiddleware, markaProfil, altMarkaKullanicisi, islemGecmisiYaz, isAtamaYetkiliMi, personelHesapEkstresi, pmKisiselEmailGorur,
   get PM_KISISEL_EMAIL() { return PM_KISISEL_EMAIL; },
+  // 28.10.2026: alt marka iş atamada yalnız kendi firmasına bağlı taşeronları görür / fiyatlarını okur
+  taseronFirmaSuzgeci: async (req) => {
+    const K = await rolloutKapsam(req);
+    if (!K) return null;
+    return (x) => String(x.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(x.subcon_name);
+  },
 });
 // Tarihli onay devri + mobil "Onaylar" listesi (/onay/bekleyen) + admin devir tanımları. Eski e-posta listeleri
 // (AVANS_YETKI, MASRAF_*_MAIL) dosyanın ilerisinde tanımlıdır; yalnız istek anında okunur.
@@ -13368,12 +13612,15 @@ app.get("/is-atama/yetkim", authMiddleware, (req, res) => res.json({ ok: true, y
 app.get("/is-atama/personel-listesi", authMiddleware, async (req, res) => {
   try {
     const r = await pool.query(`
-      SELECT u.email, COALESCE(NULLIF(u.name,''), p.ad_soyad, u.email) AS ad, p.bolge, p.unvan, p.ekip_bilgisi, p.ekip_arac_plaka
+      SELECT u.email, COALESCE(NULLIF(u.name,''), p.ad_soyad, u.email) AS ad, p.bolge, p.unvan, p.ekip_bilgisi, p.ekip_arac_plaka,
+             UPPER(COALESCE(p.marka, u.marka, 'ERC')) AS _marka
       FROM public.users u
-      LEFT JOIN LATERAL (SELECT ad_soyad, bolge, unvan, ekip_bilgisi, ekip_arac_plaka FROM personel WHERE LOWER(TRIM(email)) = LOWER(TRIM(u.email)) AND COALESCE(aktif,true) LIMIT 1) p ON true
+      LEFT JOIN LATERAL (SELECT ad_soyad, bolge, unvan, ekip_bilgisi, ekip_arac_plaka, to_jsonb(personel)->>'marka' AS marka FROM personel WHERE LOWER(TRIM(email)) = LOWER(TRIM(u.email)) AND COALESCE(aktif,true) LIMIT 1) p ON true
       WHERE COALESCE(u.is_active,true) AND u.email IS NOT NULL AND COALESCE(u.role,'') <> 'subcon'
       ORDER BY p.bolge NULLS LAST, ad`);
-    res.json({ ok: true, rows: r.rows });
+    // 28.10.2026: alt marka yalnız kendi bordro kümesindeki kişileri görür / atar
+    const ak = altMarkaKapsam(req);
+    res.json({ ok: true, rows: r.rows.filter((x) => !ak || ak.bordro.includes(x._marka)).map(({ _marka, ...x }) => x) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Saha arama: Rollout Data + PR (master_works) + PO (po_rows) — kaynak etiketiyle
@@ -13395,7 +13642,13 @@ app.get("/is-atama/saha-ara", authMiddleware, async (req, res) => {
           item_description ~* 'installation|addition|moderniz|microwave|camoufl|kamufl|energy line|lv power|survey|dismantl' FROM po_rows WHERE UPPER(TRIM(site_code)) LIKE $1
       ) x GROUP BY site_code ORDER BY site_code LIMIT 30`, [`%${q}%`]);
     // ana_is: PO/PR'da montaj/iş kalemi var mı (yalnız etiket/plaka gibi sarf kalemleri "iş" sayılmaz)
-    res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, po_kalem: Number(x.po_kalem || 0), pr_kalem: Number(x.pr_kalem || 0), bolge: x.bolge || detectRegion(x.site_code) || null })) });
+    let satirlar = r.rows;
+    const K = await rolloutKapsam(req);
+    if (K) { // alt marka: yalnız kapsamdaki sahalar; PO / PR kalem açıklamaları (Şimşek'in Huawei verisi) verilmez
+      const S = await markaRolloutSahalar(K);
+      satirlar = satirlar.filter((x) => S.has(x.site_code)).map((x) => ({ ...x, kalemler: null, po: false, pr: false, po_kalem: 0, pr_kalem: 0 }));
+    }
+    res.json({ ok: true, rows: satirlar.map((x) => ({ ...x, po_kalem: Number(x.po_kalem || 0), pr_kalem: Number(x.pr_kalem || 0), bolge: x.bolge || detectRegion(x.site_code) || null })) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Yeni iş ataması
@@ -13420,6 +13673,13 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
       if (fiyat) { fiyatV = omnixPanel.fiyatDogrula(fiyat); if (fiyatV.hata) return res.status(400).json({ ok: false, error: fiyatV.hata }); }
     }
     if (!kisiler.length && !taseron) return res.status(400).json({ ok: false, error: "En az bir personel ya da taşeron seçin" });
+    const kapsamHata = await isAtamaPersonelKapsamHatasi(req, kisiler);
+    if (kapsamHata) return res.status(403).json({ ok: false, error: kapsamHata });
+    if (taseron && req.markaRollout) {
+      const K = req.markaRollout;
+      if (!(String(taseron.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(taseron.subcon_name || taseron.kod || taseron.ad)))
+        return res.status(403).json({ ok: false, error: "Seçilen taşeron firmanızın kapsamında değil" });
+    }
     if (k.kod === "CLEANUP" && !kisiler.length) return res.status(400).json({ ok: false, error: "Clean Up işi için sahada çalışacak personeli seçin" });
     // Saha Rollout Data'da yoksa PR (master_works) ya da PO'da olması yeterli (07.09.2026, Orhan):
     // PO açılmamış ama ekip aksiyon alacak sahalar atanabilsin; hiçbirinde yoksa önce PR talebi
@@ -13438,6 +13698,8 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
       [k.kod, alt_tip || null, sites, bolge, JSON.stringify(kisiler), plan_tarihi || null,
        String(req.user?.email || "").toLowerCase().trim(), req.user?.name || null, atayan_not || null, taseron ? taseron.id : null]);
     const id = ins.rows[0].id;
+    await islemGecmisiYaz(req, "is_atama", id, "OLUSTURMA", null, { kategori: k.kod, alt_tip: alt_tip || null, site_codes: sites,
+      personeller: kisiler.map((x) => x.email), plan_tarihi: plan_tarihi || null, taseron_id: taseron ? taseron.id : null });
     if (taseron && fiyatV) await omnixPanel.fiyatKaydet(id, taseron.id, fiyatV, "Atama", String(req.user?.email || "").toLowerCase().trim());
     // Clean Up: mevcut fotoğraf/onay akışı atanan_email üzerinden çalışır → kayıtları oluştur/bağla
     if (k.kod === "CLEANUP") {
@@ -13481,7 +13743,8 @@ app.get("/is-atama/liste", authMiddleware, async (req, res) => {
     // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki sahaların atamalarını görür (MARKA ROLLOUT KAPSAMI)
     const K = await rolloutKapsam(req);
     let rows = r.rows;
-    if (K) { const S = await markaRolloutSahalar(K); rows = rows.filter((a) => (a.site_codes || []).some((sc) => S.has(String(sc || "").replace(/\s+/g, "").toUpperCase()))); }
+    // 28.10.2026: ortak sahada başka firmanın işi (ör. ERC'nin ENH ataması) listelenmez — kendi iş kolu ya da kendine atanan iş
+    if (K) rows = await markaIsAtamaSuz(K, rows, String(req.user?.email || "").toLowerCase().trim());
     res.json({ ok: true, rows, yetkili: isAtamaYetkiliMi(req) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -13521,6 +13784,16 @@ app.get("/is-atama/:id", authMiddleware, async (req, res) => {
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req) && !CLEANUP_FOTO_OFIS.includes(email)
         && req.izinler?.rollout_goruntule !== true)
       return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
+    // 28.10.2026: alt marka — sahadaki başka firmanın iş kolu belgeleri / tarihleri ve finansal belgeler gösterilmez
+    if (req.markaRollout && Array.isArray(row.sahalar)) {
+      const K = req.markaRollout;
+      for (const sh of row.sahalar) {
+        const sahip = markaRolloutSahiplik(K, (await rolloutHamSatir({ site: sh.site_code })) || {});
+        sh.belgeler = (sh.belgeler || []).filter((b) => !ROLLOUT_MARKA_GIZLI.includes(b.alan) && sahip[markaRolloutAlanKolu(b.alan)] === "BEN");
+        if (sahip.rf !== "BEN") { sh.installation_actual_start_date = null; sh.installation_actual_end_date = null; sh.qc_durum = null; }
+        if (sahip.btk !== "BEN") sh.survey_note = null;
+      }
+    }
     // Taşeron fiyatı yalnız atama yetkilisine (aynı işteki personel ya da başka taşeron görmez)
     if (row.taseron_id && isAtamaYetkiliMi(req)) {
       row.fiyat_surumleri = (await pool.query(`SELECT surum, kalemler, para_birimi, kdv_esasi, toplam, neden, olusturan, created_at FROM is_atama_fiyat
@@ -13640,6 +13913,9 @@ app.put("/is-atama/:id", authMiddleware, async (req, res) => {
     const kisiler = Array.isArray(personeller)
       ? personeller.map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() })).filter((p) => p.email)
       : null;
+    const kapsamHata = await isAtamaPersonelKapsamHatasi(req, kisiler);
+    if (kapsamHata) return res.status(403).json({ ok: false, error: kapsamHata });
+    const onceki = (await pool.query(`SELECT personeller, plan_tarihi::text AS plan_tarihi, atayan_not, durum, alt_tip FROM is_atama WHERE id = $1`, [id])).rows[0];
     const u = await pool.query(
       `UPDATE is_atama SET
          personeller = COALESCE($2::jsonb, personeller), plan_tarihi = COALESCE($3::date, plan_tarihi),
@@ -13650,6 +13926,9 @@ app.put("/is-atama/:id", authMiddleware, async (req, res) => {
     if (u.rows[0].kategori === "CLEANUP" && kisiler?.length) {
       await pool.query(`UPDATE rollout_cleanup SET atanan_email = $2, atanan_ad = $3, updated_at = NOW() WHERE is_atama_id = $1`, [id, kisiler[0].email, kisiler[0].ad]);
     }
+    const sonraki = (await pool.query(`SELECT personeller, plan_tarihi::text AS plan_tarihi, atayan_not, durum, alt_tip FROM is_atama WHERE id = $1`, [id])).rows[0];
+    const fark = rolloutFark(onceki, sonraki);
+    if (fark.degisti) await islemGecmisiYaz(req, "is_atama", id, "DUZENLEME", fark.eski, fark.yeni);
     res.json({ ok: true, row: await isAtamaDetay(id) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -13657,8 +13936,12 @@ app.delete("/is-atama/:id", authMiddleware, async (req, res) => {
   try {
     if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "İş atama yetkiniz yok" });
     await isAtamaTablolar();
+    const silinen = (await pool.query(`SELECT kategori, alt_tip, site_codes, personeller, plan_tarihi::text AS plan_tarihi, durum, taseron_id FROM is_atama WHERE id = $1`,
+      [Number(req.params.id)])).rows[0];
+    if (!silinen) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     await pool.query(`UPDATE rollout_cleanup SET is_atama_id = NULL WHERE is_atama_id = $1`, [Number(req.params.id)]);
     await pool.query(`DELETE FROM is_atama WHERE id = $1`, [Number(req.params.id)]);
+    await islemGecmisiYaz(req, "is_atama", req.params.id, "SILME", silinen, null);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -21459,6 +21742,8 @@ pool.query(`
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS plaka TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS firma TEXT;
   ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS arac_km NUMERIC;
+  -- 28.10.2026 (Orhan): son ödeme günü (vade). Eski kayıtlarda boş kalır ("vade bilgisi eksik"); tahminle doldurulmaz.
+  ALTER TABLE is_avans_talep ADD COLUMN IF NOT EXISTS son_odeme_tarihi DATE;
 `).catch(e => console.error("is_avans_talep tablo hatası:", e.message));
 
 // Mobil yakıt talebi: kişinin atanan aracı (org şeması) — kişide yoksa
@@ -21605,7 +21890,9 @@ async function islemGecmisiYaz(req, modul, kayitId, tip, eski, yeni, aciklama) {
     [modul, Number(kayitId) || 0, tip, temiz(eski), temiz(yeni), aciklama ? String(aciklama).slice(0, 2000) : null, kullanici])
     .catch(e => console.error("[islem-gecmisi]", e.message));
 }
-const avansOzet = (t) => t ? ({ tutar: t.tutar, tarih: ymdYerel(t.tarih), gider_turu: t.gider_turu, bolge: t.bolge, proje: t.proje, plaka: t.plaka, firma: t.firma, aciklama: t.aciklama, not_aciklama: t.not_aciklama, personel_id: t.personel_id }) : null;
+// Son ödeme günü (vade) girdisi: YYYY-MM-DD ya da boş (null). Geçersiz değer reddedilir.
+const avansVadeGirdisi = (v) => (v == null || v === "" ? null : /^\d{4}-\d{2}-\d{2}$/.test(String(v).slice(0, 10)) ? String(v).slice(0, 10) : undefined);
+const avansOzet = (t) => t ? ({ son_odeme_tarihi: t.son_odeme_tarihi ? ymdYerel(t.son_odeme_tarihi) : null, tutar: t.tutar, tarih: ymdYerel(t.tarih), gider_turu: t.gider_turu, bolge: t.bolge, proje: t.proje, plaka: t.plaka, firma: t.firma, aciklama: t.aciklama, not_aciklama: t.not_aciklama, personel_id: t.personel_id }) : null;
 const maasOzet = (m) => m ? ({ donem: m.donem, bankadan: m.bankadan, elden: m.elden, tarih: ymdYerel(m.tarih), aciklama: m.aciklama, odeyen: m.odeyen, personel_id: m.personel_id }) : null;
 const kalemOzet = (k) => k ? ({ kalem_id: k.id, kategori: k.kategori, tarih: ymdYerel(k.tarih), tutar: k.tutar, aciklama: k.aciklama, belge_no: k.belge_no, belge_aciklama: k.belge_aciklama, plaka: k.plaka, fis_var: k.fis_var }) : null;
 async function avansOnayBitir(req, res, onceki, yeni, ek) {
@@ -22015,9 +22302,10 @@ app.delete("/hr/personel-odeme/:id", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.get("/hr/is-avans", authMiddleware, async (req, res) => {
-  try {
-    let { email, name } = req.query;
+// Kullanıcının görebildiği iş avansı satırları — liste, özet kartları ve modal AYNI kuraldan (28.10.2026 ayrıştırıldı):
+// tam görüş yoksa kendi kaydı, Orhan'ın kişisel avansı yalnız yetkiliye, alt marka yalnız kendi firma kapsamı.
+async function isAvansGorunurSatirlar(req, sorgu = {}) {
+    let { email, name } = sorgu;
     // Personel görünümü: istemci ne gönderirse göndersin kendi kaydına kilitle
     if (!avansTamGorus(req)) { email = req.user.email; name = req.user.name || name; }
     let query, params;
@@ -22084,8 +22372,85 @@ app.get("/hr/is-avans", authMiddleware, async (req, res) => {
       }
       rows = rows.filter((t) => avansKapsamda(kapsam, t));
     }
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    return rows;
+}
+app.get("/hr/is-avans", authMiddleware, async (req, res) => {
+  try { res.json(await isAvansGorunurSatirlar(req, req.query)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══ İŞ AVANSI ÖZET KARTLARI + ONAY BEKLEYENLER (28.10.2026, Orhan) ═══════════════════════════════════════════════
+// Kartlar ve modal satırları TEK yanıttan gelir (kart tutarı = modal satırlarının toplamı). Kapsam liste ile aynıdır.
+//  • son_odeme: en son ödeme yapılan gün (ödeme tarihi = odeme_tarihi → muhasebe → direktör onay tarihi) ve o günün ödemeleri
+//  • onay_bekleyen: TALEP / RM / PM onaylı talepler — mevcut aşama, sıradaki onaycı(lar), oturumdaki kişinin onaylayıp onaylayamayacağı
+//  • bugun_gereken: nihai onaylı (DIREKTOR_ONAY) ödenmemiş talepler, son ödeme günü (vade) Europe/Istanbul "bugün" olanlar.
+//      Kısmi ödeme kaydı yoktur (ödeme tek adımda tutarın tamamı) → kalan = tutar; avans tablosundaki 'IS' kopyası sayılmaz.
+//      Ayrı gösterilenler: bugün vadeli ama onay bekleyen, vadesi geçmiş (geciken), vade bilgisi eksik. Tutarlar TRY
+//      (talepte para birimi alanı yok); farklı para birimi gelirse ayrı toplanır, kurla birleştirilmez.
+const AVANS_ASAMA = { TALEP: "RM", ROLLOUT_MUDUR_ONAY: "PM", PM_ONAY: "PD", DIREKTOR_ONAY: "ODE" };
+const AVANS_ASAMA_TR = { RM: "Rollout müdürü onayı", PM: "PM onayı", PD: "Direktör onayı", ODE: "Ödeme (muhasebe)" };
+const istanbulBugun = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
+  try {
+    const rows = await isAvansGorunurSatirlar(req, req.query);
+    const bugun = istanbulBugun();
+    const gun = (v) => (v ? ymdYerel(v) : null);
+    const kullanicilar = (await pool.query(`SELECT id, LOWER(TRIM(email)) AS email, name, role, COALESCE(is_active,true) AS aktif FROM users`)).rows;
+    const adOf = (e) => kullanicilar.find((u) => u.email === e)?.name || e;
+    const benimEmail = _eposta(req.user);
+    // Aşamanın onaycıları: eski liste (AVANS_YETKI) + muhasebe rolü (ödeme); PD adımında firma devri varsa yalnız devralan.
+    // Başka bir alt markanın ortak hesabı listelenmez (ör. TEKNO talebinde AHY hesabı).
+    const yabanciMarkaHesabi = (e, firma) => (e === "teknocenter" && firma !== "TEKNO") || (e === "info@ahyelektrik.com" && firma !== "AHY");
+    const onaycilar = async (adim, t) => {
+      const firma = String(t.firma || "").toUpperCase();
+      if (adim === "PD") {
+        const d = await onayPanel.adimOnaycisi(await onayPanel.talepFirmasiAvans(t), "AVANS_PD").catch(() => ({ devir: null }));
+        if (d?.devir) { const u = kullanicilar.find((x) => Number(x.id) === Number(d.devir.onayci_user_id)); return [{ ad: u?.name || `#${d.devir.onayci_user_id}`, devir: true }]; }
+      }
+      const liste = new Set((AVANS_YETKI[adim] || []).filter((e) => !e.endsWith("@gmail.com") && !yabanciMarkaHesabi(e, firma)));
+      if (adim === "ODE") kullanicilar.filter((u) => u.role === "muhasebe" && u.aktif).forEach((u) => liste.add(u.email));
+      return [...liste].map((e) => ({ ad: adOf(e) }));
+    };
+    const satir = async (t) => {
+      const adim = AVANS_ASAMA[t.durum] || null;
+      // Hızlı onay yalnız onay aşamalarında (ödeme hariç) ve yalnız mevcut aşama için — aynı yetki fonksiyonu (devir dahil)
+      const benim = !!adim && adim !== "ODE" && (await avansYetkili(req, adim, t));
+      return {
+        id: t.id, talep_no: `AV-${t.id}`, talep_eden: t.talep_eden_ad || t.talep_eden_email, personel: t.personel_ad || null,
+        firma: t.firma || null, bolge: t.bolge || null, proje: t.proje || null, gider_turu: t.gider_turu || null, plaka: t.plaka || null,
+        tarih: gun(t.tarih), son_odeme_tarihi: gun(t.son_odeme_tarihi), olusturma: t.created_at, tutar: Number(t.tutar || 0), para_birimi: "TRY",
+        aciklama: t.aciklama || null, not_aciklama: t.not_aciklama || null, durum: t.durum,
+        asama: adim, asama_tr: adim ? AVANS_ASAMA_TR[adim] : null, onaycilar: adim ? await onaycilar(adim, t) : [],
+        benim_onaylayabilir: benim, firma_secim_gerekli: benim && (adim === "PM" || (adim === "PD" && !t.firma)), // mevcut panel kuralı
+        odeme_tarihi: gun(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi),
+      };
+    };
+    const bekleyenHam = rows.filter((t) => ["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(t.durum));
+    const hazirHam = rows.filter((t) => t.durum === "DIREKTOR_ONAY");
+    const odenmisHam = rows.filter((t) => t.durum === "TAMAMLANDI" && gun(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi));
+    const onay_bekleyen = []; for (const t of bekleyenHam) onay_bekleyen.push(await satir(t));
+    const hazir = []; for (const t of hazirHam) hazir.push(await satir(t));
+    const odenmis = []; for (const t of odenmisHam) odenmis.push(await satir(t));
+    // Son ödeme günü kartı: en son ödeme yapılan gün
+    const sonGun = odenmis.map((x) => x.odeme_tarihi).sort().pop() || null;
+    const sonGunSatirlar = odenmis.filter((x) => x.odeme_tarihi === sonGun);
+    const topla = (l) => { const o = {}; for (const x of l) o[x.para_birimi] = (o[x.para_birimi] || 0) + x.tutar; return o; };
+    const grup = (l) => ({ ids: l.map((x) => x.id), adet: l.length, tutar: topla(l) });
+    const bugunHazir = hazir.filter((x) => x.son_odeme_tarihi === bugun);
+    const geciken = hazir.filter((x) => x.son_odeme_tarihi && x.son_odeme_tarihi < bugun);
+    const vadeEksik = hazir.filter((x) => !x.son_odeme_tarihi);
+    const bugunBekleyen = onay_bekleyen.filter((x) => x.son_odeme_tarihi === bugun);
+    res.json({
+      ok: true, bugun, saat_dilimi: "Europe/Istanbul",
+      satirlar: [...onay_bekleyen, ...hazir, ...sonGunSatirlar],
+      kartlar: {
+        son_odeme: { tarih: sonGun, ...grup(sonGunSatirlar) },
+        onay_bekleyen: { ...grup(onay_bekleyen), benim: grup(onay_bekleyen.filter((x) => x.benim_onaylayabilir)) },
+        bugun_gereken: { odemeye_hazir: grup(bugunHazir), bugun_onay_bekleyen: grup(bugunBekleyen), geciken: grup(geciken), vade_eksik: grup(vadeEksik) },
+      },
+      kullanici: benimEmail,
+    });
+  } catch (e) { console.error("IS AVANS OZET:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.post("/hr/is-avans", taseronDegil, async (req, res) => {
@@ -22160,8 +22525,8 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
 
     const r = await pool.query(
       `INSERT INTO is_avans_talep
-         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma,arac_km)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+         (personel_id,talep_eden_email,talep_eden_ad,tutar,aciklama,not_aciklama,tarih,gider_turu,bolge,proje,banka_adi,iban,durum,pm_onay_tarihi,plaka,firma,arac_km,son_odeme_tarihi)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
       [
         personelIdFinal,
         talep_eden_email,
@@ -22182,6 +22547,7 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
         // Araç KM (mobil yakıt talebi): ileride yakıt bedeli / km karşılaştırması için
         req.body.arac_km != null && req.body.arac_km !== "" && !isNaN(Number(req.body.arac_km))
           ? Number(req.body.arac_km) : null,
+        avansVadeGirdisi(req.body.son_odeme_tarihi) || null, // gönderilmezse boş (mobil eski sürüm) — vade eksik sayılır
       ]
     );
     const yeniAvans = r.rows[0];
@@ -22198,10 +22564,13 @@ app.put("/hr/is-avans/:id", avansSahibiVeyaTam, async (req, res) => {
     if (!check.rows[0] || check.rows[0].durum !== "TALEP") {
       return res.status(400).json({ error: "Sadece TALEP durumundaki kayıtlar düzenlenebilir" });
     }
+    // Son ödeme günü: gövdede yoksa mevcut değer korunur (eski istemci alanı silmesin)
+    const vade = "son_odeme_tarihi" in (req.body || {}) ? avansVadeGirdisi(req.body.son_odeme_tarihi) : (check.rows[0].son_odeme_tarihi ? ymdYerel(check.rows[0].son_odeme_tarihi) : null);
+    if (vade === undefined) return res.status(400).json({ error: "Son ödeme günü geçersiz" });
     const r = await pool.query(
-      `UPDATE is_avans_talep SET personel_id=$1,tutar=$2,aciklama=$3,not_aciklama=$4,tarih=$5,gider_turu=$6,bolge=$7,proje=$8,plaka=$9 WHERE id=$10 RETURNING *`,
+      `UPDATE is_avans_talep SET personel_id=$1,tutar=$2,aciklama=$3,not_aciklama=$4,tarih=$5,gider_turu=$6,bolge=$7,proje=$8,plaka=$9,son_odeme_tarihi=$11 WHERE id=$10 RETURNING *`,
       [personel_id || null, tutar, aciklama, not_aciklama, tarih, gider_turu || null, bolge || null, proje || null,
-       plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null, id]
+       plaka ? String(plaka).trim().toUpperCase().replace(/\s+/g, " ") : null, id, vade]
     );
     islemGecmisiYaz(req, "avans", id, "DUZENLEME", avansOzet(check.rows[0]), avansOzet(r.rows[0]), req.body.gerekce || null);
     res.json(r.rows[0]);
@@ -22212,6 +22581,8 @@ app.delete("/hr/is-avans/:id", avansSahibiVeyaTam, async (req, res) => {
   try {
     const { id } = req.params;
     const eskiA = (await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id])).rows[0];
+    // 28.10.2026: ödenmiş avans silinmez (avans tablosundaki ödeme kaydı ve geçmiş korunur)
+    if (eskiA?.durum === "TAMAMLANDI") return res.status(409).json({ error: "Ödenmiş avans silinemez" });
     await pool.query("DELETE FROM is_avans_talep WHERE id=$1", [id]);
     if (eskiA) await islemGecmisiYaz(req, "avans", id, "SILME", { ...avansOzet(eskiA), durum: eskiA.durum }, null, req.body?.gerekce || null);
     res.json({ ok: true });
@@ -22299,6 +22670,23 @@ async function avansYetkili(req, adim, talep) {
   return y.izin;
 }
 const onayCakismasi = (res) => res.status(409).json({ error: "Bu kayıt az önce başka bir onaycı tarafından işlendi. Liste yenilendi." });
+// 28.10.2026 onay ön kontrolü (tüm onay / red uçları):
+//  • alt marka (Teknocenter) yalnız kendi firma kapsamındaki talebi işler — kimlik numarasıyla başka firmanın avansı onaylanamaz
+//  • istemci ekranda gördüğü aşamayı (beklenen_durum) gönderirse ve talep o arada ilerlemişse 409: eski ekranla yanlış aşama onaylanmaz
+// Yanıt verildiyse true döner.
+async function avansOnayOnKontrol(req, res, talep) {
+  const k = altMarkaKapsam(req);
+  if (k) {
+    const pm = (await pool.query(`SELECT COALESCE(marka,'ERC') AS m FROM personel WHERE id = $1`, [talep.personel_id]).catch(() => ({ rows: [] }))).rows[0];
+    if (!avansKapsamda(k, { ...talep, personel_marka: pm?.m || "ERC" })) { res.status(403).json({ error: "Bu talep firmanızın kapsamında değil" }); return true; }
+  }
+  const beklenen = req.body?.beklenen_durum;
+  if (beklenen && String(beklenen) !== String(talep.durum)) {
+    res.status(409).json({ error: "Talep bu arada başka bir onaycı tarafından ilerletildi; güncel aşama ekranda gösteriliyor.", guncel_durum: talep.durum });
+    return true;
+  }
+  return false;
+}
 
 app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
   try {
@@ -22307,12 +22695,16 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
+    if (await avansOnayOnKontrol(req, res, talep)) return;
     const ADIM = { TALEP: "RM", ROLLOUT_MUDUR_ONAY: "PM", PM_ONAY: "PD", DIREKTOR_ONAY: "ODE" }[talep.durum];
+    // Hızlı onay (tek_asama): yalnız mevcut aşama ilerler; ödeme (muhasebe) adımı hızlı onaydan yapılmaz
+    const tekAsama = req.body?.tek_asama === true;
+    if (tekAsama && ADIM === "ODE") return res.status(400).json({ error: "Ödeme adımı hızlı onaydan yapılamaz" });
     if (ADIM && !(await avansYetkili(req, ADIM, talep))) {
       return res.status(403).json({ error: req.onayHatasi || (req.onayKaynagi === "devir" && ADIM === "PD" ? "Bu firmanın direktör onayı başka bir kullanıcıya devredildi" : "Bu onay adımı için yetkiniz yok") });
     }
-    if (firmaSecim) {
-      await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2", [firmaSecim, id]);
+    if (firmaSecim) { // aşama hâlâ okunan aşamaysa yazılır (eş zamanlı onayda başka talebin firması değişmez)
+      await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2 AND durum=$3", [firmaSecim, id, talep.durum]);
     }
     const today = new Date().toISOString().split("T")[0];
     let updateSql, updateParams;
@@ -22322,7 +22714,7 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     // adımlar için de yetkiliyse (ör. Orhan hem RM hem PM) zincir, yetkisinin
     // yettiği en ileri adıma kadar tek seferde ilerletilir. Her adım hâlâ kendi
     // yetki listesine bağlı — 28.07 kilidi korunur.
-    if (talep.durum === "TALEP" || talep.durum === "ROLLOUT_MUDUR_ONAY") {
+    if (!tekAsama && (talep.durum === "TALEP" || talep.durum === "ROLLOUT_MUDUR_ONAY")) {
       const pmYetki = await avansYetkili(req, "PM", talep);
       // Devralan direktör (onay devri) yalnız PM_ONAY'da onaylar; burada pdYetki yalnız eski liste için doğru döner
       const pdYetki = await avansYetkili(req, "PD", { ...talep, durum: "PM_ONAY" }) && req.onayKaynagi !== "devir";
@@ -22385,12 +22777,14 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
 app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!avansYetkili(req, "PM")) {
+    // 28.10.2026: avansYetkili async — await olmadan Promise her zaman "doğru" sayılıyor, kontrol hiç çalışmıyordu
+    if (!(await avansYetkili(req, "PM"))) {
       return res.status(403).json({ error: "PM onayı için yetkiniz yok" });
     }
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
+    if (await avansOnayOnKontrol(req, res, talep)) return;
     if (!["TALEP","ROLLOUT_MUDUR_ONAY"].includes(talep.durum)) {
       return res.status(400).json({ error: "Bu durumda PM onayı yapılamaz" });
     }
@@ -22415,6 +22809,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
+    if (await avansOnayOnKontrol(req, res, talep)) return;
     // Mobil pano direktöre TALEP/ROLLOUT/PM_ONAY'ı listeler (mobile-dashboard);
     // direktör yetkisi PM ve RM adımlarını da kapsadığından hepsi kabul edilir. (Zaten işlenmiş talep: 409)
     if (!["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(talep.durum)) {
@@ -22461,8 +22856,11 @@ app.put("/hr/is-avans/:id/reddet", avansOnayKapisi, async (req, res) => {
   try {
     const { id } = req.params;
     const { red_aciklama, reddeden_email } = req.body;
-    const onceki = (await pool.query("SELECT id, durum, firma FROM is_avans_talep WHERE id=$1", [id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum, firma, tarih, personel_id FROM is_avans_talep WHERE id=$1", [id])).rows[0];
     if (!onceki) return res.status(404).json({ error: "Kayıt bulunamadı" });
+    if (await avansOnayOnKontrol(req, res, onceki)) return;
+    // 28.10.2026: ödenmiş / reddedilmiş talep reddedilemez (ödeme kaydı yetim kalmasın)
+    if (["TAMAMLANDI", "REDDEDILDI"].includes(onceki.durum)) return res.status(409).json({ error: "Bu talep ödenmiş ya da zaten reddedilmiş; reddedilemez" });
     // 25.10.2026 (onay devri): devralan direktör yalnız kendi firmasının PM_ONAY'daki talebini reddeder; devredilmiş
     // firmanın direktör adımında eski listedeki direktör (RM/PM yetkisi de yoksa) red veremez
     if (["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(onceki.durum)) {

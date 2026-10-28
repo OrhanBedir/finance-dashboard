@@ -66,6 +66,7 @@ async function taseronAdlari(pool, id) {
 function kur(app, c) {
   // PM_KISISEL_EMAIL server.js'te bu modülden sonra tanımlı: istek anında c üzerinden okunur
   const { pool, authMiddleware, markaProfil, altMarkaKullanicisi, islemGecmisiYaz, isAtamaYetkiliMi, personelHesapEkstresi, pmKisiselEmailGorur } = c;
+  const taseronSuz = async (req) => (c.taseronFirmaSuzgeci ? await c.taseronFirmaSuzgeci(req) : null);
   const hata = (res, kod, mesaj) => res.status(kod).json({ ok: false, error: mesaj });
 
   // ── TAŞERON KAPSAMI ──────────────────────────────────────────────────────────────────────────────
@@ -506,7 +507,8 @@ function kur(app, c) {
     try {
       if (!isAtamaYetkiliMi(req)) return hata(res, 403, "İş atama yetkiniz yok");
       const r = await pool.query(`SELECT id, subcon_name, unvan, ana_firma FROM subcons WHERE COALESCE(aktif, true) ORDER BY COALESCE(unvan, subcon_name)`);
-      res.json({ ok: true, rows: r.rows.map((x) => ({ id: x.id, ad: x.unvan || x.subcon_name, kod: x.subcon_name, ana_firma: x.ana_firma })) });
+      const suz = await taseronSuz(req);
+      res.json({ ok: true, rows: r.rows.filter((x) => !suz || suz(x)).map((x) => ({ id: x.id, ad: x.unvan || x.subcon_name, kod: x.subcon_name, ana_firma: x.ana_firma })) });
     } catch (e) { hata(res, 500, e.message); }
   });
 
@@ -517,6 +519,11 @@ function kur(app, c) {
       if (!isAtamaYetkiliMi(req)) return hata(res, 403, "İş atama yetkiniz yok");
       const tid = Number(req.query.taseron_id);
       if (!tid) return hata(res, 400, "Taşeron seçin");
+      const suz = await taseronSuz(req);
+      if (suz) {
+        const t = (await pool.query(`SELECT subcon_name, ana_firma FROM subcons WHERE id = $1`, [tid])).rows[0];
+        if (!t || !suz(t)) return hata(res, 403, "Bu taşeron firmanızın kapsamında değil");
+      }
       const r = await pool.query(`SELECT k->>'kalem_kodu' AS kalem_kodu, k->>'aciklama' AS aciklama, k->>'birim' AS birim, (k->>'birim_fiyat')::numeric AS birim_fiyat,
           f.para_birimi, f.kdv_esasi, f.created_at
         FROM is_atama_fiyat f, jsonb_array_elements(f.kalemler) k WHERE f.taseron_id = $1 ORDER BY f.created_at DESC LIMIT 200`, [tid]);

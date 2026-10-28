@@ -7489,6 +7489,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   const [firmaKolu, setFirmaKolu] = useState("TUMU");
   const [firmaSozluk, setFirmaSozluk] = useState({});
   const [firmaMarkalar, setFirmaMarkalar] = useState([]);
+  const [alanKollari, setAlanKollari] = useState(null); // 28.10.2026: firma hesabında alan → iş kolu (form kilidi)
   const [errorMessage, setErrorMessage] = useState("");
   const [showRolloutEntryModal, setShowRolloutEntryModal] = useState(false);
   const [selectedRolloutSite, setSelectedRolloutSite] = useState("");
@@ -7772,6 +7773,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
       setRows(data.rows || []);
       setFirmaSozluk(data.firma_sozluk || {});
       setFirmaMarkalar(data.firma_markalar || []);
+      setAlanKollari(data.alan_kollari || null);
       if (!saltOkunur) try {
         const cleanupData = await fetchJson(`${API_BASE}/rollout/cleanup`, { withAuth: true });
         setCleanupRows(cleanupData.rows || []);
@@ -7788,8 +7790,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   }, []);
 
   useEffect(() => {
-    // DB migration + site type fix — salt okunur (İSG) görünümde çağrılmaz
-    if (!saltOkunur) {
+    // DB migration + site type fix — salt okunur (İSG) ve firma (Teknocenter) görünümünde çağrılmaz (ERC sistem bakımı)
+    if (!saltOkunur && !kapsamEtiketi) {
       fetch(`${API_BASE}/migrate`).catch(() => {});
       fetch(`${API_BASE}/rollout/fix-site-types`).catch(() => {});
     }
@@ -8383,6 +8385,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         <RolloutEntryModal
           siteCode={selectedRolloutSite}
           rows={rows}
+          alanKollari={alanKollari}
           onClose={() => setShowRolloutEntryModal(false)}
           onSaved={() => {
             setShowRolloutEntryModal(false);
@@ -27000,6 +27003,312 @@ function adlariTeklestir(rows, alanlar) {
     return o;
   });
 }
+// ═══ İŞ AVANSI ÖZET KARTLARI + BÜYÜK MODAL + HIZLI ONAY (28.10.2026, Orhan) ═══════════════════════════════════════
+// ERC ve alt marka (Teknocenter) İş Avansları ekranında ortak bileşen. Veri tek uçtan (/hr/is-avans/ozet): kart tutarı/adedi
+// ile modal satırları aynı yanıttan gelir. Hızlı onay mevcut onay ucunu (/hr/is-avans/:id/onayla) kullanır; yalnız mevcut
+// aşamayı ilerletir (tek_asama), ekranda görülen aşamayı gönderir (beklenen_durum) — talep arada ilerlediyse sunucu 409 döner.
+// "Onayla" düğmesi yalnız sunucunun benim_onaylayabilir dediği satırda görünür; sunucu yetkiyi ayrıca yeniden doğrular.
+const AVANS_AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+const avansGunUzun = (g) => { if (!g) return "—"; const [y, m, d] = String(g).split("-"); return `${Number(d)} ${AVANS_AYLAR[Number(m) - 1]}`; };
+const avansGunKisa = (g) => { if (!g) return "—"; const [y, m, d] = String(g).split("-"); return `${d}.${m}.${y}`; };
+const avansTutar = (t, pb = "TRY") => `${pb === "TRY" ? "₺" : pb + " "}${Number(t || 0).toLocaleString("tr-TR", { maximumFractionDigits: 2 })}`;
+// Para birimleri kurla birleştirilmez: { TRY: 1000, EUR: 50 } → "₺1.000 + EUR 50"
+const avansToplamMetni = (o) => { const e = Object.entries(o || {}).filter(([, v]) => v); return e.length ? e.map(([pb, v]) => avansTutar(v, pb)).join(" + ") : "₺0"; };
+const AVANS_SONRAKI_ASAMA = { RM: "PM onayı", PM: "Direktör onayı", PD: "Ödeme bekler (muhasebe)" };
+const AVANS_DURUM_ETIKET = { TALEP: "RM onayı bekliyor", ROLLOUT_MUDUR_ONAY: "PM onayı bekliyor", PM_ONAY: "Direktör onayı bekliyor",
+  DIREKTOR_ONAY: "Nihai onaylı · ödeme bekliyor", TAMAMLANDI: "Ödendi", REDDEDILDI: "Reddedildi" };
+const AVANS_MODAL_CSS = `
+.avm-ort{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:3000;padding:24px}
+.avm-kutu{background:#fff;border-radius:18px;width:min(1180px,100%);max-height:calc(100vh - 48px);display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(15,23,42,.35);text-align:left;color:#0f172a}
+.avm-bas{padding:20px 24px 14px;border-bottom:1px solid #e2e8f0;position:sticky;top:0;background:#fff;border-radius:18px 18px 0 0;z-index:2}
+.avm-sekmeler{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.avm-sekme{border:1.5px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;color:#334155;cursor:pointer}
+.avm-sekme[aria-selected=true]{background:#1e3a5f;border-color:#1e3a5f;color:#fff}
+.avm-filtre{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px;margin-top:12px}
+.avm-filtre input,.avm-filtre select{padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#fff;color:#0f172a;min-width:0}
+.avm-govde{overflow:auto;flex:1}
+.avm-satir,.avm-baslik{display:grid;grid-template-columns:88px 1.4fr 1.1fr 1.3fr 118px 120px 1.5fr 128px;gap:10px;align-items:center;padding:12px 24px}
+.avm-baslik{position:sticky;top:0;background:#f1f5f9;font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em;z-index:1;padding-top:9px;padding-bottom:9px}
+.avm-satir{border-bottom:1px solid #f1f5f9;font-size:13.5px}
+.avm-satir:hover{background:#f8fafc}
+.avm-k{font-size:11px;color:#64748b}
+.avm-btn{border:none;border-radius:10px;padding:8px 14px;font-weight:800;font-size:13px;cursor:pointer}
+.avm-btn:disabled{opacity:.55;cursor:wait}
+.avm-btn:focus-visible,.avm-sekme:focus-visible,.avm-kart:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}
+.avm-detay{grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-top:4px}
+.avm-onay{grid-column:1/-1;background:#ecfdf5;border:1.5px solid #6ee7b7;border-radius:12px;padding:14px 16px;margin-top:4px}
+.avm-etiket{display:inline-block;border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:700}
+.avm-kartlar{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px}
+.avm-kart{text-align:left;border-radius:16px;padding:14px 18px;cursor:pointer;border:1.5px solid #e2e8f0;background:#fff;font:inherit;color:inherit;transition:transform .12s, box-shadow .12s}
+.avm-kart:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(15,23,42,.12)}
+@media (max-width:760px){
+ .avm-ort{padding:0}
+ .avm-kutu{width:100%;height:100%;max-height:none;border-radius:0}
+ .avm-bas{border-radius:0;padding:14px 16px 10px}
+ .avm-filtre{grid-template-columns:1fr 1fr}
+ .avm-filtre input{grid-column:1/-1}
+ .avm-baslik{display:none}
+ .avm-satir{grid-template-columns:1fr auto;padding:12px 16px;gap:6px}
+ .avm-satir > .avm-h{grid-column:1/-1}
+}`;
+
+function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnaylandi, firmaSabit }) {
+  const ilkSekme = (sekmeler.find((s) => s.varsayilan && s.ids.length) || sekmeler.find((s) => s.ids.length) || sekmeler[0]).kod;
+  const [sekme, setSekme] = useState(ilkSekme);
+  const [ara, setAra] = useState("");
+  const [firma, setFirma] = useState("");
+  const [bolge, setBolge] = useState("");
+  const [asama, setAsama] = useState("");
+  const [detay, setDetay] = useState(null);
+  const [onayAcik, setOnayAcik] = useState(null);
+  const [firmaSecim, setFirmaSecim] = useState({});
+  const [isleniyor, setIsleniyor] = useState(null);
+  const [mesaj, setMesaj] = useState(null);
+  const [gecmis, setGecmis] = useState(null);
+  const kutu = useRef(null);
+  const kilit = useRef(new Set()); // aynı talep için ikinci istek gitmez (çift tıklama / Enter tekrarı)
+  const kapatRef = useRef(onKapat); kapatRef.current = onKapat;
+
+  // Odak yönetimi: açılışta arama kutusu; Tab modal içinde döner; Escape kapatır. Sayfa kaydırması kilitlenir.
+  useEffect(() => {
+    kutu.current?.querySelector("[data-ilk-odak]")?.focus();
+    const tus = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); kapatRef.current(); return; }
+      if (e.key !== "Tab" || !kutu.current) return;
+      const odaklar = [...kutu.current.querySelectorAll("button:not([disabled]),input,select,a[href],[tabindex]:not([tabindex='-1'])")].filter((x) => x.offsetParent !== null);
+      if (!odaklar.length) return;
+      const ilk = odaklar[0], son = odaklar[odaklar.length - 1];
+      if (e.shiftKey && document.activeElement === ilk) { e.preventDefault(); son.focus(); }
+      else if (!e.shiftKey && document.activeElement === son) { e.preventDefault(); ilk.focus(); }
+    };
+    document.addEventListener("keydown", tus);
+    const eski = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", tus); document.body.style.overflow = eski; };
+  }, []);
+
+  const aktif = sekmeler.find((s) => s.kod === sekme) || sekmeler[0];
+  const tumSatirlar = sekmeler.flatMap((s) => s.ids).map((id) => byId.get(id)).filter(Boolean);
+  const secenek = (f) => [...new Set(tumSatirlar.map(f).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "tr"));
+  const q = ara.trim().toLocaleLowerCase("tr-TR");
+  const satirlar = aktif.ids.map((id) => byId.get(id)).filter(Boolean).filter((x) => {
+    if (firma && (x.firma || "—") !== firma) return false;
+    if (bolge && x.bolge !== bolge) return false;
+    if (asama && x.asama_tr !== asama) return false;
+    if (!q) return true;
+    return [x.talep_no, x.talep_eden, x.personel, x.firma, x.bolge, x.proje, x.gider_turu, x.plaka, x.aciklama, x.not_aciklama,
+      ...(x.onaycilar || []).map((o) => o.ad)].some((v) => String(v || "").toLocaleLowerCase("tr-TR").includes(q));
+  });
+  const toplam = {}; satirlar.forEach((x) => { toplam[x.para_birimi] = (toplam[x.para_birimi] || 0) + x.tutar; });
+
+  const onayla = async (x) => {
+    if (kilit.current.has(x.id)) return;
+    const f = firmaSabit || firmaSecim[x.id] || x.firma || "";
+    if (x.firma_secim_gerekli && !f) { setMesaj({ tur: "hata", metin: "Onaydan önce avansın ödeneceği firmayı seçin." }); return; }
+    kilit.current.add(x.id); setIsleniyor(x.id); setMesaj(null);
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/${x.id}/onayla`, {
+        method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" },
+        body: JSON.stringify({ beklenen_durum: x.durum, tek_asama: true, ...(f ? { firma: f } : {}) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMesaj({ tur: "hata", metin: `${x.talep_no}: ${d.error || "Onay verilemedi"}` });
+        if (r.status === 409) await onOnaylandi(); // güncel aşamayı göster; modal ve filtreler açık kalır
+        return;
+      }
+      setOnayAcik(null);
+      setMesaj({ tur: "ok", metin: `${x.talep_no} — ${x.asama_tr} verildi. Sıradaki: ${AVANS_SONRAKI_ASAMA[x.asama] || "—"}. Ödeme yapılmadı.` });
+      await onOnaylandi();
+    } catch (e) {
+      setMesaj({ tur: "hata", metin: `${x.talep_no}: ${e.message}` });
+    } finally { kilit.current.delete(x.id); setIsleniyor(null); }
+  };
+
+  return (
+    <div className="avm-ort" onMouseDown={(e) => { if (e.target === e.currentTarget) onKapat(); }}>
+      <style>{AVANS_MODAL_CSS}</style>
+      <div className="avm-kutu" ref={kutu} role="dialog" aria-modal="true" aria-labelledby="avm-baslik">
+        <div className="avm-bas">
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 id="avm-baslik" style={{ margin: 0, fontSize: "20px", fontWeight: 800, textAlign: "left" }}>{baslik}</h2>
+              {aciklama && <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>{aciklama}</div>}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e3a5f" }}>{avansToplamMetni(toplam)}</div>
+              <div className="avm-k">{satirlar.length} talep (filtrede)</div>
+            </div>
+            <button type="button" className="avm-btn" onClick={onKapat} aria-label="Kapat" style={{ background: "#f1f5f9", color: "#334155", fontSize: "16px" }}>✕</button>
+          </div>
+          {sekmeler.length > 1 && (
+            <div className="avm-sekmeler" role="tablist">
+              {sekmeler.map((s) => (
+                <button key={s.kod} type="button" role="tab" className="avm-sekme" aria-selected={s.kod === sekme}
+                  onClick={() => { setSekme(s.kod); setDetay(null); setOnayAcik(null); }}>
+                  {s.ad} · {s.ids.length}{s.tutar ? ` · ${avansToplamMetni(s.tutar)}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="avm-filtre">
+            <input data-ilk-odak type="search" value={ara} onChange={(e) => setAra(e.target.value)} placeholder="Ara: talep no, kişi, proje, açıklama, onaycı…" aria-label="Ara" />
+            <select value={firma} onChange={(e) => setFirma(e.target.value)} aria-label="Firma"><option value="">Tüm firmalar</option>{secenek((x) => x.firma || "—").map((v) => <option key={v} value={v}>{v === "—" ? "Firma seçilmemiş" : altMarkaEtiket(v) || v}</option>)}</select>
+            <select value={bolge} onChange={(e) => setBolge(e.target.value)} aria-label="Bölge"><option value="">Tüm bölgeler</option>{secenek((x) => x.bolge).map((v) => <option key={v} value={v}>{v}</option>)}</select>
+            <select value={asama} onChange={(e) => setAsama(e.target.value)} aria-label="Aşama"><option value="">Tüm aşamalar</option>{secenek((x) => x.asama_tr).map((v) => <option key={v} value={v}>{v}</option>)}</select>
+          </div>
+          {mesaj && (
+            <div role={mesaj.tur === "hata" ? "alert" : "status"} style={{ marginTop: "10px", padding: "9px 12px", borderRadius: "10px", fontSize: "13px", fontWeight: 600,
+              background: mesaj.tur === "hata" ? "#fef2f2" : "#ecfdf5", color: mesaj.tur === "hata" ? "#991b1b" : "#065f46", border: `1px solid ${mesaj.tur === "hata" ? "#fecaca" : "#a7f3d0"}` }}>
+              {mesaj.metin}
+            </div>
+          )}
+        </div>
+        <div className="avm-govde">
+          <div className="avm-baslik" role="row">
+            <div>Talep</div><div>Talep eden / personel</div><div>Firma · bölge</div><div>Saha / iş</div><div>Tarih / son ödeme</div><div style={{ textAlign: "right" }}>Tutar</div><div>Aşama / onay kimde</div><div />
+          </div>
+          {!satirlar.length && <div style={{ padding: "40px 24px", textAlign: "center", color: "#94a3b8", fontSize: "14px" }}>Bu görünümde kayıt yok.</div>}
+          {satirlar.map((x) => (
+            <div key={x.id} className="avm-satir" role="row">
+              <div><b>{x.talep_no}</b><div className="avm-k">{x.para_birimi}</div></div>
+              <div style={{ minWidth: 0 }}><div style={{ fontWeight: 700 }}>{x.talep_eden || "—"}</div>{x.personel && x.personel !== x.talep_eden && <div className="avm-k">Kime: {x.personel}</div>}</div>
+              <div><div>{x.firma ? altMarkaEtiket(x.firma) || x.firma : <span className="avm-k">Firma seçilmemiş</span>}</div><div className="avm-k">{x.bolge || "—"}</div></div>
+              <div className="avm-h" style={{ minWidth: 0 }}><div>{x.proje || x.gider_turu || "—"}</div><div className="avm-k" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[x.gider_turu && x.proje ? x.gider_turu : null, x.plaka, x.aciklama].filter(Boolean).join(" · ")}</div></div>
+              <div><div>{avansGunKisa(x.tarih)}</div><div className="avm-k" style={{ color: x.son_odeme_tarihi ? "#64748b" : "#b45309" }}>Son ödeme: {x.son_odeme_tarihi ? avansGunKisa(x.son_odeme_tarihi) : "vade yok"}</div></div>
+              <div style={{ textAlign: "right", fontWeight: 800, fontSize: "15px" }}>{avansTutar(x.tutar, x.para_birimi)}</div>
+              <div className="avm-h">
+                <span className="avm-etiket" style={{ background: x.durum === "TAMAMLANDI" ? "#dcfce7" : x.durum === "DIREKTOR_ONAY" ? "#fef3c7" : "#e0e7ff", color: x.durum === "TAMAMLANDI" ? "#166534" : x.durum === "DIREKTOR_ONAY" ? "#92400e" : "#3730a3" }}>
+                  {x.durum === "TAMAMLANDI" ? `Ödendi · ${avansGunKisa(x.odeme_tarihi)}` : AVANS_DURUM_ETIKET[x.durum] || x.durum}
+                </span>
+                {x.asama && x.asama !== "ODE" && !x.benim_onaylayabilir && (
+                  <div className="avm-k" style={{ marginTop: "3px" }}>Onay: {(x.onaycilar || []).map((o) => o.ad + (o.devir ? " (devir)" : "")).join(", ") || "—"}</div>
+                )}
+                {x.benim_onaylayabilir && <div className="avm-k" style={{ marginTop: "3px", color: "#047857", fontWeight: 700 }}>Onayınızı bekliyor</div>}
+              </div>
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                {x.benim_onaylayabilir && (
+                  <button type="button" className="avm-btn" style={{ background: "#059669", color: "#fff" }} disabled={isleniyor === x.id}
+                    aria-expanded={onayAcik === x.id} onClick={() => { setOnayAcik(onayAcik === x.id ? null : x.id); setMesaj(null); }}>Onayla</button>
+                )}
+                <button type="button" className="avm-btn" style={{ background: "#eef2ff", color: "#3730a3" }} aria-expanded={detay === x.id}
+                  onClick={() => setDetay(detay === x.id ? null : x.id)}>{detay === x.id ? "Kapat" : "Detay"}</button>
+              </div>
+              {onayAcik === x.id && (
+                <div className="avm-onay">
+                  <div style={{ fontWeight: 800, marginBottom: "6px" }}>Onay özeti — {x.talep_no}</div>
+                  <div style={{ fontSize: "13.5px", lineHeight: 1.6 }}>
+                    <b>{x.talep_eden}</b>{x.personel && x.personel !== x.talep_eden ? ` (kime: ${x.personel})` : ""} · <b>{avansTutar(x.tutar, x.para_birimi)}</b><br />
+                    Verilecek onay: <b>{x.asama_tr}</b> → sıradaki aşama: <b>{AVANS_SONRAKI_ASAMA[x.asama]}</b>. Sonraki onaylar atlanmaz; <b>bu işlem ödeme yapmaz.</b>
+                  </div>
+                  {x.firma_secim_gerekli && !firmaSabit && (
+                    <label style={{ display: "block", marginTop: "10px", fontSize: "13px", fontWeight: 700 }}>
+                      Avans hangi firmadan ödenecek?
+                      <select value={firmaSecim[x.id] ?? x.firma ?? ""} onChange={(e) => setFirmaSecim((m) => ({ ...m, [x.id]: e.target.value }))}
+                        style={{ display: "block", marginTop: "4px", padding: "8px 10px", borderRadius: "8px", border: "1.5px solid #a7f3d0", fontSize: "14px" }}>
+                        <option value="">Seçiniz</option>
+                        <option value={GUNCEL_ALT_MARKA}>{altMarkaEtiket(GUNCEL_ALT_MARKA)}</option>
+                        <option value="ERC">🏢 Şimşek (ERC)</option>
+                      </select>
+                    </label>
+                  )}
+                  <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                    <button type="button" className="avm-btn" style={{ background: "#059669", color: "#fff" }} disabled={isleniyor === x.id} onClick={() => onayla(x)}>
+                      {isleniyor === x.id ? "Onaylanıyor…" : `${x.asama_tr} ver`}
+                    </button>
+                    <button type="button" className="avm-btn" style={{ background: "#fff", color: "#334155", border: "1px solid #cbd5e1" }} disabled={isleniyor === x.id} onClick={() => setOnayAcik(null)}>Vazgeç</button>
+                  </div>
+                </div>
+              )}
+              {detay === x.id && (
+                <div className="avm-detay">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: "8px 18px", fontSize: "13px" }}>
+                    <div><span className="avm-k">Gider türü</span><div>{x.gider_turu || "—"}</div></div>
+                    <div><span className="avm-k">Proje / saha</span><div>{x.proje || "—"}</div></div>
+                    <div><span className="avm-k">Plaka</span><div>{x.plaka || "—"}</div></div>
+                    <div><span className="avm-k">Talep tarihi / son ödeme</span><div>{avansGunKisa(x.tarih)} / {x.son_odeme_tarihi ? avansGunKisa(x.son_odeme_tarihi) : "vade bilgisi yok"}</div></div>
+                    <div><span className="avm-k">Mevcut aşama</span><div>{x.asama_tr || AVANS_DURUM_ETIKET[x.durum] || x.durum}</div></div>
+                    {x.asama && <div><span className="avm-k">Onay kimde</span><div>{(x.onaycilar || []).map((o) => o.ad + (o.devir ? " (devir)" : "")).join(", ") || "—"}</div></div>}
+                  </div>
+                  <div style={{ marginTop: "10px", fontSize: "13.5px", whiteSpace: "pre-wrap", lineHeight: 1.55 }}><span className="avm-k">Açıklama</span><div>{x.aciklama || "—"}</div></div>
+                  {x.not_aciklama && <div style={{ marginTop: "8px", fontSize: "13.5px", whiteSpace: "pre-wrap" }}><span className="avm-k">Not</span><div>{x.not_aciklama}</div></div>}
+                  <button type="button" className="avm-btn" style={{ marginTop: "10px", background: "#fff", color: "#1e3a5f", border: "1px solid #cbd5e1" }}
+                    onClick={() => setGecmis(gecmis === x.id ? null : x.id)}>🕘 Talep geçmişi</button>
+                  {gecmis === x.id && <IslemGecmisPanelSarmal id={x.id} onClose={() => setGecmis(null)} />}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+const IslemGecmisPanelSarmal = ({ id, onClose }) => <div style={{ marginTop: "8px" }}><IslemGecmisiPanel modul="avans" id={id} onClose={onClose} /></div>;
+
+function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
+  const [veri, setVeri] = useState(null);
+  const [hata, setHata] = useState(null);
+  const [modal, setModal] = useState(null);
+  const tetik = useRef(null);
+  const yukle = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/ozet`, { headers: AUTH_H() });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || "Özet alınamadı");
+      setVeri(d); setHata(null);
+    } catch (e) { setHata(e.message); }
+  }, []);
+  useEffect(() => { yukle(); }, [yukle, surum]);
+  if (!veri) return hata ? <div style={{ fontSize: "12.5px", color: "#b91c1c", marginBottom: "12px" }}>Özet kartları yüklenemedi: {hata}</div> : null;
+  const k = veri.kartlar;
+  const byId = new Map(veri.satirlar.map((x) => [x.id, x]));
+  const ac = (tur) => (e) => { tetik.current = e.currentTarget; setModal(tur); };
+  const kapat = () => { setModal(null); setTimeout(() => tetik.current?.focus(), 0); };
+  const degisti = async () => { await yukle(); onDegisti && onDegisti(); };
+  const bg = k.bugun_gereken;
+  const modaller = {
+    son_odeme: { baslik: `📅 ${avansGunUzun(k.son_odeme.tarih)} — Son ödeme günü`, aciklama: `En son ödeme yapılan gün (${avansGunKisa(k.son_odeme.tarih)}) ödenen avanslar · saat dilimi Europe/Istanbul`,
+      sekmeler: [{ kod: "odenen", ad: "Ödenenler", ids: k.son_odeme.ids, tutar: k.son_odeme.tutar }] },
+    onay: { baslik: "⏳ Onay Bekleyenler", aciklama: "Rollout müdürü / PM / direktör onayındaki talepler. Onayla düğmesi yalnız onayınızı bekleyen satırlarda görünür.",
+      sekmeler: [{ kod: "benim", ad: "Onayımı bekleyen", ids: k.onay_bekleyen.benim.ids, tutar: k.onay_bekleyen.benim.tutar, varsayilan: true },
+        { kod: "tum", ad: "Tümü", ids: k.onay_bekleyen.ids, tutar: k.onay_bekleyen.tutar }] },
+    bugun: { baslik: `💰 Bugün Gereken Avans — ${avansGunUzun(veri.bugun)}`, aciklama: "Ana tutar: son ödeme günü bugün olan, nihai onayı tamamlanmış ve henüz ödenmemiş talepler. Diğer sekmeler ana tutara eklenmez.",
+      sekmeler: [{ kod: "hazir", ad: "Ödemeye hazır (bugün)", ids: bg.odemeye_hazir.ids, tutar: bg.odemeye_hazir.tutar, varsayilan: true },
+        { kod: "bekleyen", ad: "Bugün vadeli, onay bekleyen", ids: bg.bugun_onay_bekleyen.ids, tutar: bg.bugun_onay_bekleyen.tutar },
+        { kod: "geciken", ad: "Geciken", ids: bg.geciken.ids, tutar: bg.geciken.tutar },
+        { kod: "eksik", ad: "Vade bilgisi eksik", ids: bg.vade_eksik.ids, tutar: bg.vade_eksik.tutar }] },
+  };
+  const m = modal && modaller[modal];
+  return (
+    <>
+      <style>{AVANS_MODAL_CSS}</style>
+      <div className="avm-kartlar">
+        <button type="button" className="avm-kart" onClick={ac("son_odeme")} style={{ borderLeft: "5px solid #2563eb" }} aria-haspopup="dialog">
+          <div style={{ fontSize: "11px", fontWeight: 800, color: "#64748b" }}>📅 {k.son_odeme.tarih ? `${avansGunUzun(k.son_odeme.tarih)} — Son ödeme günü` : "Son ödeme günü"}</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e3a5f", marginTop: "2px" }}>{avansToplamMetni(k.son_odeme.tutar)}</div>
+          <div style={{ fontSize: "11.5px", color: "#94a3b8" }}>{k.son_odeme.tarih ? `${k.son_odeme.adet} avans ödendi · ${avansGunKisa(k.son_odeme.tarih)}` : "Henüz ödeme yok"}</div>
+        </button>
+        <button type="button" className="avm-kart" onClick={ac("onay")} aria-haspopup="dialog"
+          style={{ background: k.onay_bekleyen.benim.adet ? "#ecfdf5" : "#fffbeb", borderColor: k.onay_bekleyen.benim.adet ? "#6ee7b7" : "#fcd34d" }}>
+          <div style={{ fontSize: "11px", fontWeight: 800, color: "#92400e" }}>⏳ Onay Bekleyenler</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, color: "#b45309", marginTop: "2px" }}>{avansToplamMetni(k.onay_bekleyen.tutar)}</div>
+          <div style={{ fontSize: "11.5px", color: "#92400e" }}>{k.onay_bekleyen.adet} talep{k.onay_bekleyen.benim.adet ? <b style={{ color: "#047857" }}> · {k.onay_bekleyen.benim.adet} onayınızı bekliyor</b> : ""}</div>
+        </button>
+        <button type="button" className="avm-kart" onClick={ac("bugun")} aria-haspopup="dialog"
+          style={{ background: "linear-gradient(135deg,#b45309,#d97706)", color: "#fff", borderColor: "transparent", boxShadow: "0 4px 14px rgba(180,83,9,.3)" }}>
+          <div style={{ fontSize: "11px", fontWeight: 800, opacity: 0.85 }}>💰 Bugün Gereken Avans</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>{avansToplamMetni(bg.odemeye_hazir.tutar)} <span style={{ fontSize: "12px", fontWeight: 600, opacity: 0.85 }}>ödemeye hazır kalan</span></div>
+          <div style={{ fontSize: "11.5px", opacity: 0.9 }}>{bg.odemeye_hazir.adet} talep</div>
+          <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "4px" }}>
+            Bugün vadeli onay bekleyen {avansToplamMetni(bg.bugun_onay_bekleyen.tutar)} · Geciken {avansToplamMetni(bg.geciken.tutar)}{bg.vade_eksik.adet ? ` · Vade bilgisi eksik: ${bg.vade_eksik.adet}` : ""}
+          </div>
+        </button>
+      </div>
+      {m && <AvansListeModal key={modal} baslik={m.baslik} aciklama={m.aciklama} sekmeler={m.sekmeler} byId={byId} onKapat={kapat} onOnaylandi={degisti} firmaSabit={firmaSabit} />}
+    </>
+  );
+}
+
 function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "", initialKapsam = "", yeniTetik = 0 }) {
   const [list, setList] = useState([]);
   const [gecmis, setGecmis] = useState(null); // 20.10.2026: kayıt bazında işlem geçmişi (ortak IslemGecmisiPanel)
@@ -27007,7 +27316,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({
-    personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0],
+    personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], son_odeme_tarihi: new Date().toISOString().split("T")[0],
     aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: ""
   });
   const [searchText, setSearchText] = useState("");
@@ -27234,7 +27543,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   const openNew = () => {
     setEditingId(null);
     setFarkliArac(false);
-    setForm({ personel_id: "", tutar: "", tarih: new Date().toISOString().split("T")[0], aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "", firma: _altMarka ? _marka : "" });
+    const _bugunT = new Date().toISOString().split("T")[0];
+    setForm({ personel_id: "", tutar: "", tarih: _bugunT, son_odeme_tarihi: _bugunT, aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "", firma: _altMarka ? _marka : "" });
     setShowModal(true);
   };
 
@@ -27243,7 +27553,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   const openEdit = (t) => {
     setEditingId(t.id);
     setFarkliArac(true); // düzenlemede mevcut plaka korunur, otomatik doldurma devreye girmez
-    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || (_altMarka ? _marka : "") });
+    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, son_odeme_tarihi: t.son_odeme_tarihi ? (String(t.son_odeme_tarihi).split("T")[0]) : "", aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || (_altMarka ? _marka : "") });
     setShowModal(true);
   };
 
@@ -27730,8 +28040,10 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
       </div>
       <div style={{ fontSize:"12.5px", fontWeight:700, color:"#6b7a90", margin:"-6px 0 10px" }}>{KAPSAM_AD[kapsam]} — {visibleList.length} sonuç</div>
 
-      {/* Ödeme özeti kartları: filtreye uyan kayıtlardan fiilen ÖDENEN avanslar,
-          ödeme gününe göre gruplanır. Filtre yokken yalnız son ödeme günü gösterilir. */}
+      {/* 28.10.2026: özet kartları (son ödeme günü / onay bekleyenler / bugün gereken avans) — sunucudan, büyük modal + hızlı onay.
+          Kart ve modal aynı yanıttan; kapsam liste ile aynı (alt marka yalnız kendi firması). */}
+      {!isRequester && <AvansOzetKartlari surum={list} onDegisti={load} firmaSabit={_altMarka ? _marka : null} />}
+      {/* Filtre etkinken: filtreye uyan kayıtlardan fiilen ÖDENEN avanslar, ödeme gününe göre gruplanır. */}
       {!isRequester && (() => {
         const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis);
         // Ödenen kartları: tarih filtresi TALEP tarihine değil ÖDEME tarihine
@@ -27757,7 +28069,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         const bekleyenToplam = bekleyenOdeme.reduce((s, t) => s + Number(t.tutar || 0), 0);
         const surecteHepsi = list.filter(t => ["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(t.durum));
         const surecteToplam = surecteHepsi.reduce((s, t) => s + Number(t.tutar || 0), 0);
-        if (!odenmis.length && !bekleyenOdeme.length && !surecteHepsi.length) return null;
+        if (!filtreAktif || !odenmis.length) return null;
         const gunler = {};
         odenmis.forEach(t => {
           const g = String(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi).split("T")[0];
@@ -27772,20 +28084,6 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         const gunUzun = (g) => { const [y, m, d] = g.split("-"); return `${Number(d)} ${AYLAR[Number(m) - 1]}`; };
         return (
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "stretch", marginBottom: "16px" }}>
-            {bekleyenOdeme.length > 0 && (
-              <div style={{ background: "linear-gradient(135deg, #b45309, #d97706)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "180px", boxShadow: "0 4px 14px rgba(180,83,9,0.3)" }}>
-                <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.8, letterSpacing: "0.05em" }}>💰 ÖDEME BEKLEYEN — BUGÜN GEREKEN</div>
-                <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>₺{bekleyenToplam.toLocaleString("tr-TR")}</div>
-                <div style={{ fontSize: "11px", opacity: 0.8 }}>{bekleyenOdeme.length} onaylı talep muhasebede{surecteHepsi.length ? ` · onay sürecinde ₺${surecteToplam.toLocaleString("tr-TR")} (${surecteHepsi.length})` : ""}</div>
-              </div>
-            )}
-            {bekleyenOdeme.length === 0 && surecteHepsi.length > 0 && (
-              <div style={{ background: "#fffbeb", border: "1.5px solid #fcd34d", borderRadius: "14px", padding: "12px 18px", minWidth: "160px" }}>
-                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#92400e" }}>⏳ ONAY SÜRECİNDE</div>
-                <div style={{ fontSize: "19px", fontWeight: 800, color: "#b45309", marginTop: "2px" }}>₺{surecteToplam.toLocaleString("tr-TR")}</div>
-                <div style={{ fontSize: "11px", color: "#b45309", opacity: 0.8 }}>{surecteHepsi.length} talep · onaylanınca ödemeye düşer</div>
-              </div>
-            )}
             {filtreAktif && odenmis.length > 0 && (
               <div style={{ background: "linear-gradient(135deg, #1e3a5f, #2d5a8f)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "170px", boxShadow: "0 4px 14px rgba(30,58,95,0.25)" }}>
                 <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.75, letterSpacing: "0.05em" }}>💸 FİLTREDE ÖDENEN TOPLAM</div>
@@ -27795,7 +28093,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
             )}
             {gosterilen.map(([g, v]) => (
               <div key={g} style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: "4px solid #2563eb", borderRadius: "14px", padding: "12px 18px", minWidth: "140px" }}>
-                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b" }}>📅 {gunUzun(g)}{!filtreAktif ? " (son ödeme günü)" : ""}</div>
+                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b" }}>📅 {gunUzun(g)}</div>
                 <div style={{ fontSize: "19px", fontWeight: 800, color: "#1e3a5f", marginTop: "2px" }}>₺{v.toplam.toLocaleString("tr-TR")}</div>
                 <div style={{ fontSize: "11px", color: "#94a3b8" }}>{v.adet} avans ödendi · {gunFmt(g)}</div>
               </div>
@@ -28123,8 +28421,15 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Tarih <span style={{ color: "#dc2626" }}>*</span>
-                  <input type="date" required value={form.tarih} onChange={e => setForm(f => ({...f, tarih: e.target.value}))}
+                  {/* Son ödeme günü talep tarihini izler (kullanıcı ayrıca değiştirmediyse) */}
+                  <input type="date" required value={form.tarih} onChange={e => setForm(f => ({...f, tarih: e.target.value, son_odeme_tarihi: !f.son_odeme_tarihi || f.son_odeme_tarihi === f.tarih ? e.target.value : f.son_odeme_tarihi}))}
                     style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
+                </label>
+                <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
+                  Son ödeme günü
+                  <input type="date" value={form.son_odeme_tarihi || ""} onChange={e => setForm(f => ({...f, son_odeme_tarihi: e.target.value}))}
+                    style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #e5e7eb", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", background: "#fff", color: "#1f2937" }} />
+                  <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 500 }}>Avansın en geç ödenmesi gereken gün (varsayılan: talep tarihi)</span>
                 </label>
                 <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                   Araç Plakası (opsiyonel)
@@ -41362,7 +41667,7 @@ function CleanupModal({ record, rolloutRows, onClose, onSaved }) {
   );
 }
 
-function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
+function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
   const existingRow = (() => {
     const raw = rows.find(
       (r) =>
@@ -41621,6 +41926,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
       if (result.row?.id) {
         setEnhProjeSaving(true);
         for (const { files, type, field, setter } of belgeUploads) {
+          if (kilitli(field)) continue;
           const mevcut = String(form[field] || "").split("\n").filter(Boolean);
           const degisti = mevcut.join("\n") !== String(existingRow[field] || "");
           if (!files.length && !degisti) continue;
@@ -41639,15 +41945,15 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         }
         setEnhProjeSaving(false);
         // Kabul belgeleri ek alanları (tarih / aynı evrak / not)
-        try {
+        if (!kilitli("hasarsizlik_tarihi")) try {
           await fetchJson(`${API_BASE}/rollout/${result.row.id}/kabul-belgeleri`, {
             method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
             body: JSON.stringify({ hasarsizlik_tarihi: form.hasarsizlik_tarihi || null, memnuniyet_tarihi: form.memnuniyet_tarihi || null,
               memnuniyet_ayni_belge: !!form.memnuniyet_ayni_belge, kabul_belge_not: form.kabul_belge_not || null })
           });
         } catch(e) { alert("Kabul belgeleri bilgisi kaydedilemedi: " + e.message); }
-        // ENH Perakende ek alanları
-        try {
+        // ENH Perakende ek alanları (tutar / ödeme finansal alan — firma hesabından gönderilmez)
+        if (!kolSahip) try {
           await fetchJson(`${API_BASE}/rollout/${result.row.id}/enh-perakende`, {
             method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
             body: JSON.stringify({ enh_perakende_tarihi: form.enh_perakende_tarihi || null, enh_perakende_odeme_tarihi: form.enh_perakende_odeme_tarihi || null,
@@ -41656,7 +41962,9 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
         } catch(e) { alert("ENH Perakende bilgisi kaydedilemedi: " + e.message); }
       }
 
-      alert("Kayıt başarıyla kaydedildi");
+      alert(result.korunan_alanlar?.length
+        ? `Kayıt kaydedildi. Başka firmanın iş koluna / ortak saha bilgisine ait ${result.korunan_alanlar.length} alan değiştirilmedi.`
+        : "Kayıt başarıyla kaydedildi");
       onSaved();
     } catch (err) {
       console.error("ROLLOUT SAVE ERROR:", err);
@@ -41690,7 +41998,29 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     }
   };
 
+  // 28.10.2026 — firma (Teknocenter) hesabı: yalnız kendi iş kolunun alanları düzenlenir. Başka firmanın iş kolu, ortak saha
+  // bilgisi (proje kodu, saha tipi, malzeme durumu…) ve finansal alanlar kilitli; sunucu aynı kuralı ayrıca uygular.
+  const kolSahip = existingRow._kol_sahip || null;
+  const MARKA_GIZLI_ALAN = ["enh_perakende_tutar", "enh_perakende_odeme_tarihi", "enh_perakende_dekont_url"];
+  const kilitli = (field) => {
+    if (!kolSahip) return false;
+    if (MARKA_GIZLI_ALAN.includes(field)) return true;
+    const kolu = alanKollari?.[field];
+    if (!kolu) return !!existingRow.id; // ortak saha bilgisi: yeni kayıtta girilir, sonra değiştirilmez
+    return kolSahip[kolu] !== "BEN";
+  };
+  const kilitKutusu = (label, field) => (
+    <label className="modalField">
+      <span>{label}</span>
+      <div title={alanKollari?.[field] ? "Bu iş kolu başka firmaya ait ya da sahibi belirsiz" : "Ortak saha bilgisi — firma hesabından değiştirilmez"}
+        style={{ background:"#f8fafc", border:"1px dashed #cbd5e1", borderRadius:"8px", padding:"8px 12px", color:"#64748b", fontSize:"13px", display:"flex", alignItems:"center", gap:"6px" }}>
+        <span aria-hidden="true">🔒</span>
+        {alanKollari?.[field] ? (form[field] && form[field] !== "__NA__" ? String(form[field]) : "Başka firmanın iş kolu") : (form[field] || "—")}
+      </div>
+    </label>
+  );
   const input = (label, field, type = "text", naMsg = "Huawei sorumluluğunda") => {
+    if (kilitli(field)) return kilitKutusu(label, field);
     const isNA = form[field] === "__NA__";
     return (
       <label className="modalField">
@@ -41732,7 +42062,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     );
   };
 
-  const select = (label, field, options) => (
+  const select = (label, field, options) => kilitli(field) ? kilitKutusu(label, field) : (
     <label className="modalField">
       <span>{label}</span>
       <select
@@ -41764,6 +42094,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
     }
   };
   const belgeWidget = (urlField, files, setFiles) => {
+    if (kilitli(urlField)) return null; // başka firmanın iş kolu belgesi: ekranda gösterilmez, yüklenemez
     const urls = String(form[urlField] || "").split("\n").filter(Boolean);
     // 11.09.2026: .xls (eski Excel) kabul edilmiyordu — Excel/Office/arşiv/görsel türleri genişletildi
     const accept = ".pdf,.jpg,.jpeg,.png,.heic,.tif,.tiff,.dwg,.dxf,.xlsx,.xls,.xlsm,.xlsb,.csv,.doc,.docx,.ppt,.pptx,.txt,.msg,.eml,.kmz,.kml,.zip,.rar,.7z";
@@ -41839,6 +42170,12 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
           <h2>Rollout Veri Girişi</h2>
           <button onClick={onClose}>✕</button>
         </div>
+        {kolSahip && (
+          <div role="note" style={{ margin:"0 0 12px", padding:"10px 14px", borderRadius:"10px", background:"#eff6ff", border:"1px solid #bfdbfe", color:"#1e3a8a", fontSize:"13px", textAlign:"left" }}>
+            Yalnız firmanızın iş kollarındaki alanları değiştirebilirsiniz. 🔒 işaretli alanlar başka firmaya ait iş kolu ya da ortak saha bilgisidir;
+            finansal alanlar firma hesabında gösterilmez.
+          </div>
+        )}
 
         {/* ===== Temel Bilgiler ===== */}
         <div className="modalGrid">
@@ -41984,10 +42321,11 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             {input("Tesisat No", "enh_tesisat_no")}
             {input("Sözleşme Tarihi", "enh_perakende_tarihi", "date")}
             {input("Ödeme Tarihi", "enh_perakende_odeme_tarihi", "date")}
+            {kilitli("enh_perakende_tutar") ? kilitKutusu("Ödenen Tutar (₺)", "enh_perakende_tutar") : (
             <label className="modalField">
               <span>Ödenen Tutar (₺)</span>
               <input type="number" step="0.01" value={form.enh_perakende_tutar ?? ""} onChange={e => handleChange("enh_perakende_tutar", e.target.value)} placeholder="Abonelik / bağlantı bedeli" />
-            </label>
+            </label>)}
             {input("Perakende Notu", "enh_perakende_not")}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(260px, 1fr))", gap:"12px", marginTop:"10px" }}>
@@ -42085,7 +42423,7 @@ function RolloutEntryModal({ siteCode, rows, onClose, onSaved }) {
             Kapat
           </button>
 
-          {existingRow.id && (
+          {existingRow.id && !(kolSahip && Object.values(kolSahip).includes("DIGER")) && (
             <button
               className="tab"
               onClick={deleteRollout}
