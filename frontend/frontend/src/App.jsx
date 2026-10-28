@@ -6736,11 +6736,224 @@ function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu
   );
 }
 
+/* ═══ ROLLOUT SAHA HARİTASI (28.10.2026, Orhan) ═══════════════════════════════════════════════════════════════════
+   Saf SVG + "Haritadan Gör" ile aynı il sınırları/projeksiyon (dış tile/CDN yok; saha adresi üçüncü tarafa gitmez).
+   Veri: GET /rollout/harita (sunucuda firma kapsamı — başka firmanın sahası pin/arama sonucu olarak gelmez) ∩ Rollout ekranının
+   o anki filtrelenmiş satırları (bölge, firma/taşeron, tip, QC … filtreleriyle tutarlı). Bir fiziksel saha = tek pin;
+   pin kartında o sahadaki iş kayıtları ayrı. 2026 = doğrulanmış gerçekleşen iş tarihi; tarih eksikse ayrıca gösterilir.
+   Konum kaynağı (TSSR koordinatı / adres / elle) ve doğruluğu kartta; Bursa deposuna kuş uçuşu her zaman, karayolu yalnız
+   yönlendirme servisi yapılandırılmışsa. Kalabalık bölgede kümelendirme; yakınlaşınca Site ID etiketi. */
+function RolloutHaritaPin({ x, y, k, secili, uyari, onClick }) {
+  return (
+    <g transform={`translate(${x},${y}) scale(${k})`} onClick={onClick} style={{ cursor: "pointer" }}>
+      <path d="M0 0 C-6 -8 -10 -12 -10 -18 A10 10 0 1 1 10 -18 C10 -12 6 -8 0 0Z" fill={secili ? "#dc2626" : uyari ? "#d97706" : "#2563eb"} stroke="#fff" strokeWidth="2" />
+      <circle cx="0" cy="-18" r="3.6" fill="#fff" />
+    </g>
+  );
+}
+function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
+  const feats = Array.isArray(TR_ILLER?.features) ? TR_ILLER.features : [];
+  const proj = (lng, lat) => [(lng - 25.5) * 100 * Math.cos(39 * Math.PI / 180), (42.4 - lat) * 100];
+  const iller = useMemo(() => feats.map((f) => {
+    const polys = f.geometry.type === "MultiPolygon" ? f.geometry.coordinates : [f.geometry.coordinates];
+    const d = polys.map((poly) => poly.map((ring) => ring.map(([lng, lat], i) => { const [x, y] = proj(lng, lat); return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`; }).join("") + "Z").join("")).join("");
+    return { ad: f.properties?.name || "", d };
+  }), [feats]); // eslint-disable-line
+  const [veri, setVeri] = useState(null);
+  const [hata, setHata] = useState("");
+  const [bolge, setBolge] = useState(bolgeVarsayilan || "ALL");
+  const [yalniz2026, setYalniz2026] = useState(true);
+  const [arama, setArama] = useState("");
+  const [aramaAcik, setAramaAcik] = useState(false);
+  const [secili, setSecili] = useState(null); // fiziksel_id
+  const [tekSaha, setTekSaha] = useState(false);
+  const [rota, setRota] = useState(null);
+  const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
+  const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null);
+  useEffect(() => {
+    (async () => {
+      try { const d = await fetchJson(`${API_BASE}/rollout/harita`, { withAuth: true }); if (!d?.ok) throw new Error(d?.error || "Harita verisi alınamadı"); setVeri(d); }
+      catch (e) { setHata(e.message || "Harita verisi alınamadı"); }
+    })();
+  }, []);
+  useEffect(() => { const f = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
+  // Rollout ekranının filtrelenmiş iş kayıtları — haritadaki kapsam bununla kesişir (aynı bölge/firma/tip filtreleri)
+  const ekranKodlari = useMemo(() => new Set((satirlar || []).map((r) => String(r.site_code || "").toUpperCase().trim())), [satirlar]);
+  const bolgeler = useMemo(() => [...new Set((veri?.sahalar || []).map((s) => s.bolge).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr")), [veri]);
+  const kapsamdaki = useMemo(() => (veri?.sahalar || [])
+    .map((s) => ({ ...s, isler: s.isler.filter((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) }))
+    .filter((s) => s.isler.length)
+    .filter((s) => bolge === "ALL" || String(s.bolge).toLocaleLowerCase("tr-TR") === String(bolge).toLocaleLowerCase("tr-TR"))
+    .filter((s) => !yalniz2026 || s.isler.some((i) => i.gerceklesen_2026)), [veri, ekranKodlari, bolge, yalniz2026]);
+  const tarihEksik = useMemo(() => (veri?.sahalar || []).filter((s) => s.isler.some((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) && s.tarih_eksik), [veri, ekranKodlari]);
+  const gorunen = tekSaha && secili ? kapsamdaki.filter((s) => s.fiziksel_id === secili) : kapsamdaki;
+  const pinli = gorunen.filter((s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk));
+  const konumsuz = gorunen.filter((s) => !(s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk)));
+  const kutuyaSigdir = (liste) => {
+    const pts = liste.map((s) => proj(s.konum.lng, s.konum.lat));
+    if (veri?.depo?.dogrulandi && !liste.length) pts.push(proj(veri.depo.lng, veri.depo.lat));
+    if (!pts.length) { setView({ x: 0, y: 0, w: 1800, h: 900 }); return; }
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const w = Math.max(maxX - minX, 60), h = Math.max(maxY - minY, 40), pad = Math.max(w, h) * 0.25;
+    setView({ x: minX - pad, y: minY - pad, w: w + 2 * pad, h: h + 2 * pad });
+  };
+  useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, secili]); // eslint-disable-line
+  useEffect(() => {
+    const el = svgRef.current; if (!el) return;
+    const onWheel = (ev) => {
+      ev.preventDefault();
+      const r = el.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height;
+      setView((v) => { const k = ev.deltaY > 0 ? 1.2 : 1 / 1.2; const w = v.w * k, h = v.h * k; return { x: v.x + (v.w - w) * px, y: v.y + (v.h - h) * py, w, h }; });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [veri]);
+  const zoom = (k) => setView((v) => ({ x: v.x + (v.w - v.w * k) / 2, y: v.y + (v.h - v.h * k) / 2, w: v.w * k, h: v.h * k }));
+  const surukle = (cx, cy) => {
+    const d = drag.current; if (!d || !svgRef.current) return;
+    const r = svgRef.current.getBoundingClientRect();
+    setView({ x: d.v.x - (cx - d.cx) / r.width * d.v.w, y: d.v.y - (cy - d.cy) / r.height * d.v.h, w: d.v.w, h: d.v.h });
+  };
+  // Kümelendirme: ekran ızgarası (görünüm genişliğinin 1/14'ü); yakınlaşınca kümeler açılır
+  const hucre = view.w / 14;
+  const kumeler = useMemo(() => {
+    const m = {};
+    for (const s of pinli) { const [x, y] = proj(s.konum.lng, s.konum.lat); const key = `${Math.floor(x / hucre)}|${Math.floor(y / hucre)}`; (m[key] = m[key] || []).push({ s, x, y }); }
+    return Object.values(m);
+  }, [pinli, hucre]); // eslint-disable-line
+  const sec = async (id) => {
+    setSecili(id); setRota(null); setAramaAcik(false);
+    try { const d = await fetchJson(`${API_BASE}/rollout/harita/rota?fiziksel_id=${encodeURIComponent(id)}`, { withAuth: true }); setRota(d); } catch (e) { setRota({ ok: false, hata: e.message }); }
+  };
+  const aramaSonuclari = useMemo(() => {
+    const q = arama.trim().toLocaleUpperCase("tr-TR"); if (!q) return [];
+    return kapsamdaki.filter((s) => s.fiziksel_id.includes(q) || s.isler.some((i) => String(i.site_code).toUpperCase().includes(q)) || String(s.saha_adi || "").toLocaleUpperCase("tr-TR").includes(q)).slice(0, 12);
+  }, [arama, kapsamdaki]);
+  const temizle = () => { setArama(""); setSecili(null); setTekSaha(false); setBolge("ALL"); setRota(null); };
+  const seciliSaha = (veri?.sahalar || []).find((s) => s.fiziksel_id === secili) || null;
+  const sw = view.w / 1100, pinK = Math.max(0.35, view.w / 1400), etiketGoster = view.w < 260;
+  const depo = veri?.depo;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+      <style>{`
+        .rhmap { background:#fff; border-radius:14px; width:min(1280px, 100%); height:min(860px, 100%); display:flex; flex-direction:column; overflow:hidden; }
+        .rhmap-ust { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid #e2e8f0; }
+        .rhmap-govde { flex:1; display:flex; min-height:0; }
+        .rhmap-harita { flex:1; position:relative; background:#f8fafc; min-width:0; }
+        .rhmap-panel { width:340px; border-left:1px solid #e2e8f0; overflow-y:auto; padding:12px 14px; font-size:12.5px; }
+        @media (max-width: 820px) { .rhmap-govde { flex-direction:column; } .rhmap-panel { width:auto; max-height:42%; border-left:none; border-top:1px solid #e2e8f0; } }
+        .rhmap-btn { border:1.5px solid #cbd5e1; background:#fff; color:#1e293b; border-radius:8px; padding:6px 11px; font-size:12.5px; font-weight:700; cursor:pointer; }
+        .rhmap-zoom { position:absolute; right:12px; top:12px; display:flex; flex-direction:column; gap:4px; }
+        .rhmap-zoom button { width:34px; height:34px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:18px; font-weight:800; cursor:pointer; }
+        .rhmap-sonuc { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 8px 20px rgba(15,23,42,.15); z-index:5; max-height:260px; overflow-y:auto; }
+        .rhmap-sonuc button { display:block; width:100%; text-align:left; border:none; background:none; padding:7px 10px; font-size:12.5px; cursor:pointer; }
+        .rhmap-sonuc button:hover, .rhmap-sonuc button:focus { background:#eff6ff; }
+        .rhmap-k { color:#64748b; font-size:11px; }
+      `}</style>
+      <div className="rhmap" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Rollout saha haritası">
+        <div className="rhmap-ust">
+          <b style={{ fontSize: 15 }}>🗺 Rollout Saha Haritası</b>
+          {veri?.kapsam && <span className="rhmap-k">🏢 {veri.kapsam} kapsamı</span>}
+          <select className="rhmap-btn" value={bolge} onChange={(e) => { setBolge(e.target.value); setTekSaha(false); }} aria-label="Bölge filtresi">
+            <option value="ALL">Tüm bölgeler</option>
+            {bolgeler.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5 }}><input type="checkbox" checked={yalniz2026} onChange={(e) => setYalniz2026(e.target.checked)} /> Yalnız 2026'da iş gerçekleşenler</label>
+          <div style={{ position: "relative", minWidth: 240 }}>
+            <input ref={aramaRef} value={arama} onChange={(e) => { setArama(e.target.value); setAramaAcik(true); }} onFocus={() => setAramaAcik(true)} placeholder="Site ID / iş kodu ara (ör. KA3737)" aria-label="Site ID ya da iş kodu ara"
+              style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 12.5, boxSizing: "border-box" }} />
+            {aramaAcik && aramaSonuclari.length > 0 && (
+              <div className="rhmap-sonuc" role="listbox">
+                {aramaSonuclari.map((s) => <button key={s.fiziksel_id} type="button" role="option" onClick={() => { setArama(s.fiziksel_id); setTekSaha(true); sec(s.fiziksel_id); }}>
+                  <b>{s.fiziksel_id}</b> <span className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}{s.konum ? "" : " · konum yok"}</span></button>)}
+              </div>
+            )}
+          </div>
+          <button type="button" className="rhmap-btn" onClick={temizle}>Tümünü göster</button>
+          <button type="button" className="rhmap-btn" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="Haritayı kapat (Esc)">✕</button>
+        </div>
+        <div className="rhmap-govde">
+          <div className="rhmap-harita">
+            {hata ? <div style={{ padding: 24, color: "#b91c1c", fontWeight: 700 }}>Harita verisi alınamadı: {hata}</div> : !veri ? <div style={{ padding: 24, color: "#64748b" }}>Harita yükleniyor…</div> : (
+              <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} style={{ width: "100%", height: "100%", display: "block", cursor: drag.current ? "grabbing" : "grab" }}
+                onMouseDown={(e) => { drag.current = { cx: e.clientX, cy: e.clientY, v: view }; }} onMouseMove={(e) => surukle(e.clientX, e.clientY)} onMouseUp={() => { drag.current = null; }} onMouseLeave={() => { drag.current = null; }}>
+                {iller.map((il) => <path key={il.ad} d={il.d} fill="#eef2f7" stroke="#cbd5e1" strokeWidth={sw} />)}
+                {depo?.dogrulandi && (() => { const [x, y] = proj(depo.lng, depo.lat); return (
+                  <g transform={`translate(${x},${y}) scale(${pinK})`}><rect x="-9" y="-9" width="18" height="18" rx="3" fill="#0f172a" stroke="#fff" strokeWidth="2" /><text x="0" y="4" textAnchor="middle" fontSize="11" fill="#fff" fontWeight="800">D</text>
+                    {etiketGoster && <text x="12" y="4" fontSize="10" fill="#0f172a" fontWeight="700">Bursa Depo</text>}</g>); })()}
+                {kumeler.map((grup) => {
+                  if (grup.length > 1 && !tekSaha) {
+                    const cx = grup.reduce((a, b) => a + b.x, 0) / grup.length, cy = grup.reduce((a, b) => a + b.y, 0) / grup.length;
+                    return (
+                      <g key={grup[0].s.fiziksel_id} transform={`translate(${cx},${cy}) scale(${pinK})`} style={{ cursor: "pointer" }}
+                        onClick={(e) => { e.stopPropagation(); kutuyaSigdir(grup.map((g) => g.s)); }} role="button" aria-label={`${grup.length} sahalık küme — yakınlaştır`}>
+                        <circle r="15" fill="#1e3a5f" stroke="#fff" strokeWidth="2.5" opacity=".92" /><text y="5" textAnchor="middle" fontSize="13" fill="#fff" fontWeight="800">{grup.length}</text>
+                      </g>);
+                  }
+                  return grup.map(({ s, x, y }) => (
+                    <g key={s.fiziksel_id}>
+                      <RolloutHaritaPin x={x} y={y} k={pinK} secili={s.fiziksel_id === secili} uyari={s.konum.dogruluk !== "KESIN"} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }} />
+                      {(etiketGoster || s.fiziksel_id === secili) && <text x={x + 9 * pinK} y={y - 16 * pinK} fontSize={11 * pinK} fontWeight="800" fill="#0f172a" stroke="#fff" strokeWidth={3 * pinK} paintOrder="stroke">{s.fiziksel_id}</text>}
+                    </g>));
+                })}
+              </svg>
+            )}
+            {veri && <div className="rhmap-zoom"><button type="button" onClick={() => zoom(1 / 1.4)} aria-label="Yakınlaştır">+</button><button type="button" onClick={() => zoom(1.4)} aria-label="Uzaklaştır">−</button></div>}
+            <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0) · dış harita servisi kullanılmaz</div>
+          </div>
+          <div className="rhmap-panel">
+            {veri && <div style={{ marginBottom: 10 }}>
+              <b>{pinli.length}</b> saha haritada · <b>{konumsuz.length}</b> sahanın konumu yok{tarihEksik.length ? <> · <b>{tarihEksik.length}</b> sahada gerçekleşen iş tarihi eksik (2026 sayılmadı)</> : null}
+              <div className="rhmap-k">Konum kaynağı TSSR koordinatıdır; adresten konum üretme (coğrafi kodlama) kapalı.</div>
+            </div>}
+            {seciliSaha ? (
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{seciliSaha.fiziksel_id}</div>
+                <div>{seciliSaha.saha_adi || "Saha adı yok"}</div>
+                <div className="rhmap-k">{[seciliSaha.bolge, seciliSaha.il, seciliSaha.ilce].filter(Boolean).join(" · ")}</div>
+                {seciliSaha.adres && <div style={{ marginTop: 4 }}>{seciliSaha.adres}</div>}
+                <div style={{ marginTop: 8, fontWeight: 700 }}>İş kayıtları</div>
+                {seciliSaha.isler.map((i) => <div key={i.site_code} style={{ padding: "4px 0", borderTop: "1px solid #f1f5f9" }}>
+                  <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{i.site_code}</span> <span className="rhmap-k">{i.site_type}{i.rf_subcon ? ` · ${i.rf_subcon}` : ""}</span>
+                  <div className="rhmap-k">{i.tarih_yok ? "Gerçekleşen iş tarihi yok" : `Son gerçekleşen: ${i.son_gerceklesen}${i.gerceklesen_2026 ? " (2026)" : ""}`}</div></div>)}
+                <div style={{ marginTop: 8, fontWeight: 700 }}>Konum</div>
+                {seciliSaha.konum ? <div>
+                  {seciliSaha.konum.lat.toFixed(6)}, {seciliSaha.konum.lng.toFixed(6)}
+                  <div className="rhmap-k">Kaynak: {seciliSaha.konum.kaynak === "TSSR_KOORDINAT" ? "TSSR'da yazan koordinat" : seciliSaha.konum.kaynak} · doğruluk: {seciliSaha.konum.dogruluk}{seciliSaha.konum.belge_url ? <> · <a href={`${seciliSaha.konum.belge_url}${seciliSaha.konum.sayfa ? `#page=${seciliSaha.konum.sayfa}` : ""}`} target="_blank" rel="noreferrer">belge s. {seciliSaha.konum.sayfa || "?"}</a></> : null}</div>
+                  {(seciliSaha.konum.uyarilar || []).map((u, i) => <div key={i} style={{ color: "#b45309" }}>⚠ {u}</div>)}
+                </div> : <div className="rhmap-k">{seciliSaha.konum_durumu === "YALNIZ_ADRES" ? "Yalnız adres var; koordinat yok (coğrafi kodlama kapalı)." : "Konum yok — sahanın TSSR'ı okunmamış ya da koordinat yazmıyor."}</div>}
+                <div style={{ marginTop: 10, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+                  <div style={{ fontWeight: 700 }}>Bursa deposuna uzaklık</div>
+                  {!depo?.dogrulandi ? <div style={{ color: "#b45309" }}>{depo?.mesaj || "Depo konumu doğrulanamadı."}</div> : <>
+                    <div className="rhmap-k">{depo.ad} — {depo.adres}</div>
+                    <div>Kuş uçuşu: <b>{rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km ?? "—"}{(rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km) != null ? " km" : ""}</b></div>
+                    <div>Karayolu: {!rota ? "hesaplanıyor…" : rota.karayolu?.durum === "OK" ? <b>{rota.karayolu.km.toFixed(1)} km · ~{Math.round(rota.karayolu.dakika)} dk</b> : <span className="rhmap-k">{rota.karayolu?.mesaj || rota.hata || "hesaplanmadı"}</span>}</div>
+                  </>}
+                </div>
+                <button type="button" className="rhmap-btn" style={{ marginTop: 10 }} onClick={() => { setSecili(null); setTekSaha(false); setArama(""); }}>Seçimi kaldır</button>
+              </div>
+            ) : (
+              <div>
+                <div className="rhmap-k" style={{ marginBottom: 6 }}>Bir pine tıklayın ya da Site ID arayın.</div>
+                {konumsuz.length > 0 && <details><summary style={{ cursor: "pointer", fontWeight: 700 }}>Konumu olmayan sahalar ({konumsuz.length})</summary>
+                  {konumsuz.slice(0, 200).map((s) => <div key={s.fiziksel_id} style={{ padding: "3px 0" }}><button type="button" className="tbk-link" style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", padding: 0 }} onClick={() => sec(s.fiziksel_id)}>{s.fiziksel_id}</button> <span className="rhmap-k">{s.konum_durumu === "YALNIZ_ADRES" ? "yalnız adres" : s.konum_durumu === "YOK" ? "TSSR koordinatı yok" : `koordinat ${s.konum_durumu}`}</span></div>)}
+                </details>}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, kapsamEtiketi = null }) {
   const [belgeSecRow, setBelgeSecRow] = useState(null);
   const [showCleanupPanel, setShowCleanupPanel] = useState(false);
   // İş Atama (Faz 1, 03.09.2026): yetkili görür; açık iş sayısı butonda
   const [showIsAtama, setShowIsAtama] = useState(false);
+  const [showHarita, setShowHarita] = useState(false); // 28.10.2026: Rollout saha haritası (salt görüntüleme)
   const [isAtamaBaslangic, setIsAtamaBaslangic] = useState(null); // iş kolu görünümünden ön dolu atama
   const [isAtamaYetkili, setIsAtamaYetkili] = useState(false);
   // İş kolu görünümü (03.09.2026): NS sahalarda saha × iş kolu; filtre seçiliyse liste modu
@@ -7391,6 +7604,12 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
               🗂 İş Ata{acikIsSayisi ? ` (${acikIsSayisi})` : ""}
             </button>
           )}
+          {/* Saha haritası (28.10.2026): İş Ata'nın hemen sağında; görüntüleme yetkisi olan herkes (salt okunur dahil) */}
+          <button type="button" onClick={() => setShowHarita(true)} title="Filtrelenmiş sahaları haritada göster"
+            style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
+            🗺 Harita
+          </button>
+          {showHarita && <RolloutHaritaModal satirlar={filteredRows} bolgeVarsayilan={regionFilter} onClose={() => setShowHarita(false)} />}
         </div>
       </div>
       {firmaSecim.length > 0 && (
@@ -8163,17 +8382,24 @@ function BoqSurumKarti({ oneri, surumler = [], secim, onSecim, saltOkunur = fals
   );
 }
 
-/* ═══ TSSR ve BoQ KONTROLÜ (27.10.2026) — Akıllı Kontrol alanına eklenen bölüm ═══════════════════════════════
-   GET /po/tssr-boq-kontrol?site=&surum= : yapay zekâ TSSR bulguları + seçili BoQ kataloğu + PR/PO kalemleri birlikte
-   değerlendirilir. "Talebe ekle" kullanıcı işlemidir (gride YENİ satır olarak eklenir, Kaydet'e kadar DB'ye yazılmaz).
-   Uyarılar gerekçeyle "dikkate alınmadı" olarak kaydedilebilir (POST …/karar). Yapay zekâ çalışmazsa "TSSR kontrolü
-   tamamlanamadı" gösterilir — "sorun yok" denmez, form verisi korunur. */
+/* ═══ TSSR ve BoQ KONTROLÜ (28.10.2026, Orhan) — kompakt özet kartı + sağdan açılan inceleme paneli ═══════════════
+   GET /po/tssr-boq-kontrol?site=&surum= : yapay zekâ TSSR analizi (önbellekli) + seçili BoQ'nun paket SOW bilgi tabanı +
+   PR/PO + günlük işler. Akıllı Asistan kartı da aynı sunucu analizini kullanır (çelişen ikinci motor yok).
+   Kart: fiziksel Site ID · teknik kapsam · BoQ · analiz durumu · paket / kontrol sayısı · "İncele".
+   Panel (masaüstünde geniş yan panel, dar ekranda tam ekran): 1) TSSR özeti ve istenen işler 2) önerilen paketler
+   3) pakete dahil / ek talep gerektiren işler 4) PR/PO karşılaştırması ve uyarılar 5) kaynak belgeler.
+   "+ PR'a ekle" kullanıcı işlemidir (gride YENİ satır ekler, Kaydet'e kadar DB'ye yazılmaz). Panel kapanıp açılınca
+   seçimler ve gerekçe girdileri korunur (durum bu bileşende tutulur). Escape kapatır, odak İncele düğmesine döner. */
 function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = false }) {
   const [veri, setVeri] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState("");
-  const [acik, setAcik] = useState(true);
+  const [panelAcik, setPanelAcik] = useState(false);
   const [gerekceler, setGerekceler] = useState({});
+  const [paketSecimi, setPaketSecimi] = useState({}); // bant → seçilen paket kodu (alternatifli paketlerde)
+  const [eklenenler, setEklenenler] = useState({});    // kod → true (bu oturumda "+ PR'a ekle" yapılanlar)
+  const [kaynakAcik, setKaynakAcik] = useState({});
+  const inceleRef = useRef(null), panelRef = useRef(null), kapatRef = useRef(null);
   const yukle = useCallback(async (yenile = false) => {
     const s = String(siteCode || "").trim().toUpperCase();
     if (!s || s.length < 4) { setVeri(null); return; }
@@ -8185,6 +8411,24 @@ function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = fals
     finally { setYukleniyor(false); }
   }, [siteCode, surum]);
   useEffect(() => { const t = setTimeout(() => yukle(false), 700); return () => clearTimeout(t); }, [yukle]);
+  useEffect(() => { setPaketSecimi({}); setEklenenler({}); setGerekceler({}); }, [siteCode]);
+  // Klavye: Escape kapatır; Tab panel içinde döner; kapanınca odak İncele'ye
+  useEffect(() => {
+    if (!panelAcik) return;
+    const onceki = document.activeElement;
+    setTimeout(() => kapatRef.current && kapatRef.current.focus(), 0);
+    const f = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); setPanelAcik(false); return; }
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const odaklar = panelRef.current.querySelectorAll('button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!odaklar.length) return;
+      const ilk = odaklar[0], son = odaklar[odaklar.length - 1];
+      if (e.shiftKey && document.activeElement === ilk) { e.preventDefault(); son.focus(); }
+      else if (!e.shiftKey && document.activeElement === son) { e.preventDefault(); ilk.focus(); }
+    };
+    document.addEventListener("keydown", f);
+    return () => { document.removeEventListener("keydown", f); (inceleRef.current || onceki)?.focus?.(); };
+  }, [panelAcik]);
   const karar = async (anahtar, k, gerekce) => {
     try {
       const d = await fetchJson(`${API_BASE}/po/tssr-boq-kontrol/karar`, { method: "POST", withAuth: true, headers: { "Content-Type": "application/json" },
@@ -8193,103 +8437,251 @@ function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = fals
       await yukle(false);
     } catch (e) { alert(`Karar kaydedilemedi: ${e.message}`); }
   };
-  const fiyat = (a) => a.birim_fiyat === null || a.birim_fiyat === undefined ? "fiyat yok" : `${Number(a.birim_fiyat).toLocaleString("tr-TR")} ${a.para_birimi || ""}`;
-  const R = { kontrol: { cizgi:"#fde68a", ink:"#b45309", zemin:"#fffbeb" }, oneri: { cizgi:"#c7d2fe", ink:"#4338ca", zemin:"#eef2ff" }, yok: { cizgi:"#e2e8f0", ink:"#64748b", zemin:"#f8fafc" } };
-  const belge = veri?.tssr_belge;
+  const prEkle = (kod, aciklama, adet) => { if (!onTalebeEkle) return; onTalebeEkle(kod, aciklama, adet); setEklenenler((p) => ({ ...p, [kod]: true })); };
+  const tl = (n, para) => (n === null || n === undefined ? "fiyat doğrulanamadı" : `${Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} ${para || ""}`);
+  const sayfaLink = (url, sayfa) => (url ? `${url}${sayfa ? `#page=${sayfa}` : ""}` : null);
+  const tb = veri?.tssr_belge || null;
+  const pk = veri?.paket || null;
+  const belgeYok = veri && !tb && !(veri.tssr_belgeler || []).length;
+  const servisHatasi = veri && veri.tssr_durumu === "TAMAMLANAMADI" && (veri.tssr_belgeler || []).length > 0;
+  const kismi = !!(tb && ((tb.eksik_sayfalar || []).length || (veri.tssr_belgeler || []).some((b) => b.durum === "KISMI")));
+  const katalogEksik = veri && veri.katalog_hazir === false;
+  const durum = yukleniyor ? { ad: "Yükleniyor…", renk: "#64748b", zemin: "#f1f5f9" }
+    : hata ? { ad: "Servis hatası", renk: "#b91c1c", zemin: "#fee2e2" }
+    : !veri ? { ad: "—", renk: "#64748b", zemin: "#f1f5f9" }
+    : belgeYok ? { ad: "TSSR belgesi yok", renk: "#64748b", zemin: "#f1f5f9" }
+    : servisHatasi ? { ad: "Analiz tamamlanamadı", renk: "#b91c1c", zemin: "#fee2e2" }
+    : katalogEksik ? { ad: "Katalog eksik", renk: "#b45309", zemin: "#fef3c7" }
+    : kismi ? { ad: "Kısmi analiz", renk: "#b45309", zemin: "#fef3c7" }
+    : { ad: "Analiz hazır", renk: "#166534", zemin: "#dcfce7" };
+  const paketSay = veri?.ozet?.paket_sayisi ?? 0;
+  const kontrolSay = veri?.ozet?.kontrol ?? (veri?.uyarilar || []).filter((u) => u.seviye === "KONTROL" && !u.karar).length;
+  const fizikselId = veri?.saha_eslesme?.fiziksel_id || String(siteCode || "").toUpperCase().split("_")[0];
+  const ISDURUM = { PAKETE_DAHIL: ["Pakete dahil", "#166534", "#dcfce7"], PAKET: ["Paket", "#4338ca", "#e0e7ff"], EK_TALEP: ["Ek talep (SOW hariç)", "#b45309", "#fef3c7"],
+    EK_ADAY: ["Kontrol gerekli", "#b45309", "#fff7ed"], KONTROL: ["Kontrol gerekli", "#b45309", "#fff7ed"], PAKETSIZ: ["Paket yok", "#475569", "#f1f5f9"] };
+  const Rozet = ({ t, r, z }) => <span className="tbk-rozet" style={{ color: r, background: z }}>{t}</span>;
+  const Kaynak = ({ id, children, baslik = "Kaynak" }) => (
+    <span>
+      <button type="button" className="tbk-link" aria-expanded={!!kaynakAcik[id]} onClick={() => setKaynakAcik((p) => ({ ...p, [id]: !p[id] }))}>{kaynakAcik[id] ? `▾ ${baslik}` : `▸ ${baslik}`}</button>
+      {kaynakAcik[id] && <div className="tbk-kaynak">{children}</div>}
+    </span>
+  );
+  const onerilerMap = {}; (veri?.oneriler || []).forEach((o) => { onerilerMap[o.is.sira] = o; });
+
   return (
-    <div style={{ marginBottom:12, background:"#fff", border:"1px solid #e2e8f0", borderRadius:12, padding:"12px 14px" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-        <div style={{ fontWeight:800, fontSize:13, color:"#0f172a", cursor:"pointer" }} onClick={() => setAcik((p) => !p)}>{acik ? "▾" : "▸"} 🧠 TSSR ve BoQ Kontrolü</div>
-        <div style={{ fontSize:11.5, color:"#64748b" }}>Yapay zekâ TSSR incelemesi + {veri?.surum_ad || (surum ? surum : "seçili BoQ")} kataloğu · öneriler kaynak sayfaya bağlı</div>
-        {yukleniyor && <span style={{ fontSize:11, color:"#94a3b8" }}>inceleniyor…</span>}
-        <div style={{ marginLeft:"auto", display:"flex", gap:6, flexWrap:"wrap" }}>
-          {belge && <span title={`${belge.dosya}${belge.revizyon ? " · " + belge.revizyon : ""} · ${belge.sayfa_sayisi || "?"} sayfa · ${belge.kaynak === "onbellek" ? "önbellekten" : "yeni okundu"}`}
-            style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#ede9fe", color:"#6d28d9" }}>
-            TSSR {belge.tarih ? belge.tarih.split("-").reverse().join(".") : ""}{belge.revizyon ? ` · ${belge.revizyon}` : ""} · {belge.is_sayisi} iş{belge.revizyon_sayisi > 1 ? ` · ${belge.revizyon_sayisi} revizyon` : ""}</span>}
-          {veri && veri.tssr_durumu !== "TAMAM" && <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#fee2e2", color:"#b91c1c" }}>TSSR kontrolü tamamlanamadı</span>}
-          {veri && veri.katalog_hazir === false && <span style={{ fontSize:10.5, fontWeight:700, borderRadius:999, padding:"2px 9px", background:"#f1f5f9", color:"#64748b" }}>Katalog içe alınmamış</span>}
-          <button type="button" onClick={() => yukle(true)} disabled={yukleniyor || saltOkunur} title="TSSR'ı yeniden okut (yeni dosya/revizyon yüklendiyse)"
-            style={{ border:"1px solid #e2e8f0", background:"#f8fafc", color:"#475569", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>TSSR'ı yeniden oku</button>
-        </div>
-      </div>
-      {!acik ? null : hata ? (
-        <div style={{ marginTop:8, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"8px 12px", fontSize:12.5, color:"#b91c1c", fontWeight:600 }}>TSSR kontrolü tamamlanamadı: {hata}. PR verileri korunuyor; "sorun yok" anlamına gelmez.</div>
-      ) : !veri ? null : (
-        <div style={{ marginTop:8 }}>
-          {veri.tssr_mesaj && <div style={{ fontSize:12, color: veri.tssr_durumu === "TAMAM" ? "#64748b" : "#b45309", marginBottom:6 }}>{veri.tssr_mesaj}{veri.tssr_hata ? ` (${veri.tssr_hata})` : ""}</div>}
-          {(veri.tssr_belgeler || []).some((b) => b.durum === "HATA") && (
-            <div style={{ fontSize:11.5, color:"#b91c1c", marginBottom:6 }}>Okunamayan belge: {veri.tssr_belgeler.filter((b) => b.durum === "HATA").map((b) => `${b.dosya} (${b.hata})`).join("; ")}</div>
-          )}
-          {/* Uyarılar */}
-          {(veri.uyarilar || []).length > 0 && (
-            <div style={{ background:R.kontrol.zemin, border:`1px solid ${R.kontrol.cizgi}`, borderRadius:10, padding:"10px 10px 5px", marginBottom:8 }}>
-              <div style={{ fontSize:11, fontWeight:800, color:R.kontrol.ink, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Yanlış / eksik talep uyarıları · {veri.uyarilar.length}</div>
-              {veri.uyarilar.map((u) => (
-                <div key={u.anahtar} style={{ background:"#fff", border:`1px solid ${R.kontrol.cizgi}`, borderRadius:9, padding:"7px 10px", marginBottom:5, opacity: u.karar ? 0.6 : 1 }}>
-                  <div style={{ display:"flex", gap:8, alignItems:"flex-start", flexWrap:"wrap" }}>
-                    <span style={{ fontSize:10, fontWeight:800, borderRadius:5, padding:"1px 6px", background: u.seviye === "KONTROL" ? "#fef3c7" : "#e0e7ff", color: u.seviye === "KONTROL" ? "#b45309" : "#4338ca" }}>{u.seviye === "KONTROL" ? "Kontrol gerekli" : "Öneri"}</span>
-                    <span style={{ fontSize:10, fontWeight:700, color:"#94a3b8" }}>{u.tip}</span>
-                    <div style={{ flex:1, minWidth:200, fontSize:12.5, color:"#0f172a", fontWeight:600 }}>{u.mesaj}</div>
-                  </div>
-                  {u.dayanak && <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2, fontStyle:"italic" }}>Dayanak: {u.dayanak}</div>}
-                  {u.karar ? (
-                    <div style={{ fontSize:11, color:"#64748b", marginTop:4 }}>Dikkate alınmadı — {u.karar.gerekce} ({u.karar.kullanici}, {String(u.karar.zaman).slice(0, 10)})
-                      {!saltOkunur && <button type="button" onClick={() => karar(u.anahtar, "GERI_AL", "")} style={{ marginLeft:8, border:"none", background:"transparent", color:"#2563eb", cursor:"pointer", fontSize:11 }}>geri al</button>}</div>
-                  ) : !saltOkunur && (
-                    <div style={{ display:"flex", gap:6, marginTop:5, alignItems:"center", flexWrap:"wrap" }}>
-                      {u.item_code && u.tip === "EKSIK" && <button type="button" onClick={() => onTalebeEkle && onTalebeEkle(u.item_code, u.item_description, 1)}
-                        style={{ border:"none", background:"#4338ca", color:"#fff", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>+ Talebe ekle</button>}
-                      <input value={gerekceler[u.anahtar] || ""} onChange={(e) => setGerekceler((p) => ({ ...p, [u.anahtar]: e.target.value }))} placeholder="Dikkate almama gerekçesi"
-                        style={{ flex:1, minWidth:180, padding:"4px 8px", border:"1px solid #e2e8f0", borderRadius:7, fontSize:11.5 }} />
-                      <button type="button" onClick={() => karar(u.anahtar, "DIKKATE_ALINMADI", gerekceler[u.anahtar] || "")}
-                        style={{ border:"1px solid #e2e8f0", background:"#f8fafc", color:"#475569", borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer" }}>Dikkate alma</button>
-                    </div>
-                  )}
-                </div>
-              ))}
+    <div className="tbk-kart" aria-live="polite">
+      <style>{`
+        .tbk-kart { margin-bottom:12px; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+        .tbk-baslik { font-weight:800; font-size:13px; color:#0f172a; }
+        .tbk-chip { font-size:11.5px; color:#334155; background:#f8fafc; border:1px solid #e2e8f0; border-radius:999px; padding:3px 10px; white-space:nowrap; }
+        .tbk-chip b { color:#0f172a; }
+        .tbk-rozet { font-size:10.5px; font-weight:800; border-radius:999px; padding:2px 9px; white-space:nowrap; }
+        .tbk-incele { margin-left:auto; background:#1e3a5f; color:#fff; border:none; border-radius:9px; padding:8px 18px; font-weight:800; font-size:13px; cursor:pointer; }
+        .tbk-incele:focus-visible, .tbk-btn:focus-visible, .tbk-link:focus-visible { outline:3px solid #93c5fd; outline-offset:2px; }
+        .tbk-ort { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:2000; }
+        .tbk-panel { position:fixed; top:0; right:0; bottom:0; width:min(940px, 92vw); background:#f8fafc; z-index:2001; display:flex; flex-direction:column; box-shadow:-12px 0 32px rgba(15,23,42,.25); text-align:left; }
+        @media (max-width: 768px) { .tbk-panel { width:100vw; } }
+        .tbk-ust { display:flex; align-items:center; gap:10px; padding:14px 18px; background:#1e3a5f; color:#fff; flex-wrap:wrap; }
+        .tbk-ust h2 { margin:0; font-size:16px; font-weight:800; }
+        .tbk-govde { flex:1; overflow-y:auto; padding:14px 18px 40px; }
+        .tbk-bolum { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:12px 14px; margin-bottom:12px; }
+        .tbk-bolum h3 { margin:0 0 8px; font-size:13px; color:#0f172a; font-weight:800; }
+        .tbk-satir { border-top:1px solid #f1f5f9; padding:8px 0; font-size:12.5px; color:#1e293b; }
+        .tbk-satir:first-of-type { border-top:none; }
+        .tbk-kucuk { font-size:11.5px; color:#64748b; }
+        .tbk-btn { border:1px solid #e2e8f0; background:#fff; color:#334155; border-radius:8px; padding:5px 11px; font-size:12px; font-weight:700; cursor:pointer; }
+        .tbk-btn.ana { background:#4338ca; color:#fff; border-color:#4338ca; }
+        .tbk-btn[disabled] { opacity:.55; cursor:not-allowed; }
+        .tbk-link { background:none; border:none; padding:0; color:#2563eb; cursor:pointer; font-size:11.5px; font-weight:700; }
+        .tbk-kaynak { margin-top:4px; padding:6px 9px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:8px; font-size:11.5px; color:#475569; white-space:pre-wrap; }
+        .tbk-izgara { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:6px 14px; font-size:12.5px; }
+        .tbk-izgara div span { display:block; font-size:10.5px; color:#64748b; text-transform:uppercase; letter-spacing:.04em; }
+        .tbk-uyari { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:8px 10px; margin-bottom:6px; }
+      `}</style>
+      <span className="tbk-baslik">🧠 TSSR ve BoQ Kontrolü</span>
+      <span className="tbk-chip">Site <b>{fizikselId || "—"}</b></span>
+      <span className="tbk-chip">Kapsam <b>{tb?.teknik_kapsam || "—"}</b></span>
+      <span className="tbk-chip">BoQ <b>{surum === "BOQ2026" ? "2026" : surum === "BOQ2025" ? "2025" : "seçilmedi"}</b></span>
+      <Rozet t={durum.ad} r={durum.renk} z={durum.zemin} />
+      <span className="tbk-chip"><b>{paketSay}</b> paket önerisi</span>
+      <span className="tbk-chip"><b>{kontrolSay}</b> kontrol gereken</span>
+      <button type="button" ref={inceleRef} className="tbk-incele" onClick={() => setPanelAcik(true)} aria-haspopup="dialog" disabled={!String(siteCode || "").trim()}>İncele</button>
+
+      {panelAcik && (
+        <>
+          <div className="tbk-ort" onClick={() => setPanelAcik(false)} />
+          <div className="tbk-panel" role="dialog" aria-modal="true" aria-labelledby="tbk-panel-baslik" ref={panelRef}>
+            <div className="tbk-ust">
+              <h2 id="tbk-panel-baslik">TSSR ve BoQ Kontrolü — {fizikselId}</h2>
+              <span style={{ fontSize: 12, opacity: .85 }}>{String(siteCode || "").toUpperCase()} · {veri?.surum_ad || "BoQ seçilmedi"}</span>
+              <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <button type="button" className="tbk-btn" disabled={yukleniyor || saltOkunur}
+                  onClick={() => { if (window.confirm("TSSR belgesi yapay zekâ ile yeniden okunacak (model çağrısı yapılır). Devam edilsin mi?")) yukle(true); }}
+                  title="Yeni dosya / revizyon yüklendiyse">{yukleniyor ? "Okunuyor…" : "Yeniden oku"}</button>
+                <button type="button" className="tbk-btn" ref={kapatRef} onClick={() => setPanelAcik(false)} aria-label="Paneli kapat (Esc)">✕ Kapat</button>
+              </span>
             </div>
-          )}
-          {/* TSSR işleri → BoQ önerileri */}
-          {(veri.oneriler || []).length > 0 && (
-            <div style={{ background:R.oneri.zemin, border:`1px solid ${R.oneri.cizgi}`, borderRadius:10, padding:"10px 10px 5px", marginBottom:8 }}>
-              <div style={{ fontSize:11, fontWeight:800, color:R.oneri.ink, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>TSSR'da istenen işler → {veri.surum_ad || "BoQ"} kalemleri · {veri.oneriler.length}</div>
-              {veri.oneriler.map((o) => (
-                <div key={o.anahtar} style={{ background:"#fff", border:`1px solid ${R.oneri.cizgi}`, borderRadius:9, padding:"7px 10px", marginBottom:5 }}>
-                  <div style={{ fontSize:12.5, color:"#0f172a", fontWeight:700 }}>
-                    {o.is.sira}. {o.is.tur_tr} — {o.is.ekipman || "?"}{o.is.bant ? ` · ${o.is.bant}` : ""}{o.is.teknoloji ? ` · ${o.is.teknoloji}` : ""}
-                    <span style={{ marginLeft:8, fontSize:10.5, fontWeight:700, borderRadius:5, padding:"1px 6px", background: o.miktar_belgede ? "#dcfce7" : "#f1f5f9", color: o.miktar_belgede ? "#166534" : "#64748b" }}>
-                      {o.miktar_belgede ? `belgede miktar: ${o.is.miktar_ham} ${o.is.birim || ""}` : "belgede miktar yok"}</span>
+            <div className="tbk-govde">
+              {yukleniyor && !veri && <div className="tbk-bolum">TSSR ve BoQ analizi yükleniyor…</div>}
+              {hata && <div className="tbk-bolum" style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#b91c1c", fontWeight: 700 }}>Servis hatası: {hata}. PR verileri korunuyor; bu "sorun yok" anlamına gelmez.</div>}
+              {veri && belgeYok && <div className="tbk-bolum">Bu sahada Rollout belgeleri altında TSSR dosyası yok — TSSR karşılaştırması yapılamadı.</div>}
+              {veri && servisHatasi && <div className="tbk-bolum" style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#b91c1c" }}>TSSR analizi tamamlanamadı: {veri.tssr_hata || veri.tssr_mesaj}. Paket önerisi yapılmadı; "sorun yok" anlamına gelmez.</div>}
+              {veri && katalogEksik && <div className="tbk-bolum" style={{ borderColor: "#fde68a", background: "#fffbeb", color: "#92400e", fontWeight: 700 }}>Katalog kullanıma hazır değil; paket eşleştirmesi tamamlanamadı. (Bu "BoQ'da karşılık yok" demek değildir.)</div>}
+              {veri && kismi && <div className="tbk-bolum" style={{ borderColor: "#fde68a", background: "#fffbeb", color: "#92400e" }}>Kısmi analiz: {(tb?.eksik_sayfalar || []).length ? `${tb.eksik_sayfalar.join(", ")}. sayfalar okunamadı.` : "bazı belgeler kısmen okundu."} Bulgular eksik olabilir.</div>}
+
+              {tb && (<>
+                {/* 1) TSSR özeti ve istenen işler */}
+                <div className="tbk-bolum">
+                  <h3>1 · TSSR özeti ve istenen işler</h3>
+                  <div className="tbk-izgara">
+                    <div><span>TSSR Site ID</span>{tb.site_id || "—"} {veri.saha_eslesme && <Rozet t={veri.saha_eslesme.durum === "AYNI" ? "Aynı fiziksel saha" : veri.saha_eslesme.durum === "FARKLI" ? "Farklı saha!" : "Doğrulanamadı"} r={veri.saha_eslesme.durum === "AYNI" ? "#166534" : "#b91c1c"} z={veri.saha_eslesme.durum === "AYNI" ? "#dcfce7" : "#fee2e2"} />}</div>
+                    <div><span>Seçili iş kaydı</span>{String(siteCode || "").toUpperCase()}</div>
+                    <div><span>Saha adı</span>{tb.saha_adi || "—"}</div>
+                    <div><span>Teknik kapsam (REVİZYON alanı)</span>{tb.teknik_kapsam || "—"}{veri.saha_eslesme?.kapsam_uyumu?.durum === "FARKLI" && <Rozet t="iş kaydıyla örtüşmüyor" r="#b45309" z="#fef3c7" />}</div>
+                    <div><span>Belge sürümü</span>{tb.belge_surumu || "belgede yok"}</div>
+                    <div><span>Hazırlama / survey</span>{tb.tarih || "—"} / {tb.survey_tarihi || "—"}</div>
+                    <div><span>Hazırlayan firma</span>{tb.hazirlayan_firma || "—"}<div className="tbk-kucuk">Survey ücreti bu bilgiden tek başına doğmaz</div></div>
+                    <div><span>Konum</span>{tb.konum?.enlem_ham || tb.konum?.enlem_ondalik || "—"} / {tb.konum?.boylam_ham || tb.konum?.boylam_ondalik || "—"}{tb.konum?.sayfa ? ` (s. ${tb.konum.sayfa})` : ""}</div>
                   </div>
-                  <div style={{ fontSize:11.5, color:"#475569", marginTop:2 }}>{o.is.aciklama}</div>
-                  <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2, fontStyle:"italic" }}>
-                    <a href={o.dayanak.url} target="_blank" rel="noreferrer" style={{ color:"#6d28d9" }}>{o.dayanak.dosya}</a> · sayfa {o.dayanak.sayfa || "?"}{o.dayanak.bolum ? ` · ${o.dayanak.bolum}` : ""}: “{o.dayanak.alinti}”
-                  </div>
-                  {o.adaylar.length ? o.adaylar.map((a, j) => (
-                    <div key={a.boq_kod} style={{ display:"flex", gap:8, alignItems:"flex-start", marginTop:6, padding:"6px 8px", borderRadius:7, background: j === 0 ? "#f5f3ff" : "#fafafa", border:"1px solid #ede9fe", flexWrap:"wrap" }}>
-                      <div style={{ flex:1, minWidth:220 }}>
-                        <span style={{ fontFamily:"monospace", fontWeight:800, color:"#4338ca" }}>{a.boq_kod}</span>
-                        <span style={{ color:"#0f172a", marginLeft:6 }}>{a.aciklama}</span>
-                        <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>{a.birim || "?"} · {fiyat(a)}{a.bolge ? ` · ${a.bolge}` : ""} · {a.surum}{j > 0 ? " · alternatif" : ""}
-                          {a.pr_var && <span style={{ marginLeft:6, background:"#dbeafe", color:"#1d4ed8", borderRadius:5, padding:"0 6px", fontSize:10, fontWeight:700 }}>PR'da var ({a.pr_qty})</span>}
-                          {a.po_var && <span style={{ marginLeft:6, background:"#dcfce7", color:"#166534", borderRadius:5, padding:"0 6px", fontSize:10, fontWeight:700 }}>PO açık ({a.po_qty}{a.po_no ? " · " + a.po_no : ""})</span>}
+                  {tb.konum?.adres && <div className="tbk-kucuk" style={{ marginTop: 6 }}>Adres: {tb.konum.adres}</div>}
+                  {(tb.mevcut_ekipman || []).length > 0 && <div style={{ marginTop: 6 }}><Kaynak id="mevcut" baslik={`Mevcut ekipman (${tb.mevcut_ekipman.length}) — iş değildir`}>{tb.mevcut_ekipman.map((m) => `${m.sektor ? m.sektor + ": " : ""}${m.ekipman} ${m.model} ${m.bant} ${m.adet ? "× " + m.adet : ""} (s. ${m.sayfa || "?"})`).join("\n")}</Kaynak></div>}
+                  <div style={{ marginTop: 8 }}>
+                    {(pk?.isler || []).map((x) => {
+                      const r = ISDURUM[x.durum] || ["—", "#475569", "#f1f5f9"];
+                      const link = sayfaLink(x.tssr_dayanak?.url, x.tssr_dayanak?.sayfa);
+                      return (
+                        <div key={x.sira} className="tbk-satir">
+                          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                            <b>{x.sira}. {x.ekipman || "iş"}</b><span className="tbk-kucuk">{x.tur}</span><Rozet t={r[0]} r={r[1]} z={r[2]} />
+                            <span className="tbk-kucuk">{x.miktar !== null && x.miktar !== undefined ? `belgede miktar: ${x.miktar_ham || x.miktar} ${x.birim || ""}` : "belgede miktar yok"}</span>
+                          </div>
+                          <div>{x.aciklama}</div>
+                          {x.miktar_hesabi && <div className="tbk-kucuk">{x.miktar_hesabi.toplam !== null ? `Toplam ${x.miktar_hesabi.toplam} = ${x.miktar_hesabi.sektor_basina} × ${x.miktar_hesabi.sektor_sayisi} sektör (${x.miktar_hesabi.kaynak_1} · ${x.miktar_hesabi.kaynak_2})` : x.miktar_hesabi.not}</div>}
+                          <div className="tbk-kucuk">{link ? <a href={link} target="_blank" rel="noreferrer">{x.tssr_dayanak.dosya} · sayfa {x.tssr_dayanak.sayfa || "?"}</a> : "kaynak yok"}{x.tssr_dayanak?.alinti ? ` — “${x.tssr_dayanak.alinti}”` : ""}</div>
                         </div>
-                        <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:2 }}>{a.gerekce}{a.kaynak ? ` · Katalog kaynağı: ${a.kaynak}` : ""}</div>
-                      </div>
-                      {!saltOkunur && !a.pr_var && <button type="button" onClick={() => onTalebeEkle && onTalebeEkle(a.boq_kod, a.aciklama, o.is.miktar || 1)}
-                        style={{ border:"none", background:"#4338ca", color:"#fff", borderRadius:7, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>+ Talebe ekle</button>}
-                    </div>
-                  )) : <div style={{ marginTop:5, fontSize:12, color:"#b45309", fontWeight:600 }}>Eşleşme doğrulanamadı — {o.mesaj}</div>}
-                  {o.mevcut_not && <div style={{ fontSize:11, color:"#b45309", marginTop:4 }}>⚠ {o.mevcut_not}</div>}
-                  {o.paket_notu && <div style={{ fontSize:11, color:"#7c3aed", marginTop:4 }}>ⓘ {o.paket_notu}</div>}
+                      );
+                    })}
+                  </div>
                 </div>
-              ))}
-              <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:4 }}>TSSR'da bulunması faturalanabilirlik ya da müşteri onayı kanıtı değildir; "Talebe ekle" gride satır ekler, Kaydet'e kadar kayıt yapılmaz.</div>
+
+                {/* 2) Önerilen paketler */}
+                <div className="tbk-bolum">
+                  <h3>2 · Önerilen paketler ({(pk?.paketler || []).length})</h3>
+                  {(pk?.notlar || []).map((n, i) => <div key={i} className="tbk-kucuk">{n}</div>)}
+                  {(pk?.paketler || []).map((p) => {
+                    const seciliKod = paketSecimi[p.bant] || (p.durum === "ACIK" ? p.secenekler[0]?.kod : null);
+                    return (
+                      <div key={p.bant} className="tbk-satir">
+                        <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                          <b>{p.bant}</b><span className="tbk-kucuk">{p.rol === "ANA" ? "ana paket" : "aynı ziyaret"}</span>
+                          <Rozet t={p.durum === "ACIK" ? "Önerilen" : p.durum === "ALTERNATIF" ? "Seçenekli — seçim gerekli" : p.durum === "KATALOG_YOK" ? "Katalog eksik" : p.durum === "KATALOGDA_YOK" ? "Fiyat doğrulanamadı" : "Karşılık yok"}
+                            r={p.durum === "ACIK" ? "#166534" : "#b45309"} z={p.durum === "ACIK" ? "#dcfce7" : "#fef3c7"} />
+                        </div>
+                        <div style={{ marginTop: 2 }}>{p.neden}</div>
+                        {p.mesaj && <div style={{ color: "#b45309", fontWeight: 700 }}>{p.mesaj}</div>}
+                        {(p.secenekler || []).map((x) => (
+                          <div key={x.kod} style={{ margin: "6px 0 0", padding: "8px 10px", border: `1.5px solid ${seciliKod === x.kod ? "#4338ca" : "#e2e8f0"}`, borderRadius: 10, background: seciliKod === x.kod ? "#eef2ff" : "#fff" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              {p.durum === "ALTERNATIF" && <input type="radio" name={`paket-${p.bant}`} aria-label={`${x.kod} seç`} checked={seciliKod === x.kod} onChange={() => setPaketSecimi((s) => ({ ...s, [p.bant]: x.kod }))} />}
+                              <b style={{ fontFamily: "monospace", color: "#4338ca" }}>{x.kod}</b><span>{x.baslik}</span>
+                              <span style={{ marginLeft: "auto" }} />
+                              {!saltOkunur && <button type="button" className="tbk-btn ana" disabled={x.pr_var || eklenenler[x.kod] || (p.durum === "ALTERNATIF" && seciliKod !== x.kod) || !x.katalogda}
+                                onClick={() => prEkle(x.kod, x.baslik, 1)} title={x.pr_var ? "PR'da zaten var" : !x.katalogda ? "Katalogda fiyatlı değil" : p.durum === "ALTERNATIF" && seciliKod !== x.kod ? "Önce bu seçeneği seçin" : "Gride yeni satır olarak ekler (Kaydet'e kadar kayıt yok)"}>
+                                {eklenenler[x.kod] ? "✓ Gride eklendi" : x.pr_var ? "PR'da var" : "+ PR'a ekle"}</button>}
+                            </div>
+                            <div className="tbk-kucuk">{x.birim || "?"} · {tl(x.birim_fiyat, x.para_birimi)}{x.bolge ? ` · ${x.bolge}` : ""} · anten revizyonu: {x.anten_revizyonu === true ? "var" : x.anten_revizyonu === false ? "yok" : "—"} · aynı ziyaret: {x.ayni_ziyaret ? "evet" : "hayır"}{x.rru_araligi ? ` · ${x.rru_araligi.min}-${x.rru_araligi.max} RRU dahil` : ""}
+                              {x.po_var && ` · PO açık (${x.po_no || "no yok"})`}</div>
+                            <Kaynak id={`sow-${x.kod}`} baslik="SOW ve fiyat kaynağı">{`SOW: ${x.sow_kaynak ? `${x.sow_kaynak.dosya} · ${x.sow_kaynak.sayfa} · satır ${x.sow_kaynak.satir} · hücre ${x.sow_kaynak.sow_hucre}` : "bilgi tabanında yok"}\nFiyat: ${x.katalog_kaynak || "katalogda yok"}`}</Kaynak>
+                          </div>
+                        ))}
+                        <div className="tbk-kucuk" style={{ marginTop: 4 }}>
+                          TSSR dayanağı: {p.tssr_dayanak?.url ? <a href={sayfaLink(p.tssr_dayanak.url, p.tssr_dayanak.kapak_sayfa)} target="_blank" rel="noreferrer">kapak s. {p.tssr_dayanak.kapak_sayfa} (teknik kapsam {p.tssr_dayanak.teknik_kapsam || "—"})</a> : "—"}
+                          {p.tssr_dayanak?.anten_sayfa ? <> · <a href={sayfaLink(p.tssr_dayanak.url, p.tssr_dayanak.anten_sayfa)} target="_blank" rel="noreferrer">anten dayanağı s. {p.tssr_dayanak.anten_sayfa}</a>{p.tssr_dayanak.anten_alinti ? ` — “${p.tssr_dayanak.anten_alinti}”` : ""}</> : ""}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="tbk-kucuk" style={{ marginTop: 6 }}>Paketin SITE birimi ekipman adediyle çarpılmaz. TSSR'da bulunması faturalanabilirlik ya da müşteri onayı kanıtı değildir.</div>
+                </div>
+
+                {/* 3) Pakete dahil / ek talep gerektiren işler */}
+                <div className="tbk-bolum">
+                  <h3>3 · Pakete dahil işler ve ek talep gerektirenler</h3>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#166534", margin: "2px 0 4px" }}>Pakete dahil — ayrıca talep edilmez</div>
+                  {(pk?.isler || []).filter((x) => x.durum === "PAKETE_DAHIL").map((x) => (
+                    <div key={x.sira} className="tbk-satir">
+                      <b>{x.ekipman}</b> — {x.aciklama}
+                      <div className="tbk-kucuk">{(x.sow_dayanaklari || []).map((d) => `${d.etiket}: ${d.paket_kod} SOW satır ${d.no} (${d.hucre})`).join(" · ")}</div>
+                      <Kaynak id={`dahil-${x.sira}`} baslik="SOW metni">{(x.sow_dayanaklari || []).map((d) => `${d.paket_kod} · ${d.sayfa} · ${d.hucre} · satır ${d.no}: ${d.metin}`).join("\n")}</Kaynak>
+                    </div>
+                  ))}
+                  {!(pk?.isler || []).some((x) => x.durum === "PAKETE_DAHIL") && <div className="tbk-kucuk">Pakete dahil olarak eşlenen iş yok.</div>}
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#b45309", margin: "10px 0 4px" }}>Paket dışında kalan / kontrol gereken işler</div>
+                  {(pk?.isler || []).filter((x) => ["EK_TALEP", "EK_ADAY", "KONTROL", "PAKETSIZ"].includes(x.durum)).map((x) => {
+                    const o = onerilerMap[x.sira];
+                    return (
+                      <div key={x.sira} className="tbk-satir">
+                        <b>{x.ekipman || "iş"}</b> — {x.aciklama} <Rozet t={(ISDURUM[x.durum] || ["—"])[0]} r="#b45309" z="#fef3c7" />
+                        <div className="tbk-kucuk">{x.neden || o?.paket_notu || o?.mesaj || ""}</div>
+                        {(o?.adaylar || []).slice(0, 3).map((a) => (
+                          <div key={a.boq_kod} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontFamily: "monospace", color: "#4338ca", fontWeight: 700 }}>{a.boq_kod}</span><span>{a.aciklama}</span>
+                            <span className="tbk-kucuk">{a.birim} · {tl(a.birim_fiyat, a.para_birimi)}{a.pr_var ? " · PR'da var" : ""}</span>
+                            {!saltOkunur && x.durum === "EK_TALEP" && o?.durum === "ACIK" && <button type="button" className="tbk-btn ana" disabled={a.pr_var || eklenenler[a.boq_kod]} onClick={() => prEkle(a.boq_kod, a.aciklama, x.miktar || 1)}>{eklenenler[a.boq_kod] ? "✓ Gride eklendi" : "+ PR'a ekle"}</button>}
+                          </div>
+                        ))}
+                        {x.durum === "EK_ADAY" && (o?.adaylar || []).length > 0 && <div className="tbk-kucuk">Aday kalemler yalnız bilgi amaçlıdır — kapsam dayanağı doğrulanmadan önerilmez.</div>}
+                      </div>
+                    );
+                  })}
+                  {!(pk?.isler || []).some((x) => ["EK_TALEP", "EK_ADAY", "KONTROL", "PAKETSIZ"].includes(x.durum)) && <div className="tbk-kucuk">Paket dışında kalan iş yok.</div>}
+                </div>
+
+                {/* 4) PR/PO karşılaştırması ve uyarılar */}
+                <div className="tbk-bolum">
+                  <h3>4 · PR/PO karşılaştırması ve uyarılar ({(veri.uyarilar || []).length})</h3>
+                  {(veri.uyarilar || []).map((u) => (
+                    <div key={u.anahtar} className="tbk-uyari" style={{ opacity: u.karar ? 0.6 : 1 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <Rozet t={u.seviye === "KONTROL" ? "Kontrol gerekli" : "Öneri"} r={u.seviye === "KONTROL" ? "#b45309" : "#4338ca"} z={u.seviye === "KONTROL" ? "#fef3c7" : "#e0e7ff"} />
+                        <span className="tbk-kucuk">{u.tip}</span>
+                      </div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 3 }}>{u.mesaj}</div>
+                      {u.dayanak && <div className="tbk-kucuk">Dayanak: {u.dayanak}</div>}
+                      {u.karar ? (
+                        <div className="tbk-kucuk" style={{ marginTop: 4 }}>Dikkate alınmadı — {u.karar.gerekce} ({u.karar.kullanici}, {String(u.karar.zaman).slice(0, 10)})
+                          {!saltOkunur && <button type="button" className="tbk-link" style={{ marginLeft: 8 }} onClick={() => karar(u.anahtar, "GERI_AL", "")}>geri al</button>}</div>
+                      ) : !saltOkunur && (
+                        <div style={{ display: "flex", gap: 6, marginTop: 5, alignItems: "center", flexWrap: "wrap" }}>
+                          <input aria-label="Dikkate almama gerekçesi" value={gerekceler[u.anahtar] || ""} onChange={(e) => setGerekceler((p) => ({ ...p, [u.anahtar]: e.target.value }))} placeholder="Dikkate almama gerekçesi"
+                            style={{ flex: 1, minWidth: 180, padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 7, fontSize: 12 }} />
+                          <button type="button" className="tbk-btn" onClick={() => karar(u.anahtar, "DIKKATE_ALINMADI", gerekceler[u.anahtar] || "")}>Dikkate alma</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {!(veri.uyarilar || []).length && <div className="tbk-kucuk">Uyarı yok.</div>}
+                  <div className="tbk-kucuk" style={{ marginTop: 6 }}>"Dikkate alma" yalnız bu sahadaki bu uyarı için kaydedilir; otomatik genel kurala dönüşmez.</div>
+                </div>
+              </>)}
+
+              {/* 5) Kaynak belge ve ilgili sayfalar */}
+              {veri && (
+                <div className="tbk-bolum">
+                  <h3>5 · Kaynak belgeler</h3>
+                  {(veri.tssr_belgeler || []).map((b) => (
+                    <div key={b.url} className="tbk-satir">
+                      <a href={b.url} target="_blank" rel="noreferrer">{b.dosya}</a>{b.guncel && <Rozet t="güncel" r="#166534" z="#dcfce7" />}
+                      <div className="tbk-kucuk">{b.durum}{b.hata ? ` — ${b.hata}` : ""} · teknik kapsam {b.teknik_kapsam || "—"} · belge sürümü {b.revizyon || "—"} · {b.tarih || "tarih yok"} · {b.sayfa || "?"} sayfa · {b.kaynak === "onbellek" ? "önbellekten" : b.kaynak === "yeni" ? "yeni okundu" : b.kaynak || ""}</div>
+                    </div>
+                  ))}
+                  {!(veri.tssr_belgeler || []).length && <div className="tbk-kucuk">TSSR dosyası yok.</div>}
+                  <div className="tbk-kucuk" style={{ marginTop: 6 }}>Paket SOW'ları: Şimşek/BoQ/2026 TE ve New Site Tender L4 sayfaları (2026) · BoQ .xlsx L4-All Items SOW (2025). Fiyatlar imzalı sözleşme fiyat eklerinden (boq_katalog).</div>
+                </div>
+              )}
             </div>
-          )}
-          {veri.tssr_durumu === "TAMAM" && !(veri.uyarilar || []).length && (veri.oneriler || []).every((o) => o.adaylar.some((a) => a.pr_var)) && (
-            <div style={{ fontSize:12.5, color:"#15803d", fontWeight:700 }}>✓ TSSR'daki işlerin tümünün PR'da karşılığı var; uyarı yok.</div>
-          )}
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -8314,13 +8706,14 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
     const t = setTimeout(async () => {
       setAsistanYukleniyor(true);
       try {
-        const d = await fetchJson(`${API_BASE}/po/akilli-asistan?site=${encodeURIComponent(s)}`, { withAuth: true });
+        // 28.10.2026: seçili BoQ sürümüyle — TSSR ve BoQ Kontrolü ile aynı sunucu analizi (ortak öneri motoru)
+        const d = await fetchJson(`${API_BASE}/po/akilli-asistan?site=${encodeURIComponent(s)}${boqSecim?.surum ? `&surum=${boqSecim.surum}` : ""}`, { withAuth: true });
         if (!iptal) setAsistan(d && d.ok ? d : null);
       } catch { if (!iptal) setAsistan(null); }
       finally { if (!iptal) setAsistanYukleniyor(false); }
     }, 600);
     return () => { iptal = true; clearTimeout(t); };
-  }, [siteCode]);
+  }, [siteCode, boqSecim?.surum]);
   const asistanUyari = useMemo(() => {
     const m = {};
     (asistan?.bulgular || []).forEach((b) => { if (b.tip === "UYARI" && b.item_code) m[b.item_code] = b; });
