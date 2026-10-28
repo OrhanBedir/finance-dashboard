@@ -556,6 +556,7 @@ pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAU
 const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant, removeIsolatedTenant } = pool;
 const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
+const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
@@ -1125,6 +1126,9 @@ const IZIN_TANIMLARI = {
   malzeme_goruntule: "Malzeme Yönetimi (görüntüleme)", kendi_avans: "Kendi iş avansları", kendi_masraf: "Kendi masraf formları",
   maas_goruntule: "Personel maaşlarını görme", gizli_arac_kira_goruntule: "Kira bedeli gizli araçların kirasını görme",
   personel_yonetimi: "Personel Yönetimi (kendi firması; maaş ayrı izin)",
+  // 28.10.2026: Organizasyon şeması / saha ekipleri — firma ve ekip kartı, personel ekip üyeliği, ekip şefi, aktif/pasif.
+  // Maaş, bordro, finans ya da kullanıcı yetkisi vermez. Silme ayrı izindir (yalnız hiç kullanılmamış kayıt).
+  org_yonet: "Organizasyon şeması ve saha ekipleri yönetimi", org_sil: "Kullanılmamış ekip / firma kaydını silme",
 };
 const _yetkiOnbellek = new Map(); // anahtar: e-posta → { t, ayar }
 const YETKI_TTL_MS = 60 * 1000;
@@ -13330,6 +13334,8 @@ async function isAtamaDetay(id) {
   return row;
 }
 
+// Organizasyon şeması tek kaynağı (/org/*): firma ve ekip kartları, üyelik geçmişi, yetki (org_yonet / org_sil)
+const orgPanel = orgEkip.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi, detectTenant });
 const omnixPanel = omnixProfil.kur(app, {
   pool, authMiddleware, markaProfil, altMarkaKullanicisi, islemGecmisiYaz, isAtamaYetkiliMi, personelHesapEkstresi, pmKisiselEmailGorur,
   get PM_KISISEL_EMAIL() { return PM_KISISEL_EMAIL; },
@@ -19829,6 +19835,8 @@ app.post("/hr/personel/:id/yeniden-ise-baslat", authMiddleware, async (req, res)
         [id, giris.slice(0, 7), net, banka, elden, giris]);
     }
     await client.query("COMMIT");
+    // 28.10.2026: önceki dönemin ekip üyeliği geçmişte kapanır (üyelik kaydı silinmez)
+    await orgPanel.uyelikSenkron(req, id, p.ekip_bilgisi, null, { tarih: eskiAyr || giris, gerekce: "Yeniden işe başlatma — önceki dönemin ekip ataması kapandı" });
     const detay = `${p.ad_soyad}: ${arsivNot}; yeni dönem giriş ${giris}` +
       `${giris > ymdYerel(new Date()) ? " (ileri tarihli — işe başlayacak)" : ""}; unvan ${up.rows[0].unvan || "—"}, bölge ${up.rows[0].bolge || "—"}, firma ${up.rows[0].firma_tipi || "—"}, bordro ${up.rows[0].marka || "—"}; ` +
       (net > 0 ? `maaş ₺${net}` : "maaş BİLGİ EKSİK") + `; ekip/araç ataması sıfırlandı${b.aciklama ? `; not: ${String(b.aciklama).trim()}` : ""}`;
@@ -19972,6 +19980,7 @@ app.post("/hr/personel", personelEkleKapisi, async (req, res) => {
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
        elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,String(marka||"ERC").toUpperCase()]
     );
+    if (ekip_bilgisi) await orgPanel.uyelikSenkron(req, r.rows[0].id, null, r.rows[0].ekip_bilgisi, { gerekce: "Yeni personel kaydında ekip seçildi" });
     // Aynı e-postalı sistem hesabı varsa kimlik bağlanır (mükerrer profil oluşmaz)
     if (_mail) {
       try {
@@ -20059,6 +20068,7 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       }
       _ayrYeni = null; _aktifYeni = true;
     }
+    const _ekipOnce = (await pool.query(`SELECT ekip_bilgisi FROM personel WHERE id=$1`, [id])).rows[0]?.ekip_bilgisi || null;
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
@@ -20083,6 +20093,7 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
         `UPDATE personel SET aktif = false WHERE id = $1 AND isten_ayrilma_tarihi <= CURRENT_DATE RETURNING *`, [id]);
       if (a.rows[0]) son = a.rows[0];
     }
+    if (son) await orgPanel.uyelikSenkron(req, Number(id), _ekipOnce, son.ekip_bilgisi, { gerekce: "İK personel kartından değişti" });
     res.json(son);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -25727,7 +25738,9 @@ pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
   bolge TEXT,
   aciklama TEXT,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)`).catch(() => {});
+)`).catch(() => {})
+  .then(() => pool.query(`CREATE TABLE IF NOT EXISTS subcons (id SERIAL PRIMARY KEY, subcon_name TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {}))
+  .then(() => orgEkip.semaKur(pool)); // 28.10.2026: firma bağı, ekip şefi, üyelik geçmişi
 // Ekip adı (örn. "ENH Ekibi") + üye bazlı araç ataması (araç kişiye yazılır)
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ad TEXT`).catch(() => {});
 pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT`).catch(() => {});
@@ -25798,10 +25811,14 @@ app.get("/hr/ekipler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/hr/ekipler", ikYazma, async (req, res) => {
+// 28.10.2026: ekip kayıtlarını yalnız organizasyon yönetim izni (org_yonet) olan değiştirir; alt marka yalnız kendi ekibini
+app.post("/hr/ekipler", orgPanel.yonetKapisi, async (req, res) => {
   try {
     const no = Number(req.body.ekip_no || 0);
     if (!no || no < 1) return res.status(400).json({ error: "Geçerli ekip no gerekli" });
+    const _once = (await pool.query(`SELECT * FROM ekipler WHERE ekip_no=$1`, [no])).rows[0] || null;
+    if (_once && !orgPanel.ekipKapsamda(req, _once)) return res.status(403).json({ error: "Bu ekip firmanızın kapsamında değil" });
+    if (!_once && orgPanel.orgYetki(req).marka) return res.status(403).json({ error: "Yeni ekip Organizasyon Şeması'ndaki \"+ Ekip Ekle\" ile açılır" });
     // aktif gönderilmediyse mevcut değer korunur; sablon_kodu bu uçtan değiştirilmez
     const aktif = typeof req.body.aktif === "boolean" ? req.body.aktif : null;
     // TEKNO ekibi: ad boşsa sıradaki numara verilir (TEKNO EkipN); TEKNO adları benzersiz
@@ -25843,6 +25860,10 @@ app.post("/hr/ekipler", ikYazma, async (req, res) => {
       [no, req.body.plaka || null, req.body.bolge || null, req.body.aciklama || null, ad,
        (req.body.taseron_adi || "").trim() || null, aktif]);
     if (yeniSira && !r.rows[0].ekip_sira) { await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {}); r.rows[0].ekip_sira = yeniSira; }
+    // 28.10.2026: ad / bölge / plaka / taşeron adı / durum değişiklikleri de geçmişe yazılır
+    const _oz = (e) => e ? { ad: e.ad || null, bolge: e.bolge || null, plaka: e.plaka || null, taseron_adi: e.taseron_adi || null, durum: e.aktif === false ? "Pasif" : "Aktif" } : null;
+    if (JSON.stringify(_oz(_once)) !== JSON.stringify(_oz(r.rows[0])))
+      await islemGecmisiYaz(req, "ekip", no, _once ? "DUZENLEME" : "OLUSTURMA", _oz(_once), _oz(r.rows[0]), String(req.body.gerekce || "").trim() || null);
     const eskiOz = { ekip_turu: eskiTur.ekip_turu || null, bagli_firma: eskiTur.bagli_firma || null, is_etiketi: (eskiTur.is_etiketleri || []).join(", ") || null };
     const yeniOz = { ekip_turu: tur, bagli_firma: bagli, is_etiketi: etiketler.join(", ") || null };
     if (JSON.stringify(eskiOz) !== JSON.stringify(yeniOz)) {
@@ -25854,12 +25875,17 @@ app.post("/hr/ekipler", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ekipler/:no", ikYazma, async (req, res) => {
+// 28.10.2026: silme ayrı izindir (org_sil) ve yalnız hiç kullanılmamış ekipte yapılır; kullanılmış ekip pasife alınır.
+// Eskiden silinen ekibin personel bağları sessizce temizleniyordu — artık personel / geçmiş kaydına dokunulmaz.
+app.delete("/hr/ekipler/:no", orgPanel.silKapisi, async (req, res) => {
   try {
     const no = Number(req.params.no);
+    const e = (await pool.query(`SELECT * FROM ekipler WHERE ekip_no=$1`, [no])).rows[0];
+    if (!e) return res.status(404).json({ error: "Ekip bulunamadı" });
+    if (!orgPanel.ekipKapsamda(req, e)) return res.status(403).json({ error: "Bu ekip firmanızın kapsamında değil" });
+    if (await orgPanel.ekipKullanimi(no)) return res.status(409).json({ error: "Ekip kullanılmış (personel, üyelik geçmişi ya da iş kaydı var) — silinemez, pasife alın" });
+    await islemGecmisiYaz(req, "ekip", no, "SILME", { ad: e.ad, bolge: e.bolge }, null, "Hatalı kayıt");
     await pool.query(`DELETE FROM ekipler WHERE ekip_no=$1`, [no]);
-    // Silinen ekibe atanmış personelin ataması temizlenir
-    await pool.query(`UPDATE personel SET ekip_bilgisi=NULL WHERE ekip_bilgisi=$1`, [String(no)]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -25880,21 +25906,17 @@ const EKIP_SABLONLARI = [
   { kod: "BUR-TEK-RF-2",       ad: "TEKNO Ekip5", sira: 5, taseron: "TEK", bolge: "Bursa"  },
   { kod: "BUR-NETWORKGROUP-1", ad: "Ekip 1",      taseron: "Networkgroup", bolge: "Bursa"  },
 ];
-// Org şemasını düzenleyebilenler (frontend canEdit listesiyle aynı)
-const ORG_DUZENLEYICI = new Set(["orhan.bedir@simsektel.com", "duzgun.simsek@simsektel.com", "nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com", "erencan.simsek@simsektel.com"]);
-app.post("/hr/ekipler/sablon-kur", authMiddleware, async (req, res) => {
+// 28.10.2026: yetki e-posta listesinden (ORG_DUZENLEYICI) org_yonet iznine taşındı (users.yetki_ayar / ERC admin rolü)
+app.post("/hr/ekipler/sablon-kur", orgPanel.yonetKapisi, async (req, res) => {
   try {
-    const email = String(req.user?.email || "").toLowerCase();
-    if (!ORG_DUZENLEYICI.has(email) && String(req.user?.role || "").toLowerCase() !== "admin") {
-      return res.status(403).json({ ok: false, error: "Ekip şablonu kurma yetkiniz yok" });
-    }
+    if (orgPanel.orgYetki(req).marka) return res.status(403).json({ ok: false, error: "Ekip şablonu kurma yetkiniz yok" });
     const eskileriPasifle = !!(req.body && req.body.eskileri_pasifle);
     let eklenen = 0, guncellenen = 0, pasiflenen = 0;
     for (const s of EKIP_SABLONLARI) {
       const mevcut = await pool.query(`SELECT ekip_no FROM ekipler WHERE sablon_kodu = $1`, [s.kod]);
       if (mevcut.rows.length) {
-        // 16.10.2026: var olan ekibin ADI ve BÖLGESİ kullanıcıya aittir (Ekip Yönetimi'nden değişir) — kurulum ezmez
-        await pool.query(`UPDATE ekipler SET taseron_adi=COALESCE(taseron_adi,$2), aktif=true, updated_at=NOW() WHERE sablon_kodu=$1`, [s.kod, s.taseron]);
+        // 16.10.2026: var olan ekibin ADI ve BÖLGESİ kullanıcıya aittir — kurulum ezmez.
+        // 28.10.2026: DURUMU da kullanıcıya aittir — pasife alınmış şablon ekip kurulumla yeniden aktifleşmez.
         guncellenen++;
       } else {
         const nx = await pool.query(`SELECT COALESCE(MAX(ekip_no), 0) + 1 AS n FROM ekipler`);
@@ -25907,17 +25929,29 @@ app.post("/hr/ekipler/sablon-kur", authMiddleware, async (req, res) => {
     if (eskileriPasifle) {
       const r = await pool.query(
         `UPDATE ekipler SET aktif=false, updated_at=NOW()
-          WHERE aktif IS DISTINCT FROM false AND (sablon_kodu IS NULL OR NOT (sablon_kodu = ANY($1::text[])))`,
+          WHERE aktif IS DISTINCT FROM false AND (sablon_kodu IS NULL OR NOT (sablon_kodu = ANY($1::text[]))) RETURNING ekip_no`,
         [EKIP_SABLONLARI.map((s) => s.kod)]);
       pasiflenen = r.rowCount;
+      for (const x of r.rows) await islemGecmisiYaz(req, "ekip", x.ekip_no, "DURUM", { durum: "Aktif" }, { durum: "Pasif" }, "Şablon kurulumu: şablon dışı ekip pasife alındı");
     }
     res.json({ ok: true, eklenen, guncellenen, pasiflenen, toplam_sablon: EKIP_SABLONLARI.length });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Personel → ekip ataması (yalnız ekip_bilgisi alanını günceller)
-app.put("/hr/personel/:id/ekip", ikYazma, async (req, res) => {
+app.put("/hr/personel/:id/ekip", authMiddleware, async (req, res) => {
   try {
+    // 28.10.2026: ekip üyeliği değişikliği org_yonet ister (geçmişe yazılır); yalnız araç ataması İK yazma yetkilisine de açık
+    const _org = orgPanel.orgYetki(req);
+    if ("ekip_bilgisi" in req.body ? !_org.yonet : !(_org.yonet || ikYazmaYetkili(req.user || {})))
+      return res.status(403).json({ ok: false, error: "Ekip ataması değiştirme yetkiniz yok" });
+    if ("ekip_bilgisi" in req.body && String(req.body.ekip_bilgisi ?? "").trim()) {
+      const _hedef = (await pool.query(`SELECT * FROM ekipler WHERE ekip_no::text=$1`, [String(req.body.ekip_bilgisi).trim()])).rows[0];
+      if (!_hedef) return res.status(404).json({ error: "Ekip bulunamadı" });
+      if (!orgPanel.ekipKapsamda(req, _hedef)) return res.status(403).json({ error: "Bu ekip firmanızın kapsamında değil" });
+      if (_hedef.aktif === false) return res.status(409).json({ error: "Ekip pasif — pasif ekibe personel eklenemez" });
+    }
+    const _ekipOnce = (await pool.query(`SELECT ekip_bilgisi FROM personel WHERE id=$1`, [req.params.id])).rows[0]?.ekip_bilgisi || null;
     const sets = [], vals = [req.params.id];
     if ("ekip_bilgisi" in req.body) {
       const v = req.body.ekip_bilgisi;
@@ -25954,6 +25988,7 @@ app.put("/hr/personel/:id/ekip", ikYazma, async (req, res) => {
       vals);
     if (!r.rows.length) return res.status(404).json({ error: "Personel bulunamadı" });
     const yeni = r.rows[0];
+    if ("ekip_bilgisi" in req.body) await orgPanel.uyelikSenkron(req, yeni.id, _ekipOnce, yeni.ekip_bilgisi, { gerekce: String(req.body.gerekce || "").trim() || "Ekip ataması" });
     // ── Araç Yönetimi senkronu: org şemasındaki atama araç kartına yansır ──
     // Atanan aracın sürücüsü = üye, bölgesi = ekibin bölgesi; atama
     // kaldırılınca/değişince eski aracın sürücüsü temizlenir.
