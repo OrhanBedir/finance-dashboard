@@ -24719,7 +24719,9 @@ const ODEME_TABLO_SQL = [
 ];
 // Araç kira ödemeleri görünümü — eski tabloyla aynı kolonlar + ödeme/fatura bağlantıları.
 // id = dağılım id'si; tarih = GERÇEK ödeme tarihi; created_at = ödeme kaydının girildiği an.
-const ARAC_KIRA_VIEW_SQL = `CREATE OR REPLACE VIEW arac_kira_odemeler AS
+// 28.10.2026: security_invoker — görünüm sorgulayan rolün yetkisi ve RLS'iyle çalışır (Supabase "Security Definer View").
+// CREATE OR REPLACE seçenekleri sıfırladığından WITH burada şart; API (postgres rolü) etkilenmez.
+const ARAC_KIRA_VIEW_SQL = `CREATE OR REPLACE VIEW arac_kira_odemeler WITH (security_invoker = true) AS
   SELECT d.id, d.arac_id, d.donem, d.tutar, k.tarih, COALESCE(k.aciklama,'') AS aciklama, k.created_at,
          k.kasadan_dus, d.odeme_id, d.fatura_id, d.fatura_arac_id, f.fatura_no,
          COALESCE(NULLIF(k.tedarikci,''), f.tedarikci) AS tedarikci, k.yontem, k.referans
@@ -24738,6 +24740,8 @@ function ensureOdemeTablolari() {
   if (!_odemeHazir) _odemeHazir = (async () => {
     for (const q of ODEME_TABLO_SQL) await pool.query(q);
     await aracKiraGoc();
+    // Herkese açık API rolleri görünümü okuyamaz (yerel veritabanında bu roller yoksa sessizce geçilir)
+    await pool.query(`REVOKE ALL ON arac_kira_odemeler FROM anon, authenticated`).catch(() => {});
   })().catch((e) => { _odemeHazir = null; console.error("[odeme tablolari]", e.message); });
   return _odemeHazir;
 }
