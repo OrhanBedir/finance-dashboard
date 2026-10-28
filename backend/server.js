@@ -3685,7 +3685,7 @@ function tssrMetinAnaliz(metinHam) {
     bul(/(Kule\s*Tipi|Tower\s*Type|Kule\/Pole)[^\n]*\bKafes\b/i) ||
     (bul(/YEN[İI]\s+(\d+\s*m\.?\s+)?(KAFES\s+)?KULE/i) && !/MONOPOL/i.test(govde) ? bul(/YEN[İI]\s+(\d+\s*m\.?\s+)?(KAFES\s+)?KULE/i) : null);
   const kafesKule = !!kafesSatir;
-  if (kafesKule) ekle("Kafes kule", kafesSatir, [], "Kafes kule sahası — vinç talep edilmez; antenler offset ile bağlanır");
+  if (kafesKule) ekle("Kafes kule", kafesSatir, [], "Kafes kule sahası — vinç talep edilmez; YENİ antenler offset ile bağlanır");
   // 1) Vinç (kafes kulede atlanır)
   const vinc = cevap(/Use Crane|Vinç kullanılacak/i);
   if (vinc.deger === "EVET" && !kafesKule) ekle("Vinç", vinc.satir, [{ kod: "8818249053", adet: 1 }]);
@@ -3714,10 +3714,11 @@ function tssrMetinAnaliz(metinHam) {
   // 5) Yeni anten
   const ant = govde.match(/(\d+)\s*ADET\s*YEN[İI][^\n]{0,60}?ANTEN/i);
   if (ant) ekle("Yeni anten montajı", ant[0], [{ kod: "8812184597", adet: Number(ant[1]) || 1 }]);
-  // 6) Outdoor kabinet
-  if (/YEN[İI]\s+OUTDOOR\s+KAB[İI]NET/i.test(govde)) {
-    const m = govde.match(/[^\n]*YEN[İI]\s+OUTDOOR\s+KAB[İI]NET[^\n]*/i);
-    ekle("Yeni outdoor kabinet", m && m[0], [{ kod: "8812184600", adet: 1 }]);
+  // 6) Outdoor kabinet — 2026 TSSR şablonundaki boş alan etiketleri ("Yeni Outdoor Kabinet Tipi / New Outdoor Cabinet Type",
+  //    "… Sayısı / … Qty") talep değildir (KA3737, 28.10.2026); yalnız serbest metinde yazan yeni kabinet işi alınır
+  const kabinetSatir = satirlar.find((l) => /YEN[İI]\s+OUTDOOR\s+KAB[İI]NET/i.test(l) && !/Tipi|Sayısı|Type|Qty|Dolabı|Battery/i.test(l) && !secenekMi(l));
+  if (kabinetSatir) {
+    ekle("Yeni outdoor kabinet", kabinetSatir, [{ kod: "8812184600", adet: 1 }]);
   }
   // 7) Gizleme (baca yüksekliği varsa kod, yoksa kodsuz tespit)
   const gizI = satirlar.findIndex((l) => /New Camouflage Type/i.test(l) && !secenekMi(l));
@@ -3739,10 +3740,13 @@ function tssrMetinAnaliz(metinHam) {
   if (starSatir) ekle("Star offset", starSatir, [{ kod: "8812184819", adet: 1 }]);
   const poleOffsetSatir = bul(/pole[\s-]*offset|pol\s*ofset/i);
   if (poleOffsetSatir) ekle("Pole offset", poleOffsetSatir, [{ kod: "8818265066", adet: 1 }, { kod: "8818264113", adet: 1 }]);
-  else if (kafesKule) {
-    // Kafes kulede offset TSSR'da açıkça yazmasa da gerekir — anten adedi kadar (bilinmiyorsa 3)
+  else if (kafesKule && (ant || yeniPoleEvet > 0 || lprt)) {
+    // Kafes kulede YENİ anten / yeni pole bağlantısı için offset gerekir — anten adedi kadar (bilinmiyorsa 3)
     const antAdet = ant ? Math.max(1, Number(ant[1]) || 3) : 3;
-    ekle("Kafes kule offset", "Kafes kule — anten bağlantısı için offset", [{ kod: "8818265066", adet: antAdet }, { kod: "8818264113", adet: antAdet }], "Adet anten sayısına göre kontrol edin");
+    ekle("Kafes kule offset", "Kafes kule — yeni anten bağlantısı için offset", [{ kod: "8818265066", adet: antAdet }, { kod: "8818264113", adet: antAdet }], "Adet anten sayısına göre kontrol edin");
+  } else if (kafesKule) {
+    // 28.10.2026 (Orhan, KA3737): mevcut antenler kullanılıyor, yeni anten/pole yok → offset ÖNERİLMEZ (yalnız bilgi)
+    ekle("Kafes kule — offset önerilmedi", kafesSatir, [], "TSSR'da yeni anten ya da yeni pole yok (mevcut antenler kullanılıyor) — offset talep edilmez");
   }
   // 9) RRU adedi → DBS kurulum bandı
   const rruI = satirlar.findIndex((l) => /^RRU\s*Qty/i.test(l));

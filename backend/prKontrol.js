@@ -10,7 +10,8 @@
 const isoGun = (v) => { if (!v) return null; if (typeof v === "string") return v.slice(0, 10); const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
 const BANTLAR = ["NR700", "NR3500", "NR2100", "NR1800", "L700", "L800", "L900", "L1800", "L2100", "L2600", "U900", "U2100", "G900", "G1800", "2600", "3500", "700", "800", "900", "1800", "2100"];
 const bantCikar = (s) => {
-  const u = String(s || "").toUpperCase().replace(/\s+/g, "");
+  // "LTE 900" / "LC900" (TT 2026 TSSR yazımı) → L900; "NR 700" → NR700
+  const u = String(s || "").toUpperCase().replace(/\s+/g, "").replace(/LTE(?=\d)/g, "L").replace(/LC(?=\d)/g, "L");
   const b = new Set();
   for (const x of ["NR700", "NR3500", "NR2100", "NR1800", "L700", "L800", "L900", "L1800", "L2100", "L2600", "U900", "U2100", "G900", "G1800"]) if (u.includes(x)) b.add(x);
   return b;
@@ -36,6 +37,8 @@ const ESLEME = [
   { ekipman: /\bAAU\b/i, tur: ["MONTAJ", "ILAVE"], kalip: [/aau installation|with aau/i], karsit: [/aau dismantl/i] },
   { ekipman: /\bAAU\b/i, tur: ["SOKUM"], kalip: [/aau dismantl/i] },
   { ekipman: /\bBBU\b/i, tur: ["SOKUM"], kalip: [/bbu removal|bbu dismantl/i] },
+  // 28.10.2026 (KA3737): BBU3900 → BBU5900 değişimi — BBU Modernization öncelikli; alternatif BBU installation + BBU Removal
+  { ekipman: /\bBBU\b/i, tur: ["DEGISIM"], kalip: [/bbu modernization/i, /bbu instal+ation/i, /bbu removal/i], oncelik: /bbu modernization/i },
   { ekipman: /\bBBU\b|DBS|BTS/i, tur: ["MONTAJ"], kalip: [/dbs\/bts system installation|bbu installation/i] },
   { ekipman: /\bMW\b|microwave|mikrodalga/i, tur: ["MONTAJ", "ILAVE"], kalip: [/new microwave installation/i], karsit: [/microwave dismantl|mw dismantl/i] },
   { ekipman: /\bMW\b|microwave|mikrodalga/i, tur: ["DEGISIM"], kalip: [/mw swap|microwave swap|microwave replacement/i] },
@@ -56,8 +59,11 @@ const ESLEME = [
   { ekipman: /rack|raf|sehpa/i, tur: ["SOKUM"], kalip: [/rack dismantl|rack demont/i] },
   { ekipman: /rack|raf|sehpa/i, tur: ["MONTAJ", "ILAVE"], kalip: [/rack installation|standing rack/i] },
   { ekipman: /band|bant|one band|single band|dual band|triple band|modernization|modernizasyon/i, tur: ["ILAVE", "MONTAJ"], kalip: [/band addition/i] },
-  { ekipman: /modernization|modernizasyon|swap/i, tur: ["DEGISIM"], kalip: [/modernization/i, /band swap/i] },
+  // "swap" tek başına bant modernizasyonu değildir (anten swap'ı RRU/BBU Modernization'a eşlenmesin — ES0288 testi)
+  { ekipman: /modernization|modernizasyon|band swap|bant de[ğg]i[şs]imi/i, tur: ["DEGISIM"], kalip: [/band modernization/i, /band swap/i] },
   { ekipman: /survey|keşif|kesif/i, tur: ["DIGER"], kalip: [/site survey/i] },
+  { ekipman: /jumper/i, tur: ["MONTAJ", "ILAVE"], kalip: [/jumper/i] },
+  { ekipman: /cold\s*shrink/i, tur: ["MONTAJ", "ILAVE"], kalip: [/cold shrink/i] },
   { ekipman: /gps/i, tur: ["MONTAJ", "ILAVE"], kalip: [/gps equipment/i] },
   { ekipman: /climber|tırman/i, tur: ["DIGER", "MONTAJ"], kalip: [/climber/i] },
 ];
@@ -66,9 +72,26 @@ const TUR_TR = { MONTAJ: "montaj", SOKUM: "söküm", DEGISIM: "değişim", ILAVE
 // Yükseklik/ölçü eşlemesi: TSSR işinde "7,2 m" varsa katalogda aynı sayı aranır
 const sayilar = (s) => (String(s || "").replace(/,/g, ".").match(/\d+(?:\.\d+)?/g) || []).map(Number);
 
+// Anten çözümü: model alanı (anten_cozumu) ya da belge ifadesi. MEVCUT → yeni anten montajı / "with antenna revision" kalemleri önerilmez,
+// "without antenna revision" tercih edilir (28.10.2026, Orhan — KA3737: mevcut antenlere NR700 + LC900 ilavesi).
+function antenCozumu(is) {
+  const a = String(is.anten_cozumu || "").toUpperCase();
+  if (["MEVCUT", "YENI", "DEGISIM", "YOK"].includes(a)) return a;
+  const t = `${is.aciklama} ${is.dayanak}`;
+  if (/yeni\s+(\S+\s+){0,2}anten|new\s+antenna/i.test(t)) return "YENI";
+  if (/mevcut\s+(sekt[öo]r\s+)?anten|existing\s+antenna|mevcut\s+anten/i.test(t)) return "MEVCUT";
+  return "";
+}
+
 function kalemBul(katalog, is) {
   const metin = `${is.ekipman} ${is.aciklama}`;
-  const kurallar = ESLEME.filter((k) => k.ekipman.test(metin) && k.tur.includes(is.tur) && !(k.lprtDegil && /lprt/i.test(metin)));
+  const anten = antenCozumu(is);
+  // Önce ekipman alanına uyan kurallar; yoksa açıklama da taranır (KA3737: "İnce-ince jumper, RRU başına 4" → jumper, RRU kurulumu değil)
+  const uygun = (hedef) => ESLEME.filter((k) => k.ekipman.test(hedef) && k.tur.includes(is.tur) && !(k.lprtDegil && /lprt/i.test(metin))
+    // mevcut anten kullanılıyorsa "anten montajı" kuralı (açıklamada "antenlere" geçse bile) uygulanmaz
+    && !(anten === "MEVCUT" && k.kalip.some((rx) => String(rx) === String(/antenna installation/i))));
+  const ekipmanKurallari = String(is.ekipman || "").trim() ? uygun(String(is.ekipman)) : [];
+  const kurallar = ekipmanKurallari.length ? ekipmanKurallari : uygun(metin);
   if (!kurallar.length) return { durum: "KURAL_YOK", adaylar: [] };
   const adaylar = [];
   const bantNot = [];
@@ -86,6 +109,11 @@ function kalemBul(katalog, is) {
       }
       if (bant === "UYUMLU") puan += 2;
       if (bant === "TSSR_BANTSIZ") puan -= 0.5;
+      if (anten === "MEVCUT" && /\bwith antenna revision/i.test(d)) continue;           // mevcut anten → revizyonlu paket değil
+      if (anten === "MEVCUT" && /without antenna revision/i.test(d)) puan += 2;
+      if ((anten === "YENI" || anten === "DEGISIM") && /\bwith antenna revision/i.test(d)) puan += 2;
+      if (kural.oncelik && kural.oncelik.test(d)) puan += 1;
+      if (/band addition/i.test(d) && !/same site visit/i.test(d)) puan += 0.5;         // ana paket; "aynı ziyaret" varyantı alternatif kalır
       adaylar.push({ ...k, puan, bant_durumu: bant, kural: kural.kalip.map(String).join(" | ") });
     }
   }
@@ -142,7 +170,9 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
   const S = guncel.sonuc;
   sonuc.tssr_belge = { dosya: guncel.dosya_adi, url: guncel.belge_url, tarih: S.belge_tarihi, revizyon: S.revizyon, site_id: S.site_id, proje: S.proje,
     sayfa_sayisi: S.sayfa_sayisi, eksik_sayfalar: S.eksik_sayfalar, revizyon_sayisi: tssr.revizyon_sayisi, is_sayisi: S.isler.length, model: S.model, kaynak: guncel.kaynak };
-  if (S.site_id && site && S.site_id !== site) uyarilar.push({ tip: "SAHA", seviye: "KONTROL", anahtar: "tssr|saha", item_code: "",
+  // TSSR çoğu zaman yalnız kök kodu yazar (KA3737 ↔ KA3737_NR700_LC900_MWA) — kök kod eşleşmesi farklılık sayılmaz
+  const kok = (x) => String(x || "").toUpperCase().split("_")[0];
+  if (S.site_id && site && S.site_id !== site && kok(S.site_id) !== kok(site)) uyarilar.push({ tip: "SAHA", seviye: "KONTROL", anahtar: "tssr|saha", item_code: "",
     mesaj: `TSSR belgesindeki saha kodu (${S.site_id}) seçili sahadan (${site}) farklı görünüyor — doğru belge mi kontrol edin.`, dayanak: `${guncel.dosya_adi} sayfa 1` });
   if (S.eksik_sayfalar && S.eksik_sayfalar.length) uyarilar.push({ tip: "TSSR", seviye: "KONTROL", anahtar: "tssr|eksik_sayfa", item_code: "",
     mesaj: `TSSR'ın ${S.eksik_sayfalar.join(", ")}. sayfaları okunamadı — bulgular eksik olabilir.`, dayanak: guncel.dosya_adi });
@@ -156,20 +186,27 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
 
   // 3) Her TSSR işi için katalogdan karşılık
   const prEslesen = new Set();
+  const eslesmeler = S.isler.map((is) => kalemBul(katalog || [], is));
+  // Bant ilavesi / co-located paketi açıkça eşleşmişse RRU kurulumu paket kapsamında olabilir (KA3737: NR700 paketi + 3 RRU5526et):
+  // ayrı RRU kalemi "eksik talep" sayılmaz, kontrol notu düşülür
+  const paketIs = S.isler.findIndex((is, i) => eslesmeler[i].durum === "ACIK" && /band addition|co-located site|band modernization/i.test(eslesmeler[i].adaylar[0]?.aciklama_en || ""));
+  const paketKalem = paketIs >= 0 ? eslesmeler[paketIs].adaylar[0] : null;
   S.isler.forEach((is, i) => {
     const anahtar = `is|${i + 1}|${is.tur}|${(is.ekipman || "").slice(0, 20)}`;
     const dayanak = { dosya: guncel.dosya_adi, url: guncel.belge_url, sayfa: is.sayfa, bolum: is.bolum, alinti: is.dayanak };
-    const es = kalemBul(katalog || [], is);
+    const es = eslesmeler[i];
+    const paketKapsami = !!paketKalem && i !== paketIs && /\bRRU\b|\bRFU\b|jumper|cold shrink|fiber|f\/o|dc kablo|power cable/i.test(`${is.ekipman} ${is.aciklama}`) && ["MONTAJ", "ILAVE"].includes(is.tur);
     const karar = kararMap[anahtar] || null;
     const o = { anahtar, is: { sira: i + 1, tur: is.tur, tur_tr: TUR_TR[is.tur] || is.tur, aciklama: is.aciklama, teknoloji: is.teknoloji, bant: is.bant, ekipman: is.ekipman,
-        miktar: is.miktar, miktar_ham: is.miktar_ham, birim: is.birim }, dayanak, miktar_belgede: is.miktar !== null, durum: es.durum, adaylar: [], karar };
+        miktar: is.miktar, miktar_ham: is.miktar_ham, birim: is.birim, anten_cozumu: antenCozumu(is) }, dayanak, miktar_belgede: is.miktar !== null, durum: es.durum, adaylar: [], karar };
+    if (paketKapsami) o.paket_notu = `${paketKalem.kod} (${paketKalem.aciklama_en}) paketi bu işi kapsıyor olabilir — ayrı kalem açmadan önce paket SOW'unu kontrol edin.`;
     if (es.durum === "ACIK" || es.durum === "ALTERNATIF") {
       o.adaylar = es.adaylar.map((a, j) => {
         const pr = prMap[a.kod], po = poMap[a.kod];
         if (pr) prEslesen.add(a.kod);
         return { boq_kod: a.kod, aciklama: a.aciklama_en, aciklama_tr: a.aciklama_tr, birim: a.birim, para_birimi: a.para_birimi, birim_fiyat: a.birim_fiyat, bolge: a.bolge, surum: a.surum,
           kaynak: `${a.kaynak_dosya || ""} ${a.kaynak_sayfa || ""} ${a.kaynak_satir || ""}`.trim(), bant_durumu: a.bant_durumu,
-          gerekce: `TSSR'da ${TUR_TR[is.tur] || is.tur} (${is.ekipman || "ekipman belirtilmemiş"}${is.bant ? ", " + is.bant : ""}) → katalog açıklaması "${a.aciklama_en}"${a.bant_durumu === "UYUMLU" ? " · bant uyumlu" : a.bant_durumu === "TSSR_BANTSIZ" ? " · TSSR'da bant yazmıyor, kalem bant içeriyor — kontrol edin" : ""}${j > 0 ? " · alternatif" : ""}`,
+          gerekce: `TSSR'da ${TUR_TR[is.tur] || is.tur} (${is.ekipman || "ekipman belirtilmemiş"}${is.bant ? ", " + is.bant : ""}${antenCozumu(is) === "MEVCUT" ? ", mevcut anten" : ""}) → katalog açıklaması "${a.aciklama_en}"${a.bant_durumu === "UYUMLU" ? " · bant uyumlu" : a.bant_durumu === "TSSR_BANTSIZ" ? " · TSSR'da bant yazmıyor, kalem bant içeriyor — kontrol edin" : ""}${/same site visit/i.test(a.aciklama_en || "") ? " · aynı ziyarette başka ana paket varsa" : ""}${j > 0 ? " · alternatif" : ""}`,
           pr_var: !!pr, pr_qty: pr ? Number(pr.pr_qty ?? pr.done_qty ?? 0) : null, po_var: !!po, po_qty: po ? Number(po.requested_qty || 0) : null, po_no: po ? po.po_no : "" };
       });
       // Miktar uyuşmazlığı (belgede miktar yazıyorsa ve PR'da aynı kalem varsa)
@@ -184,8 +221,8 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
       if (mv) {
         o.mevcut_not = `${mv.boq_kod}: ${mv.pr_var ? "PR'da var" : ""}${mv.pr_var && mv.po_var ? ", " : ""}${mv.po_var ? `PO açık (${mv.po_no || "no yok"})` : ""} — yeniden talep mükerrer olabilir.`;
       }
-      // TSSR işi var, PR karşılığı yok
-      if (!o.adaylar.some((a) => a.pr_var) && !karar) {
+      // TSSR işi var, PR karşılığı yok (paket kapsamındaki RRU/jumper/kablo işleri hariç — onlar için yalnız paket notu)
+      if (!o.adaylar.some((a) => a.pr_var) && !karar && !paketKapsami) {
         uyarilar.push({ tip: "EKSIK", seviye: es.durum === "ACIK" ? "ONERI" : "KONTROL", anahtar: `eksik|${anahtar}`, item_code: es.durum === "ACIK" ? ilk.boq_kod : "", item_description: es.durum === "ACIK" ? ilk.aciklama : "",
           mesaj: es.durum === "ACIK"
             ? `TSSR sayfa ${is.sayfa || "?"}'de ${is.ekipman || ""} ${TUR_TR[is.tur] || ""} belirtiliyor; PR'da karşılık gelen kalem yok. ${ilk.boq_kod} kalemini kontrol edin.`
@@ -233,4 +270,4 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
   return sonuc;
 }
 
-module.exports = { kontrol, kalemBul, bantCikar, bantUyumu, ESLEME, TUR_TR };
+module.exports = { kontrol, kalemBul, bantCikar, bantUyumu, antenCozumu, ESLEME, TUR_TR };

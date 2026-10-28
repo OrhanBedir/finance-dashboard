@@ -34,6 +34,7 @@ const SEMA = nesne({
   isler: { type: "array", items: nesne({
     tur: { type: "string", enum: ["MONTAJ", "SOKUM", "DEGISIM", "ILAVE", "TASIMA", "REVIZYON", "DIGER"] },
     aciklama: M, teknoloji: M, bant: M, ekipman: M, miktar: M, birim: M, sayfa: TAM, bolum: M, dayanak: M,
+    anten_cozumu: M,
   }) },
   sorular: { type: "array", items: nesne({ soru: M, cevap: M, sayfa: TAM }) },
   sayfa_sayisi: TAM,
@@ -48,6 +49,7 @@ Kurallar:
 - site_id: belgede yazan tam saha kodunu (ör. ES0288_NR700_MWA) olduğu gibi ver; proje: proje/ihale adı (ör. TT Wireless, NR700, DSS); belge_tarihi: YYYY-AA-GG; revizyon: belgede yazan revizyon/versiyon ibaresi (yoksa "").
 - isler: sahada İSTENEN her işi ayrı satır olarak çıkar. tur: MONTAJ (yeni kurulum), SOKUM (demontaj), DEGISIM (swap/replacement), ILAVE (mevcut sisteme ekleme), TASIMA (relocation), REVIZYON (pole/offset/altyapı revizyonu), DIGER.
   teknoloji (LTE/NR/5G/DSS/MW…), bant (L800, L1800, NR700, NR3500, 2600 gibi belgede yazan ifade — tahminle değiştirme, yazmıyorsa ""), ekipman (anten, RRU, AAU, BBU, MW, pole, kabinet, kablo, topraklama, gizleme, vinç…).
+  anten_cozumu: işin antenle ilişkisi belgede nasıl yazıyorsa — "MEVCUT" (mevcut anten kullanılacak / "Mevcut Anten" / "mevcut sektör antenlerine"), "YENI" (yeni anten montajı), "DEGISIM" (anten swap/revizyon), "YOK" (işin antenle ilgisi yok); hedef konfigürasyon tablosundaki "Antenna Solution" satırına ve açıklamalara bak, yazmıyorsa "".
   miktar: yalnız belgede AÇIKÇA yazan sayı (ör. "3 ADET YENİ ANTEN" → "3"); yazmıyorsa "" bırak, tahmin etme. birim: belgede yazan birim (adet, m, set…) yoksa "".
   sayfa: işin yazdığı sayfa; bolum: tablo/bölüm başlığı; dayanak: belgeden kısa alıntı (en fazla 160 karakter).
 - Guideline/şablon talimat metinlerini (genel pole, gizleme, akü kuralları) iş olarak yazma; yalnız bu sahaya özgü talep/işaretlenmiş cevapları al.
@@ -143,6 +145,7 @@ function normallestir(veri, model) {
     sira: i + 1, tur: metinAl(x.tur) || "DIGER", aciklama: metinAl(x.aciklama), teknoloji: metinAl(x.teknoloji), bant: metinAl(x.bant).toUpperCase(),
     ekipman: metinAl(x.ekipman), miktar: miktarAl(x.miktar), miktar_ham: metinAl(x.miktar), birim: metinAl(x.birim), sayfa: Number(x.sayfa) || null,
     bolum: metinAl(x.bolum), dayanak: metinAl(x.dayanak).slice(0, 200),
+    anten_cozumu: metinAl(x.anten_cozumu).toUpperCase().replace("İ", "I"),
   }));
   const sorular = (Array.isArray(veri.sorular) ? veri.sorular : []).map((x) => ({ soru: metinAl(x.soru), cevap: metinAl(x.cevap), sayfa: Number(x.sayfa) || null }));
   const sayfa = Number(veri.sayfa_sayisi) || 0;

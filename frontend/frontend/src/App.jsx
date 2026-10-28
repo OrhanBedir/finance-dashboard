@@ -8280,6 +8280,7 @@ function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = fals
                     </div>
                   )) : <div style={{ marginTop:5, fontSize:12, color:"#b45309", fontWeight:600 }}>Eşleşme doğrulanamadı — {o.mesaj}</div>}
                   {o.mevcut_not && <div style={{ fontSize:11, color:"#b45309", marginTop:4 }}>⚠ {o.mevcut_not}</div>}
+                  {o.paket_notu && <div style={{ fontSize:11, color:"#7c3aed", marginTop:4 }}>ⓘ {o.paket_notu}</div>}
                 </div>
               ))}
               <div style={{ fontSize:10.5, color:"#94a3b8", marginTop:4 }}>TSSR'da bulunması faturalanabilirlik ya da müşteri onayı kanıtı değildir; "Talebe ekle" gride satır ekler, Kaydet'e kadar kayıt yapılmaz.</div>
