@@ -6789,27 +6789,36 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const gorunen = tekSaha && secili ? kapsamdaki.filter((s) => s.fiziksel_id === secili) : kapsamdaki;
   const pinli = gorunen.filter((s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk));
   const konumsuz = gorunen.filter((s) => !(s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk)));
-  const kutuyaSigdir = (liste) => {
-    const pts = liste.map((s) => proj(s.konum.lng, s.konum.lat));
-    if (veri?.depo?.dogrulandi && !liste.length) pts.push(proj(veri.depo.lng, veri.depo.lat));
+  // Yakınlaştırma sınırı (28.10.2026): fare tekerleğiyle harita kaybolacak kadar uzaklaşmasın / pikselleşecek kadar yaklaşmasın
+  const sinirliOran = (w, k) => Math.min(Math.max(w * k, 12), 2400) / w;
+  const noktalaraSigdir = (pts) => {
     if (!pts.length) { setView({ x: 0, y: 0, w: 1800, h: 900 }); return; }
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
     const w = Math.max(maxX - minX, 60), h = Math.max(maxY - minY, 40), pad = Math.max(w, h) * 0.25;
     setView({ x: minX - pad, y: minY - pad, w: w + 2 * pad, h: h + 2 * pad });
   };
+  const kutuyaSigdir = (liste) => {
+    const pts = liste.map((s) => proj(s.konum.lng, s.konum.lat));
+    if (veri?.depo?.dogrulandi && !liste.length) pts.push(proj(veri.depo.lng, veri.depo.lat));
+    noktalaraSigdir(pts);
+  };
   useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, secili]); // eslint-disable-line
+  // 28.10.2026 (Orhan): seçili sahanın Bursa deposundan karayolu güzergâhı — gelince harita depo + yol + sahaya sığdırılır
+  const rotaCizgi = secili && rota?.ok !== false && rota?.karayolu?.durum === "OK" && Array.isArray(rota.karayolu.cizgi) && rota.karayolu.cizgi.length > 1 ? rota.karayolu.cizgi : null;
+  const rotaYolu = useMemo(() => rotaCizgi ? rotaCizgi.map(([lng, lat], i) => { const [x, y] = proj(lng, lat); return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`; }).join("") : "", [rotaCizgi]); // eslint-disable-line
+  useEffect(() => { if (rotaCizgi) noktalaraSigdir(rotaCizgi.map(([lng, lat]) => proj(lng, lat))); }, [rotaCizgi]); // eslint-disable-line
   useEffect(() => {
     const el = svgRef.current; if (!el) return;
     const onWheel = (ev) => {
       ev.preventDefault();
       const r = el.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height;
-      setView((v) => { const k = ev.deltaY > 0 ? 1.2 : 1 / 1.2; const w = v.w * k, h = v.h * k; return { x: v.x + (v.w - w) * px, y: v.y + (v.h - h) * py, w, h }; });
+      setView((v) => { const k = sinirliOran(v.w, ev.deltaY > 0 ? 1.2 : 1 / 1.2); const w = v.w * k, h = v.h * k; return { x: v.x + (v.w - w) * px, y: v.y + (v.h - h) * py, w, h }; });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [veri]);
-  const zoom = (k) => setView((v) => ({ x: v.x + (v.w - v.w * k) / 2, y: v.y + (v.h - v.h * k) / 2, w: v.w * k, h: v.h * k }));
+  const zoom = (k0) => setView((v) => { const k = sinirliOran(v.w, k0); return { x: v.x + (v.w - v.w * k) / 2, y: v.y + (v.h - v.h * k) / 2, w: v.w * k, h: v.h * k }; });
   const surukle = (cx, cy) => {
     const d = drag.current; if (!d || !svgRef.current) return;
     const r = svgRef.current.getBoundingClientRect();
@@ -6832,7 +6841,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   }, [arama, kapsamdaki]);
   const temizle = () => { setArama(""); setSecili(null); setTekSaha(false); setBolge("ALL"); setRota(null); };
   const seciliSaha = (veri?.sahalar || []).find((s) => s.fiziksel_id === secili) || null;
-  const sw = view.w / 1100, pinK = Math.max(0.35, view.w / 1400), etiketGoster = view.w < 260;
+  const pinK = Math.max(0.35, view.w / 1400), etiketGoster = view.w < 260;
   const depo = veri?.depo;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
@@ -6878,10 +6887,14 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
             {hata ? <div style={{ padding: 24, color: "#b91c1c", fontWeight: 700 }}>Harita verisi alınamadı: {hata}</div> : !veri ? <div style={{ padding: 24, color: "#64748b" }}>Harita yükleniyor…</div> : (
               <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} style={{ width: "100%", height: "100%", display: "block", cursor: drag.current ? "grabbing" : "grab" }}
                 onMouseDown={(e) => { drag.current = { cx: e.clientX, cy: e.clientY, v: view }; }} onMouseMove={(e) => surukle(e.clientX, e.clientY)} onMouseUp={() => { drag.current = null; }} onMouseLeave={() => { drag.current = null; }}>
-                {iller.map((il) => <path key={il.ad} d={il.d} fill="#eef2f7" stroke="#cbd5e1" strokeWidth={sw} />)}
+                {iller.map((il) => <path key={il.ad} d={il.d} fill="#eef2f7" stroke="#b8c4d4" strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
+                {rotaYolu && <g style={{ pointerEvents: "none" }}>
+                  <path d={rotaYolu} fill="none" stroke="#fff" strokeWidth={8} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                  <path d={rotaYolu} fill="none" stroke="#2563eb" strokeWidth={4.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                </g>}
                 {depo?.dogrulandi && (() => { const [x, y] = proj(depo.lng, depo.lat); return (
                   <g transform={`translate(${x},${y}) scale(${pinK})`}><rect x="-9" y="-9" width="18" height="18" rx="3" fill="#0f172a" stroke="#fff" strokeWidth="2" /><text x="0" y="4" textAnchor="middle" fontSize="11" fill="#fff" fontWeight="800">D</text>
-                    {etiketGoster && <text x="12" y="4" fontSize="10" fill="#0f172a" fontWeight="700">Bursa Depo</text>}</g>); })()}
+                    {(etiketGoster || rotaYolu) && <text x="12" y="4" fontSize="10" fill="#0f172a" fontWeight="700" stroke="#fff" strokeWidth="3" paintOrder="stroke">Bursa Depo</text>}</g>); })()}
                 {kumeler.map((grup) => {
                   if (grup.length > 1 && !tekSaha) {
                     const cx = grup.reduce((a, b) => a + b.x, 0) / grup.length, cy = grup.reduce((a, b) => a + b.y, 0) / grup.length;
@@ -6900,7 +6913,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
               </svg>
             )}
             {veri && <div className="rhmap-zoom"><button type="button" onClick={() => zoom(1 / 1.4)} aria-label="Yakınlaştır">+</button><button type="button" onClick={() => zoom(1.4)} aria-label="Uzaklaştır">−</button></div>}
-            <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0) · dış harita servisi kullanılmaz</div>
+            <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0){rotaYolu ? <> · Güzergâh: OSRM, harita verisi © OpenStreetMap katkıcıları (ODbL)</> : null}</div>
           </div>
           <div className="rhmap-panel">
             {veri && <div style={{ marginBottom: 10 }}>
@@ -6929,6 +6942,15 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                     <div className="rhmap-k">{depo.ad} — {depo.adres}</div>
                     <div>Kuş uçuşu: <b>{rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km ?? "—"}{(rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km) != null ? " km" : ""}</b></div>
                     <div>Karayolu: {!rota ? "hesaplanıyor…" : rota.karayolu?.durum === "OK" ? <b>{rota.karayolu.km.toFixed(1)} km · ~{Math.round(rota.karayolu.dakika)} dk</b> : <span className="rhmap-k">{rota.karayolu?.mesaj || rota.hata || "hesaplanmadı"}</span>}</div>
+                    {rotaYolu && <div className="rhmap-k"><span style={{ display: "inline-block", width: 18, height: 4, background: "#2563eb", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />Haritadaki mavi çizgi: depodan sahaya karayolu güzergâhı</div>}
+                    {seciliSaha.konum && ["KESIN", "CELISKILI"].includes(seciliSaha.konum.dogruluk) && (() => {
+                      // Yol tarifi dış haritada: yalnız kullanıcı tıklarsa açılır (depo → saha koordinatı Google / Yandex'e gider)
+                      const o = `${depo.lat},${depo.lng}`, h = `${seciliSaha.konum.lat},${seciliSaha.konum.lng}`;
+                      return <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                        <a className="rhmap-btn" style={{ textDecoration: "none" }} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${h}&travelmode=driving`}>Google Haritalar'da yol tarifi ↗</a>
+                        <a className="rhmap-btn" style={{ textDecoration: "none" }} target="_blank" rel="noreferrer" href={`https://yandex.com.tr/harita/?rtext=${o}~${h}&rtt=auto`}>Yandex'te yol tarifi ↗</a>
+                      </div>;
+                    })()}
                   </>}
                 </div>
                 <button type="button" className="rhmap-btn" style={{ marginTop: 10 }} onClick={() => { setSecili(null); setTekSaha(false); setArama(""); }}>Seçimi kaldır</button>
