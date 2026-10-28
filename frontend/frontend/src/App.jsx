@@ -13298,7 +13298,7 @@ function FinanceDashboard({
         : "tum_taseronlar";
       // Hakediş kolon başlığı seçili taşerona göre dinamik (yoksa genel "Taşeron Hakediş")
       const _expSub = String(subconFilter || "").trim();
-      const _expPct = ["ahy", "tekno"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "tekno" ? 100 : canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş (Kırılım)";
       const _hakKdvHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct}) KDV Dahil` : "Taşeron Hakediş (Kırılım) KDV Dahil";
 
@@ -13396,8 +13396,8 @@ function FinanceDashboard({
         const toplamHakedis = isUSD ? rawTotal * usdR : rawTotal;
         const subconLower = String(row.subcon_name || "").toLowerCase().trim();
         const subconCanon = canonTaseron(row.subcon_name);
-        // Kırılım oranı taşerona göre: AHY %90 (2026-07 anlaşması), diğerleri %80
-        const kirilimOran = ["ahy", "tekno"].includes(subconCanon) ? 0.90 : 0.80;
+        // Kırılım oranı taşerona göre: Teknocenter %100 (28.10.2026, HW ödemesi aynen aktarılır), AHY %90 (2026-07 anlaşması), diğerleri %80
+        const kirilimOran = subconCanon === "tekno" ? 1 : subconCanon === "ahy" ? 0.90 : 0.80;
         let federalHakedis = toplamHakedis * kirilimOran;
 
         // Manuel taşeron hakedişi varsa (kalem bazlı) sistemdeki kırılım hesabını override et
@@ -18781,7 +18781,7 @@ function FinanceDashboard({
                   <div style={{ marginTop:"6px", fontSize:"11px", fontWeight:600, color: isFixed ? "#0369a1" : "#7c3aed" }}>
                     {isFixed
                       ? "🔹 Sabit fiyat taşeron — hakediş saha (Site ID) bazında girilir, kalem seçimi opsiyoneldir."
-                      : `🔸 Kırılım taşeron — hakediş kalem (Item) bazında %${["ahy", "tekno"].includes(c) ? 90 : 80} olarak girilir.`}
+                      : `🔸 Kırılım taşeron — hakediş kalem (Item) bazında %${c === "tekno" ? 100 : c === "ahy" ? 90 : 80} olarak girilir.`}
                   </div>
                 );
               })()}
@@ -29904,7 +29904,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
 
     const itemCode = String(row.item_code || "").trim();
 
-    if (subconName.includes("ahy") || canonTaseron(subconName) === "tekno") return 0.9; // AHY / Teknocenter %90
+    if (canonTaseron(subconName) === "tekno") return 1; // Teknocenter %100 (28.10.2026)
+    if (subconName.includes("ahy")) return 0.9; // AHY %90
     if (subconName === "federal") return 0.8;
 
     if (subconName === "ubs") {
@@ -30283,7 +30284,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     const _name = subconDisplayName || userSubconName || "Taşeron";
     // Fatura zinciri kolonları: Şimşek HW'ye %80 keser; taşeron Şimşek'e
     // o bedelin kendi kırılım yüzdesi kadarını keser (AHY %90 → net %72)
-    const _pct = ["ahy", "tekno"].includes(canonTaseron(userSubconName)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
+    const _pct = canonTaseron(userSubconName) === "tekno" ? 100 : canonTaseron(userSubconName) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(userSubconName)) ? 75 : 80;
     const header = [
       "Site ID",
       "İş Açıklaması",
@@ -30407,7 +30408,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const searchSuffix = regionSearch.trim() ? ` - ${regionSearch.trim()}` : "";
       // Hakediş kolon başlığı taşerona göre dinamik (Federal → AHY → UBS ...)
       const _expSub = String(userSubconName || "").trim();
-      const _expPct = ["ahy", "tekno"].includes(canonTaseron(_expSub)) ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
+      const _expPct = canonTaseron(_expSub) === "tekno" ? 100 : canonTaseron(_expSub) === "ahy" ? 90 : ["ubs", "2kx"].includes(canonTaseron(_expSub)) ? 75 : 80;
       const _hakHdr = _expSub ? `${_expSub.toUpperCase()} Hakediş (%${_expPct})` : "Taşeron Hakediş";
       // Tablo KDV HARİÇ kurgulanır (taşeron faturasını KDV hariç bedel üzerinden keser)
       const _tsr = _expSub ? _expSub.toUpperCase() : "TAŞERON";
@@ -30787,7 +30788,7 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
     federal: { rf: 0.80, gizleme: 0.80, genel: 0.80 },
     // AHY Elektrik: anahtar teslim %90 kırılım (2026-07 anlaşması, eski %80)
     ahy:     { rf: 0.90, gizleme: 0.90, genel: 0.90 },
-    tekno:   { rf: 0.90, gizleme: 0.90, genel: 0.90 }, // Teknocenter (01.10.2026, AHY ile aynı kural)
+    tekno:   { rf: 1, gizleme: 1, genel: 1 }, // Teknocenter %100 (28.10.2026: Şimşek'e gelen HW ödemesi aynen Teknocenter kasasına)
     "2kx":   { rf: 0.75, gizleme: 0.75, genel: 0.75 },
   };
   const subconRates = subconRateMap[_subconKey] || { rf: 1, gizleme: 1, genel: 1 };

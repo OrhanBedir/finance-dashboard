@@ -9010,7 +9010,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
     let yuzde = 10;
     try {
       const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod=$1 LIMIT 1", [marka]);
-      if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
+      if (m.rows[0]) yuzde = m.rows[0].kirilim_yuzde == null ? 10 : Number(m.rows[0].kirilim_yuzde); // 0 geçerli (TEKNO %100)
     } catch {}
     // Devir kurgusu (16.07.2026): Gelir = markanın Şimşek Haberleşme'ye
     // KESTİĞİ faturalar (invoice_entries, firma canon eşleşme, fatura tarihi
@@ -9387,7 +9387,7 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
     let yuzde = 10;
     try {
       const m = await pool.query("SELECT kirilim_yuzde FROM markalar WHERE kod=$1 LIMIT 1", [marka]);
-      if (m.rows[0]) yuzde = Number(m.rows[0].kirilim_yuzde || 10);
+      if (m.rows[0]) yuzde = m.rows[0].kirilim_yuzde == null ? 10 : Number(m.rows[0].kirilim_yuzde); // 0 geçerli (TEKNO %100)
     } catch {}
     const ahyPay = (100 - yuzde) / 100; // markanın payı (varsayılan %90)
     // Markanın Şimşek'e kestiği faturalar: tedarikçi ilk kelimesi marka öneki (AHY, TEKNOCENTER…)
@@ -15429,7 +15429,7 @@ async function fetchData(isAdmin, subconName, scopeName = null) {
   const poOpenedButNotInvoiced = Math.max(okAmount - totalBilled, 0);
 
   const _scnLower = String(subconName || "").trim().toLowerCase();
-  const _altPay = altMarkaPayOf(_scnLower); // AHY / TEKNO %90 (markalar.kirilim_yuzde)
+  const _altPay = altMarkaPayOf(_scnLower); // AHY %90, TEKNO %100 (markalar.kirilim_yuzde)
   const paymentRate =
     _altPay != null
       ? _altPay
@@ -15867,7 +15867,7 @@ app.get("/export/region-analysis", authMiddleware, async (req, res) => {
       let subconRate = 1;
 
       if (altMarkaPayOf(subconName) != null) {
-        subconRate = altMarkaPayOf(subconName); // AHY / TEKNO %90 (markalar.kirilim_yuzde)
+        subconRate = altMarkaPayOf(subconName); // AHY %90, TEKNO %100 (markalar.kirilim_yuzde)
       } else if (subconName === "federal") {
         subconRate = 0.8;
       } else if (subconName === "ubs") {
@@ -28507,7 +28507,7 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
       ADD COLUMN IF NOT EXISTS devir_bitis DATE,
       ADD COLUMN IF NOT EXISTS devralinan TEXT`);
     await pool.query(`INSERT INTO markalar (tenant,kod,ad,hw_yukleme,kirilim_yuzde,taseron_onek,devir_baslangic,devralinan)
-      VALUES ('erc','TEKNO','Teknocenter',false,10,'TEKNO',DATE '2026-10-01','AHY') ON CONFLICT (kod) DO NOTHING`);
+      VALUES ('erc','TEKNO','Teknocenter',false,0,'TEKNO',DATE '2026-10-01','AHY') ON CONFLICT (kod) DO NOTHING`);
     await pool.query(`UPDATE markalar SET taseron_onek='AHY', devir_baslangic=DATE '2026-07-15', devir_bitis=DATE '2026-09-30'
       WHERE kod='AHY' AND (taseron_onek IS NULL OR devir_baslangic IS NULL OR devir_bitis IS NULL)`);
     await pool.query(`UPDATE markalar SET taseron_onek='TEKNO', devir_baslangic=DATE '2026-10-01', devralinan='AHY'
