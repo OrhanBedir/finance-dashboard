@@ -7615,7 +7615,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         ...base(r),
         "Site Fiziksel Tip":        r.site_physical_type || "",
         "Malzeme Status":           r.malzeme_status || "",
-        "RF Subcon":                r.rf_subcon || "",
+        "RF Subcon":                r._taseron_cozum?.rf?.durum === "COKLU" ? `Birden fazla taşeron — kontrol gerekli: ${(r._taseron_cozum.rf.adaylar || []).join(", ")}` : (r.rf_subcon || ""),
         "Plan Start Date":          fdHw(r.plan_start_date, r.rf_subcon),
         "Installation Start Date":  fdHw(r.installation_actual_start_date, r.rf_subcon),
         "Installation End Date":    fdHw(r.installation_actual_end_date, r.rf_subcon),
@@ -8285,7 +8285,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
                   <td>{row.malzeme_status}</td>
                   <td>{row.il}</td>
 
-                  <td>{row.rf_subcon}</td>
+                  <td>{row._taseron_cozum?.rf?.durum === "COKLU"
+                    ? <span title={`Günlük İş Girişi'nde birden fazla RF taşeronu: ${(row._taseron_cozum.rf.adaylar || []).join(", ")}`} style={{ color:"#92400e", fontWeight:700 }}>⚠ {row.rf_subcon || "Kontrol gerekli"}</span>
+                    : row.rf_subcon}</td>
                   <td>{formatDate(row.inst_plan_start_date)}</td>
                   <td>{formatDate(row.installation_actual_start_date)}</td>
                   <td>{formatDate(row.installation_actual_end_date)}</td>
@@ -9245,7 +9247,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
       item_code: kod, item_description: aciklama || "",
       project_code: data.meta?.project_code || "", site_type: data.meta?.site_type || "",
       pr_qty: null, done_qty: 0, requested_qty: 0, due_qty: 0, billed_qty: 0,
-      qc_durum: "", subcon_name: data.meta?.rf_subcon || "", po_no: "", yeni: true,
+      qc_durum: "", subcon_name: data.meta?.varsayilan_taseron || "", po_no: "", yeni: true,
     }]));
     setHucre(kod, "pr_qty", String(adet || 1));
   };
@@ -9350,7 +9352,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
         project_code: r.project_code || data.meta?.project_code || "",
         site_type: r.site_type || data.meta?.site_type || "",
         item_description: r.item_description || "",
-        subcon_name: r.subcon_name || data.meta?.rf_subcon || "",
+        subcon_name: r.subcon_name || data.meta?.varsayilan_taseron || "", // 28.10.2026: grup adı (TEKNO) kaleme yazılmaz
       });
     });
     return liste;
@@ -9436,7 +9438,13 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
             {data.meta?.site_type   && <span>Tür <b style={{ color:"#0f172a" }}>{data.meta.site_type}</b></span>}
             {(data.meta?.bolge || data.meta?.il) && <span>Bölge <b style={{ color:"#0f172a" }}>{data.meta.bolge || data.meta.il}</b></span>}
             {data.meta?.project_code && <span>Proje <b style={{ color:"#0f172a" }}>{data.meta.project_code}</b></span>}
-            {data.meta?.rf_subcon    && <span>Subcon <b style={{ color:"#0f172a" }}>{data.meta.rf_subcon}</b></span>}
+            {/* 28.10.2026: RF taşeronu ortak çözümden — Günlük İş Girişi tam adı esas; birden fazlaysa seçilmez */}
+            {data.meta?.rf_taseron?.durum === "COKLU"
+              ? <span title={(data.meta.rf_taseron.kalemler || []).map((k) => `${k.item_code || ""} ${k.aciklama || ""} → ${k.taseron}`).join("\n") || (data.meta.rf_taseron.adaylar || []).join(", ")}
+                  style={{ background:"#fef3c7", color:"#92400e", borderRadius:999, padding:"2px 10px", fontWeight:700 }}>
+                  ⚠ Birden fazla taşeron — kontrol gerekli: {(data.meta.rf_taseron.adaylar || []).join(", ")}</span>
+              : data.meta?.rf_subcon && <span title={data.meta?.rf_taseron?.kaynak === "GUNLUK" ? "Kaynak: Günlük İş Girişi (RF kalemi)" : data.meta?.rf_taseron?.kaynak === "ROLLOUT" ? "Kaynak: Rollout (Günlük İş Girişi'nde RF kaydı yok)" : ""}>
+                  Subcon <b style={{ color:"#0f172a" }}>{data.meta.rf_subcon}</b></span>}
             {boqSecim?.surum && <span style={{ background: boqSecim.surum === "BOQ2026" ? "#dcfce7" : "#fef3c7", color: boqSecim.surum === "BOQ2026" ? "#166534" : "#b45309", borderRadius:999, padding:"2px 10px", fontWeight:800, fontSize:11 }}
               title={boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen ? `Tarihe aykırı seçim · gerekçe: ${boqSecim.gerekce || "yazılmadı"}` : "Malzeme geliş tarihine göre önerilen sürüm"}>
               {boqSecim.surum === "BOQ2026" ? "2026 BoQ" : "2025 BoQ"}{boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen ? " ⚠" : ""}</span>}
@@ -9705,7 +9713,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
                     item_code: o.item_code, item_description: o.item_description || "",
                     project_code: data.meta?.project_code || "", site_type: data.meta?.site_type || "",
                     pr_qty: null, done_qty: 0, requested_qty: 0, due_qty: 0, billed_qty: 0,
-                    qc_durum: "", subcon_name: data.meta?.rf_subcon || "", po_no: "", yeni: true,
+                    qc_durum: "", subcon_name: data.meta?.varsayilan_taseron || "", po_no: "", yeni: true,
                   }]));
                   setHucre(o.item_code, "pr_qty", String(o.ort_adet || 1));
                 }}

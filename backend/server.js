@@ -572,6 +572,7 @@ const prKontrol = require("./prKontrol");
 const teknoHakedis = require("./teknoHakedis");
 // 28.10.2026 (Orhan): fiziksel saha kimliği ↔ iş kaydı, saha konumu / depo mesafesi (Rollout haritası)
 const sahaKimlik = require("./sahaKimlik");
+const taseronCozum = require("./taseronCozum"); // 28.10.2026: Günlük İş Girişi ↔ Rollout taşeron çözümü
 const sahaKonum = require("./sahaKonum");
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
@@ -2013,6 +2014,53 @@ async function markaIsAtamaUygun(K, kategori, sites, on = null) {
     if (!uygun) return { ok: false, hata: `${sc}: bu iş kolu firmanızın kapsamında değil` };
   }
   return { ok: true };
+}
+// ═══ TAŞERON EŞİTLEME — Günlük İş Girişi → Rollout (28.10.2026, Orhan) ═══════════════════════════════════════════
+// Günlük İş Girişi'ne kayıt / düzenleme / silme / toplu yükleme yapılan iş kodları için çağrılır (tek ortak yol).
+// İş kolunda tek ve doğrulanabilir taşeron varsa Rollout'taki ilgili *_subcon tam adla güncellenir (ör. TEKNO → TEKNO_EMRAH);
+// birden fazla taşeron varsa değiştirilmez. Kayıt silinir / taşeron boşaltılırsa ve Rollout'taki değer daha önce bu eşitlemeyle
+// yazılmışsa eşitleme öncesi değere dönülür (dayanak: islem_gecmisi TASERON_ESITLEME — eski değer burada saklıdır, geri alma
+// da buradan yapılır). PR/PO, hakediş, fatura, ödeme kayıtlarına dokunulmaz. Alt marka hesabı yalnız kendi iş kolunu,
+// yine kendi firmasına ait bir adla değiştirebilir (taşeron adını değiştirerek başka firmanın işine erişilemez).
+async function rolloutTaseronEsitle(siteCodes, req = null, kaynak = "Günlük İş Girişi", { kuru = false } = {}) {
+  const kodlar = [...new Set((siteCodes || []).map((x) => String(x || "").replace(/\s+/g, "").toUpperCase()).filter(Boolean))];
+  if (!kodlar.length) return { degisen: [] };
+  const es = await rolloutFirmaEsleyicileri();
+  const mw = await taseronCozum.mwGetir(pool, kodlar);
+  const rp = await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [kodlar]);
+  const K = req && typeof req === "object" ? await markaRolloutKapsami(req).catch(() => null) : null;
+  const degisen = [];
+  for (const { j } of rp.rows) {
+    const sc = String(j.site_code || "").replace(/\s+/g, "").toUpperCase();
+    const coz = taseronCozum.cozumle(mw.get(sc) || [], j, es);
+    const sahip = K ? markaRolloutSahiplik(K, j) : null;
+    const eskiO = {}, yeniO = {};
+    let gecmis = null;
+    for (const kol of taseronCozum.KOLLAR) {
+      const alan = `${kol}_subcon`, z = coz[kol], eski = taseronCozum.adNorm(j[alan]);
+      let yeni;
+      if (z && z.kaynak === "GUNLUK" && ["ROLLOUT_BOS", "GRUP_ADI", "CELISKI"].includes(z.durum)) yeni = z.gorunen;
+      else if (eski && (!z || z.durum === "GUNLUK_YOK")) {
+        // Rollout Excel yüklemesi satırları silip yeniden yazar (kimlik değişir): geçmiş iş koduyla da aranır
+        if (!gecmis) gecmis = (await pool.query(`SELECT eski, yeni FROM islem_gecmisi WHERE modul='rollout' AND tip='TASERON_ESITLEME'
+          AND (kayit_id = $1 OR aciklama LIKE '%' || $2) ORDER BY id DESC LIMIT 50`, [j.id, ` · ${j.site_code}`])).rows;
+        const son = gecmis.find((x) => x.yeni && Object.prototype.hasOwnProperty.call(x.yeni, alan));
+        if (!son || taseronCozum.adNorm(son.yeni[alan]) !== eski) continue;
+        yeni = son.eski?.[alan] ?? null; // eşitlemeyle yazılmış ad, kaynağı kalkınca geri alınır
+      } else continue;
+      if (taseronCozum.katla(yeni) === taseronCozum.katla(eski)) continue;
+      if (K && (sahip?.[kol] !== "BEN" || !K.esle(yeni))) continue;
+      eskiO[alan] = eski; yeniO[alan] = yeni ?? null;
+    }
+    if (!Object.keys(yeniO).length) continue;
+    degisen.push({ id: j.id, site_code: j.site_code, eski: eskiO, yeni: yeniO });
+    if (kuru) continue;
+    const alanlar = Object.keys(yeniO);
+    await pool.query(`UPDATE rollout_progress SET ${alanlar.map((a, i) => `${a} = $${i + 2}`).join(", ")}, updated_at = NOW() WHERE id = $1`,
+      [j.id, ...alanlar.map((a) => yeniO[a])]);
+    await islemGecmisiYaz(req && typeof req === "object" ? req : "sistem:taseron-esitleme", "rollout", j.id, "TASERON_ESITLEME", eskiO, yeniO, `${kaynak} · ${j.site_code}`);
+  }
+  return { degisen };
 }
 // Liste süzgeci: tek sorguyla kategori kolonları + saha satırları
 async function markaIsAtamaSuz(K, rows, email) {
@@ -7251,11 +7299,28 @@ app.get("/master/saha-kalemler", async (req, res) => {
     }));
 
     const meta = metaRes.rows[0] || {};
-    // Subcon: rollout'ta yoksa kalemlerde en çok geçen taşeron
-    if (!meta.rf_subcon) {
-      const sayac = {};
-      rows.forEach((r) => { if (r.subcon_name) sayac[r.subcon_name] = (sayac[r.subcon_name] || 0) + 1; });
-      meta.rf_subcon = Object.entries(sayac).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+    // 28.10.2026: başlıktaki taşeron ortak çözümden (taseronCozum): RF iş kolunun Günlük İş Girişi taşeronu (tam ad) esastır;
+    // grup adı (TEKNO) onun yerine geçmez; birden fazla taşeron varsa seçilmez, "kontrol gerekli" gösterilir. "En çok geçen"
+    // kuralı kaldırıldı (sessiz seçim). varsayilan_taseron: yeni kalem satırının ön değeri — grup adı asla ön değer olmaz.
+    {
+      const es = await rolloutFirmaEsleyicileri();
+      const rpTam = (await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site])).rows[0]?.j || null;
+      const mwSat = (await taseronCozum.mwGetir(pool, [site])).get(site) || [];
+      const coz = taseronCozum.cozumle(mwSat, rpTam, es);
+      const rf = coz.rf || null;
+      const rollRf = taseronCozum.adNorm(rpTam?.rf_subcon);
+      let baslik = rf ? (rf.durum === "COKLU" ? null : rf.gorunen) : rollRf;
+      let durum = rf ? rf.durum : (rollRf ? "GUNLUK_YOK" : "YOK"), adaylar = rf?.adaylar || [];
+      if (!rf && !rollRf) { // RF kalemi ve Rollout kaydı yoksa: ana kalemlerdeki taşeronlar (tek ise o, değilse kontrol gerekli)
+        const tum = [...new Set(mwSat.filter((x) => taseronCozum.kalemKolu(x.item_description)).map((x) => taseronCozum.adNorm(x.subcon_name)).filter(Boolean))];
+        if (tum.length === 1) { baslik = tum[0]; durum = "GUNLUK_TEK"; } else if (tum.length > 1) { durum = "COKLU"; adaylar = tum; }
+      }
+      meta.rf_subcon = baslik || "";
+      meta.rf_taseron = { durum, kaynak: rf?.kaynak || (rollRf ? "ROLLOUT" : (durum === "GUNLUK_TEK" ? "GUNLUK" : "YOK")), adaylar,
+        rollout: rollRf, kalemler: rf?.durum === "COKLU" ? rf.kalemler : undefined };
+      meta.taseron_cozum = Object.fromEntries(Object.entries(coz).map(([k, z]) => [k, { durum: z.durum, kaynak: z.kaynak, gorunen: z.gorunen, adaylar: z.adaylar, rollout: z.rollout }]));
+      meta.varsayilan_taseron = (rf?.kaynak === "GUNLUK" && rf.gorunen) || (durum === "GUNLUK_TEK" ? baslik : "")
+        || (rollRf && !taseronCozum.grupAdiMi(es, rollRf) ? rollRf : "");
     }
     if (!meta.site_type) meta.site_type = rows.find((r) => r.site_type)?.site_type || "";
     // Proje kodunda otorite PO'dur (01.09.2026, Orhan): rollout kaydı farklı
@@ -7296,7 +7361,9 @@ app.delete("/master/saha-kalem", authMiddleware, async (req, res) => {
        RETURNING id`,
       [site, item],
     );
-    res.json({ ok: true, silinen: r.rowCount });
+    // Kalem silindi: Rollout taşeronu yeniden değerlendirilir (eşitlemeyle yazılmış ad kaynağı kalkınca geri alınır)
+    const esit = await rolloutTaseronEsitle([site], req, "Günlük İş Girişi (kalem silme)").catch(() => ({ degisen: [] }));
+    res.json({ ok: true, silinen: r.rowCount, taseron_esitleme: esit.degisen });
   } catch (err) {
     console.error("SAHA KALEM SIL ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -7311,6 +7378,12 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
     const kalemler = Array.isArray(req.body.kalemler) ? req.body.kalemler : [];
     if (!site) return res.status(400).json({ ok: false, error: "Saha kodu zorunlu" });
     if (!kalemler.length) return res.json({ ok: true, guncellenen: 0, eklenen: 0 });
+    // 28.10.2026: alt marka (Teknocenter) — saha kapsamda olmalı, yazılan taşeron adı kendi firmasına ait olmalı
+    { const K = await markaRolloutKapsami(req).catch(() => null);
+      if (K) {
+        if (!(await markaRolloutSahaKapsamda(K, site))) return res.status(403).json({ ok: false, error: "Bu saha firmanızın kapsamında değil" });
+        if (kalemler.some((k) => String(k.subcon_name || "").trim() && !K.esle(k.subcon_name))) return res.status(403).json({ ok: false, error: "Başka firmanın taşeron adı yazılamaz" });
+      } }
 
     // 27.10.2026: grid kaydında BoQ sürümü (gövde: boq_surum, boq_secim_gerekce, surum_degisim_onayi). Satırda farklı sürüm
     // kayıtlıysa sessizce taşınmaz: surum_degisim_onayi yoksa 409 + karşılaştırma döner.
@@ -7396,7 +7469,8 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
 
     await client.query("COMMIT");
     for (const [fn, id] of boqLoglar) await fn(id);
-    res.json({ ok: true, guncellenen, eklenen, boq_surum: boqSurum, boq_uyari: boqUyari });
+    const esit = await rolloutTaseronEsitle([site], req, "Günlük İş Girişi (grid)").catch((e) => ({ hata: e.message, degisen: [] }));
+    res.json({ ok: true, guncellenen, eklenen, boq_surum: boqSurum, boq_uyari: boqUyari, taseron_esitleme: esit.degisen });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("SAHA KALEM KAYDET ERROR:", err.message);
@@ -7888,6 +7962,15 @@ async function syncRolloutTargets(siteCodesFilter = []) {
       }
     }
 
+    // 28.10.2026: RF taşeronu ilk satırdan değil ortak çözümden: RF iş kolunda tek taşeron → tam adı; birden fazla → boş
+    // (kontrol gerekli, sessiz seçim yok). Mevcut kayıtta yalnız boşsa doldurulur; tam ad güncellemesi rolloutTaseronEsitle'de.
+    const _es = await rolloutFirmaEsleyicileri();
+    const _mwSite = {};
+    for (const row of masterResult.rows || []) { const k = String(row.site_code || "").trim().toUpperCase(); (_mwSite[k] = _mwSite[k] || []).push(row); }
+    for (const c of candidateMap.values()) {
+      const rf = taseronCozum.cozumle(_mwSite[c.site_code] || [], null, _es).rf;
+      c.rf_subcon = rf && rf.kaynak === "GUNLUK" ? rf.gorunen : "";
+    }
     const candidates = [...candidateMap.values()];
 
     let inserted = 0;
@@ -12001,6 +12084,21 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
     });
 
     const regions = [...new Set(allRows.map((r) => r.bolge).filter(Boolean))];
+    // 28.10.2026: Excel'deki yalın grup adı (TEKNO / AHY / ŞİMŞEK) mevcut tam taşeron adını (TEKNO_EMRAH) geri düşürmez —
+    // aynı gruptaysa mevcut tam ad korunur. Farklı firma / farklı tam ad Excel'den aynen alınır.
+    try {
+      const es = await rolloutFirmaEsleyicileri();
+      const mev = await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r`);
+      const mevMap = {}; mev.rows.forEach(({ j }) => { mevMap[String(j.site_code || "").toUpperCase().trim()] = j; });
+      for (const r of allRows) {
+        const e = mevMap[String(r.site_code || "").toUpperCase().trim()]; if (!e) continue;
+        for (const kol of taseronCozum.KOLLAR) {
+          const alan = `${kol}_subcon`, yeni = taseronCozum.adNorm(r[alan]), eski = taseronCozum.adNorm(e[alan]);
+          if (yeni && eski && taseronCozum.grupAdiMi(es, yeni) && !taseronCozum.grupAdiMi(es, eski)
+              && taseronCozum.grupOf(es, yeni) === taseronCozum.grupOf(es, eski)) r[alan] = e[alan];
+        }
+      }
+    } catch (e) { console.warn("taşeron tam ad koruması uygulanamadı:", e.message); }
     // Malzeme geliş tarihleri Excel'de yoksa silme/yeniden yazma sırasında kaybolmasın
     try {
       const eski = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, malzeme_gelis_tarihi, enh_malzeme_gelis_tarihi FROM rollout_progress
@@ -12188,6 +12286,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
     let inserted = 0;
     let updated = 0;
     let rolloutCreated = 0;
+    const ithalKodlar = new Set();
 
     for (const r of rows) {
       const siteType =
@@ -12200,6 +12299,7 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
       ]);
 
       const siteCode = getCell(r, ["Site Code", "site_code", "Saha Kodu"]);
+      if (siteCode) ithalKodlar.add(String(siteCode));
 
       const itemCode = getCell(r, ["Item Code", "item_code", "Kalem Kodu"]);
 
@@ -12324,9 +12424,12 @@ app.post("/import/completed-works", upload.single("file"), async (req, res) => {
     }
 
     const syncResult = await syncRolloutTargets();
+    // Toplu kayıt: yalnız bu dosyadaki iş kodları için taşeron eşitlemesi (geçmiş diğer kayıtlar sessizce değişmez)
+    const esitIs = await rolloutTaseronEsitle([...ithalKodlar], req, "Günlük İş Girişi (toplu yükleme)").catch(() => ({ degisen: [] }));
 
     res.json({
       ok: true,
+      taseron_esitleme: esitIs.degisen.length,
       inserted,
       updated,
       rolloutCreated,
@@ -12818,9 +12921,13 @@ app.get("/export/excel", async (req, res) => {
 
     // 26.10.2026: alt marka hesabı yalnız firma kapsamındaki satırları, başka firmanın iş kolu alanları boş olarak alır
     const K = await rolloutKapsam(req);
+    const _es = await rolloutFirmaEsleyicileri(), _mw = await taseronCozum.mwGetir(pool, null); // 28.10.2026: liste ile aynı taşeron çözümü
     const result = K
-      ? { rows: markaRolloutMaskele(K, await markaRolloutSatirlari(K, { region, orderBy: "r.bolge ASC, r.site_type ASC, r.site_code ASC" })) }
-      : await pool.query(query, values);
+      ? { rows: markaRolloutMaskele(K, taseronCozum.uygula(await markaRolloutSatirlari(K, { region, orderBy: "r.bolge ASC, r.site_type ASC, r.site_code ASC" }), _mw, _es, K, markaRolloutSahiplik)) }
+      : { rows: taseronCozum.uygula((await pool.query(query, values)).rows, _mw, _es) };
+    // Birden fazla taşeronlu iş kolu Excel'de açıkça yazılır (sessiz seçim yok)
+    for (const r of result.rows) for (const [kol, z] of Object.entries(r._taseron_cozum || {}))
+      if (z.durum === "COKLU") r[`${kol}_subcon`] = `Birden fazla taşeron — kontrol gerekli: ${(z.adaylar || []).join(", ")}`;
 
     if (result.rows.length === 0) {
       return res.status(404).send("Data yok");
@@ -13087,6 +13194,67 @@ app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ═══ TAŞERON KARŞILAŞTIRMA ÖNİZLEMESİ + ONAYLI EŞİTLEME + GERİ ALMA (28.10.2026, Orhan) ═══════════════════════════
+// Yalnız ERC yöneticisi (admin / platform_admin; alt marka değil). Önizleme veriyi değiştirmez. Eşitleme yalnız istekte
+// verilen iş kodlarına uygulanır ve islem_gecmisi'ne TASERON_ESITLEME (eski / yeni) yazar; geri alma bu kayıttan yapılır.
+const taseronYonetici = (req) => ["admin", "platform_admin"].includes(_rol(req.user)) && !altMarkaKullanicisi(req.user) && !taseronMu(req.user);
+const KOL_AD_TR = { rf: "RF", los: "LOS", tss: "TSS", tssr: "TSSR", btk: "BTK", trs: "TRS", enh: "ENH", enh_proje: "ENH Proje", power: "Power", emr: "EMR", pac: "PAC", ysb: "YSB" };
+app.get("/rollout/taseron-karsilastirma", authMiddleware, async (req, res) => {
+  try {
+    if (!taseronYonetici(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const es = await rolloutFirmaEsleyicileri();
+    const site = String(req.query.site || "").replace(/\s+/g, "").toUpperCase();
+    const rp = await pool.query(`SELECT to_jsonb(r) AS j FROM rollout_progress r ${site ? "WHERE UPPER(TRIM(site_code)) = $1" : ""} ORDER BY site_code`, site ? [site] : []);
+    const mw = await taseronCozum.mwGetir(pool, site ? [site] : null);
+    const DAYANAK = { GRUP_ADI: "Rollout'ta grup adı; Günlük İş Girişi tam adı", ROLLOUT_BOS: "Rollout boş; Günlük İş Girişi'nde tek taşeron",
+      CELISKI: "ÇELİŞKİ: Rollout ve Günlük İş Girişi farklı taşeron", COKLU: "Birden fazla taşeron — kontrol gerekli", AYNI: "Aynı", GUNLUK_YOK: "Günlük İş Girişi kaydı yok — Rollout korunur" };
+    const satirlar = [];
+    for (const { j } of rp.rows) {
+      const sc = String(j.site_code || "").replace(/\s+/g, "").toUpperCase();
+      for (const [kol, z] of Object.entries(taseronCozum.cozumle(mw.get(sc) || [], j, es))) {
+        if (z.durum === "AYNI" || z.durum === "GUNLUK_YOK") { if (!req.query.tumu) continue; }
+        satirlar.push({ is_kodu: j.site_code, is_kolu: KOL_AD_TR[kol] || kol, rollout: z.rollout || "", gunluk: (z.adaylar || []).join(", "),
+          onerilen: z.durum === "COKLU" ? "Kontrol gerekli (değişmez)" : (z.kaynak === "GUNLUK" ? z.gorunen : z.rollout || ""),
+          degisir: ["GRUP_ADI", "ROLLOUT_BOS", "CELISKI"].includes(z.durum), durum: z.durum, dayanak: DAYANAK[z.durum] || z.durum,
+          kalemler: (z.kalemler || []).map((k) => `${k.item_code || ""} ${k.aciklama || ""} → ${k.taseron}`.trim()) });
+      }
+    }
+    const ozet = satirlar.reduce((o, x) => { o[x.durum] = (o[x.durum] || 0) + 1; return o; }, {});
+    res.json({ ok: true, satirlar, ozet, toplam: satirlar.length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/rollout/taseron-esitle", authMiddleware, async (req, res) => {
+  try {
+    if (!taseronYonetici(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const kodlar = Array.isArray(req.body?.site_codes) ? req.body.site_codes : [];
+    if (!kodlar.length) return res.status(400).json({ ok: false, error: "İş kodu listesi zorunlu (toplu tüm sahalar eşitlenmez)" });
+    const kuru = req.body?.onay !== true;
+    const r = await rolloutTaseronEsitle(kodlar, req, "Karşılaştırma onayı", { kuru });
+    res.json({ ok: true, kuru, degisen: r.degisen });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// Geri alma: verilen TASERON_ESITLEME kayıtlarının eski değerine döner (alan hâlâ eşitlemenin yazdığı değerdeyse)
+app.post("/rollout/taseron-esitle/geri-al", authMiddleware, async (req, res) => {
+  try {
+    if (!taseronYonetici(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const ids = (Array.isArray(req.body?.gecmis_ids) ? req.body.gecmis_ids : []).map(Number).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ ok: false, error: "Geçmiş kaydı seçin" });
+    const g = await pool.query(`SELECT id, kayit_id, eski, yeni FROM islem_gecmisi WHERE id = ANY($1::int[]) AND modul='rollout' AND tip='TASERON_ESITLEME'`, [ids]);
+    const geri = [];
+    for (const x of g.rows) {
+      const cur = (await rolloutHamSatir({ id: x.kayit_id })) || {};
+      const alanlar = Object.keys(x.yeni || {}).filter((a) => /^[a-z_]+_subcon$/.test(a) && taseronCozum.katla(cur[a]) === taseronCozum.katla(x.yeni[a]));
+      if (!alanlar.length) continue;
+      await pool.query(`UPDATE rollout_progress SET ${alanlar.map((a, i) => `${a} = $${i + 2}`).join(", ")}, updated_at = NOW() WHERE id = $1`,
+        [x.kayit_id, ...alanlar.map((a) => x.eski?.[a] ?? null)]);
+      await islemGecmisiYaz(req, "rollout", x.kayit_id, "TASERON_ESITLEME_GERI", Object.fromEntries(alanlar.map((a) => [a, x.yeni[a]])),
+        Object.fromEntries(alanlar.map((a) => [a, x.eski?.[a] ?? null])), `Geri alındı: geçmiş #${x.id}`);
+      geri.push({ kayit_id: x.kayit_id, alanlar });
+    }
+    res.json({ ok: true, geri });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 app.get("/rollout/list", authMiddleware, async (req, res) => {
   try {
     // 26.10.2026: alt marka hesabı (Teknocenter) yalnız kendi firma kapsamındaki satırları alır — MARKA ROLLOUT KAPSAMI
@@ -13099,10 +13267,14 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
       ORDER BY site_type ASC, site_code ASC
     `);
 
+    // 28.10.2026: taşeron adları ortak çözümden (Günlük İş Girişi tam adı > Rollout; çok taşeronlu iş kolu işaretlenir).
+    // Alt markada yalnız kendi iş kolu çözülür; kapsam / maske saklı Rollout değerinden (başka firmanın işi açılmaz).
+    const _es = await rolloutFirmaEsleyicileri();
+    const cozulmus = taseronCozum.uygula(result.rows || [], await taseronCozum.mwGetir(pool, null), _es, K, markaRolloutSahiplik);
     // Maske ham satıra uygulanır: başka firmanın iş kolu alanları map'e boş girer (N/A doldurması / hafta türetmeleri dahil)
-    const ham = K ? markaRolloutMaskele(K, result.rows || []) : (result.rows || []);
+    const ham = K ? markaRolloutMaskele(K, cozulmus) : cozulmus;
     // 27.10.2026: Firma / Taşeron filtresi — sahiplik maske öncesi ham satırdan, aynı sırayla
-    const FB = await rolloutFirmaBilgisi(result.rows || [], K);
+    const FB = await rolloutFirmaBilgisi(cozulmus, K);
     const rows = ham.map((r, i) => {
       const fg = FB.gruplar[i] || { rf: [], enh: [] };
       const normalizedSiteType =
@@ -15394,6 +15566,7 @@ app.post("/master/add", sahaKayitYazma, async (req, res) => {
       try {
         const syncResult = await syncRolloutTargets([siteCode]);
         console.log("BACKGROUND ROLLOUT SYNC OK:", syncResult);
+        await rolloutTaseronEsitle([siteCode], req, "Günlük İş Girişi (ekleme)");
       } catch (err) {
         console.error("BACKGROUND ROLLOUT SYNC ERROR:", err.message);
       }
@@ -15538,6 +15711,7 @@ app.put("/master/:id", sahaKayitYazma, async (req, res) => {
     const boqSecim = await boqSecimHazirla(req, { surum: m.boq_surum, kod: String(m.item_code || "").trim(), site: String(m.site_code || "").replace(/\s+/g, "").toUpperCase(), gerekce: m.boq_secim_gerekce, kapsam: m.boq_kapsam });
     if (!boqSecim.ok) return res.status(boqSecim.http || 400).json({ ok: false, error: boqSecim.hata, boq_oneri: boqSecim.oneri || null });
     const boqSnap = boqSnapDegerler(boqSecim.snapshot);
+    const eskiKod = (await pool.query(`SELECT site_code FROM master_works WHERE id = $1`, [id])).rows[0]?.site_code; // taşeron eşitlemesi için
 
     const result = await pool.query(
       `
@@ -15587,8 +15761,9 @@ app.put("/master/:id", sahaKayitYazma, async (req, res) => {
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
     }
     if (boqSecim.log) await boqSecim.log(Number(id));
+    const esit = await rolloutTaseronEsitle([eskiKod, result.rows[0]?.site_code], req, "Günlük İş Girişi (düzenleme)").catch(() => ({ degisen: [] }));
 
-    res.json({ ok: true, data: result.rows[0], boq_uyari: boqSecim.uyari || "" });
+    res.json({ ok: true, data: result.rows[0], boq_uyari: boqSecim.uyari || "", taseron_esitleme: esit.degisen });
   } catch (err) {
     console.error("MASTER UPDATE ERROR:", err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -15601,13 +15776,14 @@ app.delete("/master/:id", sahaKayitYazma, async (req, res) => {
     const id = req.params.id;
 
     const result = await pool.query(
-      `DELETE FROM master_works WHERE id = $1 RETURNING id`,
+      `DELETE FROM master_works WHERE id = $1 RETURNING id, site_code`,
       [id],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
     }
+    await rolloutTaseronEsitle([result.rows[0].site_code], req, "Günlük İş Girişi (silme)").catch(() => null);
 
     res.json({ ok: true, message: "Kayıt silindi" });
   } catch (err) {
