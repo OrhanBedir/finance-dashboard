@@ -1225,6 +1225,10 @@ const MALI_YETKI_MATRISI = [
   // 29.10.2026 (Orhan: "teknodaki yetkiyi de full aç, İlhami Şahin gibi"): Teknocenter ortak yönetim hesabı — canlı kayıttan
   // salt-okunur doğrulandı: id 1285, kullanıcı adı "teknocenter", admin, marka TEKNO; tek hesap. Kapsam yalnız Teknocenter.
   { id: 1285, email: "teknocenter", ad: "Teknocenter (ortak hesap)", kapsam: "TEKNO", dogrulandi: true },
+  // 29.10.2026 (Orhan: "AHY tarafı kendi yaptığı işleri full görebilmeli, fiyat maaşlar ne varsa"): AHY Elektrik yönetim hesabı —
+  // canlı kayıttan salt-okunur doğrulandı: id 359, info@ahyelektrik.com, admin, marka AHY; AHY markasında tek yönetim hesabı
+  // (diğerleri saha personeli / UBS taşeron hesabı — değişmez; Emre Akdeğirmen dahil AHY backofisi fiyat görmez). Kapsam yalnız AHY.
+  { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true },
 ];
 // ERC kiracısı (marka ERC / TEKNO / AHY — AHY markasında kalan Şimşek ofis hesapları dahil), taşeron değil.
 // 2KX (ayrı kiracı) ve izole kiracılar etkilenmez.
