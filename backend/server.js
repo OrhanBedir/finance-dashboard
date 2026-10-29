@@ -9588,12 +9588,13 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
           AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`),
       // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
+      // 29.10.2026 (Orhan): iş avansı yalnız muhasebe ödeyince (TAMAMLANDI), ödeme ayında gider — onaylı ama ödenmemiş sayılmaz
       pool.query(`SELECT ay, SUM(t) AS t FROM (
-          SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
+          SELECT to_char(COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
           FROM is_avans_talep t
           WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
-            AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-            AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+            AND t.durum = 'TAMAMLANDI'
+            AND COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi) >= $2
           UNION ALL
           SELECT to_char(o.tarih,'YYYY-MM') AS ay, o.tutar AS t
           FROM personel_odeme o
@@ -11778,12 +11779,13 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
         WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
           AND UPPER(COALESCE(a.avans_turu,'MAAS'))='MAAS' GROUP BY 1`),
       // İş avansları + personel masraf ödemeleri (10.09.2026: avanssız masrafın ödemesi de giderdir)
+      // 29.10.2026 (Orhan): iş avansı yalnız muhasebe ödeyince (TAMAMLANDI), ödeme ayında gider — onaylı ama ödenmemiş sayılmaz
       pool.query(`SELECT ay, SUM(t) AS t FROM (
-          SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
+          SELECT to_char(COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi),'YYYY-MM') AS ay, t.tutar AS t
           FROM is_avans_talep t
           WHERE UPPER(COALESCE(t.firma,'ERC'))=$1
-            AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-            AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+            AND t.durum = 'TAMAMLANDI'
+            AND COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi) >= $2
           UNION ALL
           SELECT to_char(o.tarih,'YYYY-MM') AS ay, o.tutar AS t
           FROM personel_odeme o
@@ -19575,19 +19577,19 @@ app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
          AND EXTRACT(YEAR FROM a.tarih)=$1 AND EXTRACT(MONTH FROM a.tarih)=$2
          AND (UPPER(COALESCE(p.marka,'ERC')) NOT IN (${altMarkaInSql()}) OR ${avansOdeyenSql("a")} = 'SIMSEK')`,
       [yil, ay]).catch(() => ({ rows: [] }));
-    // İş avansları: PD (Direktör) onayından geçenler — otomatik gider
-    // Tarih: ödeme tarihi varsa o, yoksa direktör onay tarihi
+    // İş avansları: 29.10.2026 (Orhan) yalnız muhasebenin ödediği (TAMAMLANDI) avans, ödeme gününde gider.
+    // Eskiden direktör onayından geçen ödenmemiş talep de direktör onay gününe "otomatik gider" yazılıyordu.
     const av = await pool.query(
       `SELECT t.id,
-              TO_CHAR(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
+              TO_CHAR(COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi),'YYYY-MM-DD') AS tarih,
               t.tutar, t.talep_eden_ad, t.gider_turu, t.aciklama, t.durum,
               ${pmAvansSahibiSql("t", "p")} AS pm_kisisel
        FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
-       WHERE t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
+       WHERE t.durum = 'TAMAMLANDI'
          AND UPPER(COALESCE(t.firma,'ERC')) = 'ERC'
-         AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) IS NOT NULL
-         AND EXTRACT(YEAR FROM COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi))=$1
-         AND EXTRACT(MONTH FROM COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi))=$2`,
+         AND COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi) IS NOT NULL
+         AND EXTRACT(YEAR FROM COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi))=$1
+         AND EXTRACT(MONTH FROM COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi))=$2`,
       [yil, ay]).catch(() => ({ rows: [] }));
     // Orhan'ın avansı: tutar giderde kalır, kimlik yalnız yetkililere (Nurcan/Serdar finans görür ama bunu görmez)
     const _pmGorF = pmKisiselEmailGorur(req.financeUser?.email, req.financeUser?.role);
