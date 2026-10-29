@@ -562,6 +562,7 @@ const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTe
 const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
+const tedarikciCari = require("./tedarikciCari"); // tedarikçi cari: fatura borcu / ödeme / avans / mahsup (29.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
@@ -1837,6 +1838,10 @@ const MARKA_KAYIT_SAHIBI = [
   [/^\/finance\/marka-taseron-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_taseron_odeme WHERE id=$1`],
   [/^\/finance\/marka-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'ERC')) AS m FROM cashflow_odeme WHERE id=$1`],
   [/^\/finance\/marka-borc-aktarim\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_borc_aktarim WHERE id=$1`], // 26.10.2026 mutabakat
+  // 29.10.2026 tedarikçi cari (tedarikciCari.js): ödeme kaydı firması = firma_kod, eski kayıtta bağlı marka satırı; yoksa Şimşek
+  [/^\/finance\/marka-cari\/odeme\/(\d+)(\/|$)/, `SELECT COALESCE(NULLIF(UPPER(l.firma_kod),''), (SELECT UPPER(m.marka) FROM marka_taseron_odeme m WHERE m.odeme_log_id = l.id LIMIT 1), 'SIMSEK') AS m FROM taseron_odeme_log l WHERE l.id=$1`],
+  [/^\/finance\/marka-cari\/eski-odeme\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(marka,'')) AS m FROM marka_taseron_odeme WHERE id=$1`],
+  [/^\/finance\/marka-cari\/fatura\/(\d+)(\/|$)/, `SELECT UPPER(COALESCE(firma,'')) AS m FROM invoice_entries WHERE id=$1`],
 ];
 // ═══ HEDEF FİRMA YÖNETİMİ (27.10.2026, Orhan) ═══════════════════════════════════════════════════
 // ERC (alt marka olmayan) hesabı bir alt markanın (Teknocenter) nakit akışını KENDİ oturumuyla açıp yönetir: başka hesaba
@@ -8817,6 +8822,42 @@ app.post(
 );
 
 /* ================== MANUAL INVOICE ENTRY ================== */
+// 29.10.2026 (tedarikçi cari): fatura formunun ek alanları — firma kartı kimliği (subcons.id) ve vade. Gönderilmeyen alan
+// undefined döner (mevcut değer korunur); boş gönderilen vade silinir.
+async function faturaEkAlanlari(b) {
+  const o = {};
+  if (b && b.tedarikci_id !== undefined) {
+    if (b.tedarikci_id === null || b.tedarikci_id === "") o.tedarikci_id = null;
+    else {
+      const id = Number(b.tedarikci_id);
+      if (!Number.isInteger(id) || id <= 0) return { hata: "Geçersiz tedarikçi seçimi" };
+      const s = (await pool.query(`SELECT id FROM subcons WHERE id=$1`, [id])).rows[0];
+      if (!s) return { hata: "Seçilen tedarikçi firma kartı bulunamadı" };
+      o.tedarikci_id = id;
+    }
+  }
+  if (b && b.vade_tarihi !== undefined) {
+    if (b.vade_tarihi === null || b.vade_tarihi === "") o.vade_tarihi = null;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(String(b.vade_tarihi))) o.vade_tarihi = String(b.vade_tarihi);
+    else return { hata: "Vade tarihi geçersiz" };
+  }
+  return o;
+}
+const faturaGecmisOzet = (f) => {
+  const g = (v) => (v instanceof Date ? ymdYerel(v) : v == null ? null : v);
+  return { fatura_no: f.fatura_no ?? null, fatura_tarihi: g(f.fatura_tarihi), vade_tarihi: g(f.vade_tarihi), tedarikci: f.tedarikci ?? null,
+    rf_montaj_firma: f.rf_montaj_firma ?? null, tedarikci_id: f.tedarikci_id ?? null, firma: f.firma ?? null, fatura_turu: f.fatura_turu ?? null,
+    is_kalemi: f.is_kalemi ?? null, currency: f.currency ?? null, tutar: f.tutar != null ? Number(f.tutar) : null, kdv: f.kdv != null ? Number(f.kdv) : null,
+    toplam_tutar: f.toplam_tutar != null ? Number(f.toplam_tutar) : null, odenen_tutar: f.odenen_tutar != null ? Number(f.odenen_tutar) : null };
+};
+// Faturaya AKTİF ödeme / mahsup / ortak ödeme dağılımı ya da ödenen tutar bağlı mı
+async function faturaOdemeBagli(id) {
+  const r = await pool.query(`SELECT (COALESCE(i.odenen_tutar,0) > 0.009
+      OR EXISTS (SELECT 1 FROM taseron_odeme_log l, jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim)='array' THEN l.dagilim ELSE '[]'::jsonb END) d
+                 WHERE COALESCE(l.durum,'AKTIF')='AKTIF' AND (d->>'fatura_id') = i.id::text)) AS bagli
+    FROM invoice_entries i WHERE i.id=$1`, [Number(id)]).catch(() => ({ rows: [] }));
+  return !!r.rows[0]?.bagli;
+}
 // Mükerrer fatura kontrolü: aynı fatura no ikinci kez girilemez (panel fark etmez)
 async function faturaNoMukerrerMi(fatura_no, haricId) {
   const no = String(fatura_no || "").trim();
@@ -8879,6 +8920,12 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
     // etiketi alır ki AHY yöneticileri panelde iş/fatura durumunu görebilsin.
     // 13.10.2026: AHY_ gibi TEKNO_ öneki de kendi markasına etiketler
     const firmaNorm = altMarkaKoduNormalize(firma) || altMarkaOnekiOf(rf_montaj_firma) || "SIMSEK";
+    // 29.10.2026 (tedarikçi cari): seçilen firma kartı (subcons.id) ve vade. Alt marka faturasında ödenen / kalan / ödeme
+    // tarihi formdan alınmaz — fatura borç olarak açılır, ödeme yalnız ödeme penceresinden (FIFO kaydı) girilir.
+    const ekAlan = await faturaEkAlanlari(req.body);
+    if (ekAlan.hata) return res.status(400).json({ ok: false, error: ekAlan.hata });
+    const markaBorc = !!req.markaFatura;
+    const turGelen = String(fatura_turu || "GELEN").toUpperCase() === "GELEN";
 
     const result = await pool.query(
       `
@@ -8920,7 +8967,7 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
         proje_kodu || null,
         fatura_no || null,
         fatura_tarihi || null,
-        aracFatura ? null : (odeme_tarihi || null),
+        aracFatura || markaBorc ? null : (odeme_tarihi || null),
         tedarikci || null,
         rf_montaj_firma || null,
         fatura_kalemi || null,
@@ -8930,8 +8977,8 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
         Number(tutar || 0),
         Number(kdv || 0),
         Number(toplam_tutar || 0),
-        aracFatura ? 0 : Number(odenen_tutar || 0),
-        aracFatura ? Number(toplam_tutar || 0) : Number(kalan_borc || 0),
+        aracFatura || markaBorc ? 0 : Number(odenen_tutar || 0),
+        aracFatura ? Number(toplam_tutar || 0) : markaBorc ? (turGelen ? Number(toplam_tutar || 0) : 0) : Number(kalan_borc || 0),
         note || null,
         fatura_turu || 'GELEN',
         bagli_fatura_id ? Number(bagli_fatura_id) : null,
@@ -8942,6 +8989,12 @@ app.post("/finance/invoice-entry/add", faturaYazma, async (req, res) => {
     );
 
     const newRow = result.rows[0];
+    if (ekAlan.tedarikci_id !== undefined || ekAlan.vade_tarihi !== undefined) {
+      const u2 = await pool.query(`UPDATE invoice_entries SET tedarikci_id = COALESCE($2, tedarikci_id), vade_tarihi = COALESCE($3, vade_tarihi) WHERE id=$1 RETURNING tedarikci_id, vade_tarihi`,
+        [newRow.id, ekAlan.tedarikci_id ?? null, ekAlan.vade_tarihi ?? null]);
+      Object.assign(newRow, u2.rows[0] || {});
+    }
+    islemGecmisiYaz(req, "fatura", newRow.id, "OLUSTURMA", null, faturaGecmisOzet(newRow), null).catch(() => {});
 
     // Araç kirası satırları (geçersizse fatura geri alınır — yarım kayıt kalmaz)
     let aracUyarilar = [];
@@ -9292,6 +9345,11 @@ app.get("/finance/invoice-entry/export-excel", faturaOkuma, async (req, res) => 
 
 app.delete("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
   try {
+    // 29.10.2026: alt marka faturasına ödeme / mahsup uygulanmışsa silinmez (ödeme kaydı askıda kalmasın)
+    if (req.markaFatura && await faturaOdemeBagli(req.params.id))
+      return res.status(409).json({ ok: false, error: "Bu faturaya ödeme uygulanmış — önce Ödeme Geçmişi'nden ödemeyi iptal edin" });
+    const eskiF = (await pool.query(`SELECT * FROM invoice_entries WHERE id=$1`, [req.params.id]).catch(() => ({ rows: [] }))).rows[0];
+    if (eskiF) islemGecmisiYaz(req, "fatura", Number(req.params.id), "SILME", faturaGecmisOzet(eskiF), null, null).catch(() => {});
     const result = await pool.query(
       `DELETE FROM invoice_entries WHERE id = $1 RETURNING id`,
       [req.params.id],
@@ -9547,10 +9605,16 @@ function aracNakitSatiri(r, odeyenKod) {
     aciklama: `${plaka || "⚠ PLAKA YOK"} | ${islem_ad} | ${tutarTxt} TL${r.fatura_no ? ` | Fatura ${r.fatura_no}` : ""}${not ? ` · ${not}` : ""}` };
 }
 
+// 29.10.2026: İPTAL edilen ödeme kaydının dağılımı faturadan geri alındığı için burada da sayılmaz
 const TASERON_LOG_DAGILIM_SQL = `(SELECT (d->>'fatura_id')::int AS fid, SUM((d->>'odeme')::numeric) AS t
   FROM taseron_odeme_log l,
        jsonb_array_elements(CASE WHEN jsonb_typeof(l.dagilim) = 'array' THEN l.dagilim ELSE '[]'::jsonb END) d
-  WHERE (d->>'fatura_id') ~ '^[0-9]+$' GROUP BY 1)`;
+  WHERE (d->>'fatura_id') ~ '^[0-9]+$' AND COALESCE(l.durum,'AKTIF') = 'AKTIF' GROUP BY 1)`;
+// 29.10.2026 (tedarikçi cari): marka_taseron_odeme satırı iptal edilince silinmez, durum='IPTAL' olur — nakit akışı / P&L /
+// panel okuyucuları yalnız AKTİF satırı sayar. Ödeme logunun ERC (Şimşek) tarafında sayılacağı koşul: AKTİF, alt marka
+// etiketli değil (firma_kod) ve mahsup değil (mahsup nakit çıkışı değildir; avans ödendiği gün sayıldı).
+const MTO_AKTIF = (al = "") => `COALESCE(${al ? al + "." : ""}durum,'AKTIF') = 'AKTIF'`;
+const ERC_ODEME_LOG_SQL = (al = "") => { const p = al ? al + "." : ""; return `COALESCE(${p}durum,'AKTIF') = 'AKTIF' AND UPPER(COALESCE(${p}firma_kod,'')) NOT IN (${altMarkaInSql()}) AND COALESCE(${p}islem_turu,'') <> 'MAHSUP'`; };
 app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
   try {
     const rol = String(req.user?.role || "").toLowerCase();
@@ -9623,7 +9687,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date AND COALESCE(durum,'AKTIF') = 'AKTIF'
           UNION ALL
           -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
           SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), ${TASERON_NAKIT_SQL}
@@ -9632,7 +9696,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
-              WHERE UPPER(mo.marka) = $1
+              WHERE UPPER(mo.marka) = $1 AND COALESCE(mo.durum,'AKTIF') = 'AKTIF'
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
                 AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
@@ -9866,14 +9930,14 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
             (CASE WHEN COALESCE(toplam_tutar,0) > 0 THEN toplam_tutar ELSE COALESCE(tutar,0) END) AS t
           FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) = $1`, [marka]),
         pool.query(`SELECT COALESCE(taseron_adi,'') AS ad, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND COALESCE(durum,'AKTIF') = 'AKTIF'
           UNION ALL
           SELECT COALESCE(i.tedarikci,''), (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0))
           FROM invoice_entries i LEFT JOIN ${TASERON_LOG_DAGILIM_SQL} lgd ON lgd.fid = i.id
           WHERE UPPER(COALESCE(i.firma,'')) = $1 AND (COALESCE(i.odenen_tutar,0) - COALESCE(lgd.t,0)) > 0
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
-            WHERE UPPER(mo.marka) = $1
+            WHERE UPPER(mo.marka) = $1 AND COALESCE(mo.durum,'AKTIF') = 'AKTIF'
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
               AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )`, [marka]).catch(() => ({ rows: [] })),
@@ -10026,13 +10090,13 @@ app.get("/finance/marka-gelecek-tahsilat", authMiddleware, async (req, res) => {
           AND UPPER(COALESCE(i.firma,'')) <> $2
           AND COALESCE(i.odenen_tutar,0) > 0
           AND NOT EXISTS (SELECT 1 FROM taseron_odeme_log o
-            WHERE UPPER(split_part(TRIM(COALESCE(o.firma,'')),' ',1)) ~ $1
+            WHERE UPPER(split_part(TRIM(COALESCE(o.firma,'')),' ',1)) ~ $1 AND COALESCE(o.durum,'AKTIF') = 'AKTIF'
               AND ABS(COALESCE(o.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1)`, [onekRe, marka]).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
       pool.query(`SELECT
           COALESCE(SUM(COALESCE(tutar,0)),0) AS toplam,
           COALESCE(SUM(COALESCE(tutar,0)) FILTER (WHERE tarih >= date_trunc('month', CURRENT_DATE)),0) AS bu_ay
         FROM taseron_odeme_log
-        WHERE UPPER(split_part(TRIM(COALESCE(firma,'')),' ',1)) ~ $1
+        WHERE UPPER(split_part(TRIM(COALESCE(firma,'')),' ',1)) ~ $1 AND ${ERC_ODEME_LOG_SQL()}
           AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`, [onekRe]).catch(() => ({ rows: [{ toplam: 0, bu_ay: 0 }] })),
       // Manuel "Şimşek → AHY gönderilen bakiye" girişleri (Bu Ay Gelen Bakiye
       // kartından dekontla girilenler) — 19.08.2026
@@ -10162,10 +10226,11 @@ async function markaNakitSatirlari(marka, req) {
           'TASERON' AS tip, tutar,
           ((CASE UPPER(COALESCE(tip,'AVANS')) WHEN 'AVANS' THEN 'Avans' ELSE 'Fatura ödemesi${P.fonModeli === "PROJE" ? "" : ` (${P.kod} ödedi)`}' END)
             || COALESCE(' · '||NULLIF(aciklama,''),'')) AS aciklama,
-          (UPPER(COALESCE(tip,'AVANS')) = 'AVANS' OR ${P.fonModeli === "PROJE" ? "true" : "false"}) AS kasadan_dus,
+          -- 29.10.2026: tedarikçi cari ödeme penceresinde seçilen "proje kasasından düşsün" satırda saklanır; eski satırda eski kural
+          COALESCE(kasadan_dus, (UPPER(COALESCE(tip,'AVANS')) = 'AVANS' OR ${P.fonModeli === "PROJE" ? "true" : "false"})) AS kasadan_dus,
           'marka_taseron_odeme' AS kaynak, id AS kaynak_id, NULL::text AS fatura_no
         FROM marka_taseron_odeme
-        WHERE UPPER(marka) = $1
+        WHERE UPPER(marka) = $1 AND COALESCE(durum,'AKTIF') = 'AKTIF'
         UNION ALL
         SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM-DD') AS tarih,
           COALESCE(i.tedarikci,'') AS ad_soyad, 'TASERON' AS tip, ${TASERON_NAKIT_SQL} AS tutar,
@@ -10177,7 +10242,7 @@ async function markaNakitSatirlari(marka, req) {
           -- Aynı ödeme AHY panelinden de girildiyse çift sayma (taşeron ilk kelime + tutar eşleşmesi)
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
-            WHERE UPPER(mo.marka) = $1
+            WHERE UPPER(mo.marka) = $1 AND COALESCE(mo.durum,'AKTIF') = 'AKTIF'
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
               AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )
@@ -10722,7 +10787,7 @@ app.get("/finance/taseron-borc", authMiddleware, async (req, res) => {
       const od = await pool.query(
         `SELECT id, firma, tutar, to_char(tarih,'YYYY-MM-DD') AS tarih, COALESCE(aciklama,'') AS aciklama
          FROM taseron_odeme_log
-         WHERE tarih >= $1::date
+         WHERE tarih >= $1::date AND ${ERC_ODEME_LOG_SQL()}
            AND split_part(split_part(
                  UPPER(translate(TRIM(COALESCE(firma,'')),
                    'İıŞşĞğÜüÖöÇç', 'IISSGGUUOOCC')), ' ', 1), '_', 1) = $2
@@ -10864,7 +10929,7 @@ app.get("/finance/erc-banka", authMiddleware, async (req, res) => {
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cashflow_odeme
          WHERE UPPER(COALESCE(marka,'ERC'))='ERC' AND tarih >= $1::date`),
       q(`SELECT COALESCE(SUM(COALESCE(tutar,0)),0) t FROM taseron_odeme_log
-         WHERE tarih >= $1::date
+         WHERE tarih >= $1::date AND ${ERC_ODEME_LOG_SQL()}
            AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`),
       q(`SELECT COALESCE(SUM(tutar),0) t FROM cek_senet
          WHERE durum='ODENDI' AND COALESCE(odeme_tarihi, vade_tarihi) >= $1::date`),
@@ -11027,9 +11092,9 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
         ORDER BY fatura_tarihi DESC NULLS LAST, id DESC`, [marka]),
       pool.query(`SELECT id, taseron_adi, UPPER(COALESCE(tip,'AVANS')) AS tip,
           COALESCE(tutar,0) AS tutar, to_char(tarih,'YYYY-MM-DD') AS tarih,
-          COALESCE(aciklama,'') AS aciklama, fatura_id
+          COALESCE(aciklama,'') AS aciklama, fatura_id, odeme_log_id, tedarikci_id
         FROM marka_taseron_odeme
-        WHERE UPPER(marka) = $1
+        WHERE UPPER(marka) = $1 AND COALESCE(durum,'AKTIF') = 'AKTIF'
         ORDER BY tarih DESC, id DESC`, [marka]).catch(() => ({ rows: [] })),
     ]);
     // Fatura girişinde "Ödenen Tutar" doldurulmuş faturalar da ödemedir —
@@ -11046,7 +11111,7 @@ app.get("/finance/marka-taseron", authMiddleware, async (req, res) => {
           -- Aynı ödeme Avans/Ödeme olarak da girildiyse çift sayma
           AND NOT EXISTS (
             SELECT 1 FROM marka_taseron_odeme mo
-            WHERE UPPER(mo.marka) = $1
+            WHERE UPPER(mo.marka) = $1 AND COALESCE(mo.durum,'AKTIF') = 'AKTIF'
               AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
               AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
           )
@@ -11517,7 +11582,7 @@ app.get("/finance/erc-taseron-hakedis", authMiddleware, async (req, res) => {
       FROM invoice_entries WHERE UPPER(COALESCE(firma,'')) NOT IN (${altMarkaInSql()})`);
     const ode = await pool.query(`SELECT COALESCE(firma,'') AS ad, COALESCE(tutar,0) AS tutar
       FROM taseron_odeme_log
-      WHERE id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`);
+      WHERE ${ERC_ODEME_LOG_SQL()} AND id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)`);
     for (const t of sonuc) {
       const fs = fat.rows.filter(f => ercTaseronCanon(f.taseron_adi) === t.canon);
       t.faturalar = fs.map(f => ({ fatura_no: f.fatura_no, tarih: f.fatura_tarihi, tutar: Number(f.toplam_tutar || 0) }));
@@ -11608,6 +11673,8 @@ app.delete("/finance/marka-taseron-fatura/:id", authMiddleware, async (req, res)
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase()))
       return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const marka = String(req.query.marka || "AHY").toUpperCase();
+    if (await faturaOdemeBagli(req.params.id))
+      return res.status(409).json({ ok: false, error: "Bu faturaya ödeme uygulanmış — önce Ödeme Geçmişi'nden ödemeyi iptal edin" });
     // Yalnız kendi markasının faturasını silebilir
     await pool.query(`DELETE FROM invoice_entries WHERE id=$1 AND UPPER(COALESCE(firma,''))=$2`,
       [req.params.id, marka]);
@@ -11659,6 +11726,18 @@ app.post("/finance/marka-taseron-odeme", authMiddleware, async (req, res) => {
     client.release();
   }
 });
+// 29.10.2026: eski "düzelt / sil" yolu (ödeme logunu silip yeniden yazar) yalnız eski usul kayıtlarda çalışır. Tedarikçi cari
+// penceresinden girilen, iptal edilmiş ya da aynı tedarikçinin avansı mahsup edilmiş kayıtta değişiklik ters işlem (İptal) ister.
+const MARKA_ODEME_KILIT_MESAJ = "Bu ödeme Tedarikçi Cari penceresinden yönetiliyor (yeni kayıt, iptal ya da avans mahsubu var) — düzeltme için kaydı İptal edip yeniden girin";
+async function markaOdemeKilitli(db, cur) {
+  if (String(cur.durum || "AKTIF") !== "AKTIF") return true;
+  if (cur.odeme_log_id) {
+    const l = (await db.query(`SELECT idem_key, islem_turu, durum FROM taseron_odeme_log WHERE id=$1`, [cur.odeme_log_id])).rows[0];
+    if (l && (l.idem_key || l.islem_turu || String(l.durum || "AKTIF") !== "AKTIF")) return true;
+  }
+  const m = await db.query(`SELECT 1 FROM taseron_odeme_log WHERE islem_turu='MAHSUP' AND COALESCE(durum,'AKTIF')='AKTIF' AND UPPER(COALESCE(firma_kod,''))=UPPER($1) LIMIT 1`, [cur.marka]);
+  return m.rows.length > 0;
+}
 app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -11682,6 +11761,10 @@ app.put("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) => 
     if (!cur) {
       await client.query("ROLLBACK");
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    }
+    if (await markaOdemeKilitli(client, cur)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: MARKA_ODEME_KILIT_MESAJ });
     }
     // ERC senkronu: eski log geri alınır (mahsuplar açılır), yeni değerlerle yeniden uygulanır
     if (cur.odeme_log_id) {
@@ -11724,6 +11807,10 @@ app.delete("/finance/marka-taseron-odeme/:id", authMiddleware, async (req, res) 
     await client.query("BEGIN");
     const curR = await client.query(`SELECT * FROM marka_taseron_odeme WHERE id=$1 FOR UPDATE`, [req.params.id]);
     const cur = curR.rows[0];
+    if (cur && await markaOdemeKilitli(client, cur)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ ok: false, error: MARKA_ODEME_KILIT_MESAJ });
+    }
     if (cur && cur.odeme_log_id) {
       // ERC senkronu: bağlı log geri alınır ve silinir (mahsuplar açılır)
       const logR = await client.query(`SELECT * FROM taseron_odeme_log WHERE id=$1 FOR UPDATE`, [cur.odeme_log_id]);
@@ -11816,7 +11903,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
       // marka-nakit'tekiyle birebir aynı (ilk kelime + tutar eşleşmesi).
       pool.query(`SELECT ay, SUM(t) AS t FROM (
           SELECT to_char(tarih,'YYYY-MM') AS ay, COALESCE(tutar,0) AS t
-          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date
+          FROM marka_taseron_odeme WHERE UPPER(marka) = $1 AND tarih >= $2::date AND COALESCE(durum,'AKTIF') = 'AKTIF'
           UNION ALL
           -- 17.09.2026: devirden (15.07) önceki ödeme/faturalar AHY giderine girmez
           SELECT to_char(COALESCE(i.odeme_tarihi, i.fatura_tarihi),'YYYY-MM'), ${TASERON_NAKIT_SQL}
@@ -11825,7 +11912,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
             AND COALESCE(i.odeme_tarihi, i.fatura_tarihi) >= $2::date
             AND NOT EXISTS (
               SELECT 1 FROM marka_taseron_odeme mo
-              WHERE UPPER(mo.marka) = $1
+              WHERE UPPER(mo.marka) = $1 AND COALESCE(mo.durum,'AKTIF') = 'AKTIF'
                 AND ABS(COALESCE(mo.tutar,0) - COALESCE(i.odenen_tutar,0)) < 1
                 AND UPPER(split_part(TRIM(COALESCE(mo.taseron_adi,'')),' ',1)) = UPPER(split_part(TRIM(COALESCE(NULLIF(i.rf_montaj_firma,''), i.tedarikci, '')),' ',1))
             )
@@ -14620,6 +14707,11 @@ async function isAtamaDetay(id) {
 
 // Organizasyon şeması tek kaynağı (/org/*): firma ve ekip kartları, üyelik geçmişi, yetki (org_yonet / org_sil)
 const orgPanel = orgEkip.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi, detectTenant });
+// Tedarikçi cari hesabı (/finance/marka-cari/*): Teknocenter Taşeron Faturaları / Avans ve Ödeme ekranı — firma kapsamı
+// MARKA PANELİ katmanından, ödeme yazma mali yetki matrisinden (tedarikciCari.js başlığı)
+tedarikciCari.semaKur(pool);
+const cariPanel = tedarikciCari.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi, altMarkaMi, altMarkaInSql, markaProfil,
+  maliYetkiKaydi, odemeYetkili, finansYazmaYetkili, markaFaturaKapsami, upload, uploadToStorage, utf8Name, ensureOdemeTablolari, MARKA_KASA_ROLLER });
 const omnixPanel = omnixProfil.kur(app, {
   pool, authMiddleware, markaProfil, altMarkaKullanicisi, islemGecmisiYaz, isAtamaYetkiliMi, personelHesapEkstresi, pmKisiselEmailGorur,
   get PM_KISISEL_EMAIL() { return PM_KISISEL_EMAIL; },
@@ -16498,10 +16590,27 @@ app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
       return res.status(503).json({ ok: false, error: "Saha / kalem satırları için veritabanı güncellemesi (migration) bekleniyor" });
     // 16.10.2026: araç kirası faturasında ödenen/kalan yalnız ortak ödeme kayıtlarından gelir — formdaki değer yok sayılır
     await ensureOdemeTablolari();
-    const _mev = (await pool.query(`SELECT COALESCE(odenen_tutar,0) AS odenen, ${ARAC_FATURA_MI_SQL("i")} AS arac FROM invoice_entries i WHERE i.id=$1`, [id])).rows[0];
+    const _mev = (await pool.query(`SELECT i.*, COALESCE(i.odenen_tutar,0) AS odenen, ${ARAC_FATURA_MI_SQL("i")} AS arac,
+        COALESCE((SELECT SUM(x.toplam_tutar) FROM invoice_entries x WHERE x.bagli_fatura_id = i.id AND UPPER(COALESCE(x.fatura_turu,'GELEN')) <> 'GELEN'),0) AS iade_bagli
+      FROM invoice_entries i WHERE i.id=$1`, [id])).rows[0];
     const aracFatura = String(is_kalemi || "").toUpperCase() === "ARAC_KIRA" || (Array.isArray(arac_kalemler) && arac_kalemler.length > 0) || (!!_mev?.arac && !Array.isArray(arac_kalemler));
-    const _odenen = aracFatura ? Number(_mev?.odenen || 0) : Number(odenen_tutar || 0);
-    const _kalan = aracFatura ? Math.max(0, Number(toplam_tutar || 0) - _odenen) : Number(kalan_borc || 0);
+    // 29.10.2026: alt marka faturasında ödenen tutar formdan DEĞİŞMEZ (eski form değeri FIFO ödemelerini ezmesin); kalan hesaplanır
+    const markaBorc = !!req.markaFatura;
+    const ekAlan = await faturaEkAlanlari(req.body);
+    if (ekAlan.hata) return res.status(400).json({ ok: false, error: ekAlan.hata });
+    if (markaBorc && _mev) {
+      const od = Number(_mev.odenen || 0);
+      if (od > 0.009 && Number(toplam_tutar || 0) + 0.009 < od + Number(_mev.iade_bagli || 0))
+        return res.status(409).json({ ok: false, error: `Faturaya ${od.toLocaleString("tr-TR")} ödeme uygulanmış — toplam bu tutarın altına indirilemez. Önce ödemeyi iptal edin.` });
+      if (od > 0.009 && String(currency || "TRY").toUpperCase() !== String(_mev.currency || "TRY").toUpperCase())
+        return res.status(409).json({ ok: false, error: "Ödemesi olan faturanın para birimi değiştirilemez — önce ödemeyi iptal edin" });
+      if (od > 0.009 && ekAlan.tedarikci_id !== undefined && _mev.tedarikci_id && Number(_mev.tedarikci_id) !== Number(ekAlan.tedarikci_id))
+        return res.status(409).json({ ok: false, error: "Ödemesi olan faturanın tedarikçisi değiştirilemez — önce ödemeyi iptal edin" });
+    }
+    const _odenen = aracFatura || markaBorc ? Number(_mev?.odenen || 0) : Number(odenen_tutar || 0);
+    const _kalan = aracFatura ? Math.max(0, Number(toplam_tutar || 0) - _odenen)
+      : markaBorc ? (String(_mev?.fatura_turu || "GELEN").toUpperCase() === "GELEN" ? Math.max(0, Number(toplam_tutar || 0) - _odenen - Number(_mev?.iade_bagli || 0)) : 0)
+      : Number(kalan_borc || 0);
 
     const result = await pool.query(
       `
@@ -16537,7 +16646,7 @@ app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
         proje_kodu || null,
         fatura_no || null,
         fatura_tarihi || null,
-        aracFatura ? null : (odeme_tarihi || null),
+        aracFatura ? null : markaBorc ? (_mev?.odeme_tarihi || null) : (odeme_tarihi || null),
         tedarikci || null,
         rf_montaj_firma || null,
         fatura_kalemi || null,
@@ -16563,6 +16672,14 @@ app.put("/finance/invoice-entry/:id", faturaYazma, async (req, res) => {
       return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
     }
 
+    if (ekAlan.tedarikci_id !== undefined || ekAlan.vade_tarihi !== undefined) {
+      const u2 = await pool.query(`UPDATE invoice_entries SET tedarikci_id = CASE WHEN $4 THEN $2 ELSE tedarikci_id END, vade_tarihi = CASE WHEN $5 THEN $3::date ELSE vade_tarihi END WHERE id=$1 RETURNING tedarikci_id, vade_tarihi`,
+        [id, ekAlan.tedarikci_id ?? null, ekAlan.vade_tarihi ?? null, ekAlan.tedarikci_id !== undefined, ekAlan.vade_tarihi !== undefined]);
+      Object.assign(result.rows[0], u2.rows[0] || {});
+    }
+    { const eo = faturaGecmisOzet(_mev || {}), yo = faturaGecmisOzet(result.rows[0]);
+      const fark = Object.keys(yo).filter((k) => String(eo[k] ?? "") !== String(yo[k] ?? ""));
+      if (fark.length) islemGecmisiYaz(req, "fatura", Number(id), "DUZENLEME", Object.fromEntries(fark.map((k) => [k, eo[k]])), Object.fromEntries(fark.map((k) => [k, yo[k]])), null).catch(() => {}); }
     if (fsk.satirlar && fskHazir) await fskSatirlariKaydet(pool, Number(id), fsk.satirlar, String(req.user?.email || "").toLowerCase());
 
     let aracUyarilar = [];
@@ -22177,6 +22294,10 @@ app.get("/finance/taseron-cashflow", requireFinanceAuth, async (req, res) => {
       WHERE EXTRACT(YEAR FROM l.tarih) = $1
         AND EXTRACT(MONTH FROM l.tarih) = $2
         AND COALESCE(l.avans_tutar, 0) > 0
+        -- 29.10.2026: alt marka (Teknocenter/AHY) avansı o markanın nakit akışında (marka_taseron_odeme) sayılır — faturaya
+        -- uygulanan kısmı gibi Şimşek'te ikinci kez sayılmaz; iptal edilen kayıt hiç sayılmaz
+        AND ${ERC_ODEME_LOG_SQL("l")}
+        AND l.id NOT IN (SELECT odeme_log_id FROM marka_taseron_odeme WHERE odeme_log_id IS NOT NULL)
 
       ORDER BY gun ASC, firma ASC
     `, [Number(yil), Number(ay)]);
@@ -27215,7 +27336,8 @@ pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`).catch(() => {})
   .then(() => pool.query(`CREATE TABLE IF NOT EXISTS subcons (id SERIAL PRIMARY KEY, subcon_name TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {}))
-  .then(() => orgEkip.semaKur(pool)); // 28.10.2026: firma bağı, ekip şefi, üyelik geçmişi
+  .then(() => orgEkip.semaKur(pool)) // 28.10.2026: firma bağı, ekip şefi, üyelik geçmişi
+  .then(() => tedarikciCari.semaKur(pool)); // 29.10.2026: tedarikçi cari kolonları (subcons hazır olduktan sonra)
 // Ekip adı (örn. "ENH Ekibi") + üye bazlı araç ataması (araç kişiye yazılır)
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ad TEXT`).catch(() => {});
 pool.query(`ALTER TABLE personel ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT`).catch(() => {});
@@ -30454,7 +30576,7 @@ app.get("/finance/taseron-odeme-gecmisi", requireFinanceAuth, async (req, res) =
     const r = await pool.query(`
       SELECT id, firma, tutar, tarih, aciklama, dagilim, dekont_url, created_at
       FROM taseron_odeme_log
-      WHERE firma = $1
+      WHERE firma = $1 AND ${ERC_ODEME_LOG_SQL()}
       ORDER BY tarih DESC, created_at DESC
       LIMIT 50
     `, [firma]);
@@ -30516,10 +30638,10 @@ app.get("/finance/taseron-odeme-excel", requireFinanceAuth, async (req, res) => 
   try {
     const { firma } = req.query;
     const params = [];
-    let where = "";
+    let where = `WHERE ${ERC_ODEME_LOG_SQL()}`;
     if (firma) {
       params.push(firma);
-      where = "WHERE firma = $1";
+      where += " AND firma = $1";
     }
 
     const r = await pool.query(`
@@ -30784,6 +30906,11 @@ app.delete("/finance/taseron-odeme/:id", requireFinanceAuth, async (req, res) =>
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Ödeme kaydı bulunamadı" });
     }
+    // 29.10.2026: tedarikçi cari penceresinden girilen (ya da iptal edilmiş) kayıt silinmez — iptal o pencereden ters işlemle yapılır
+    if (log.idem_key || log.islem_turu || String(log.durum || "AKTIF") !== "AKTIF") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "Bu ödeme Tedarikçi Cari penceresinden girildi ya da iptal edildi — işlem oradan (İptal) yapılır" });
+    }
     // Fatura mahsuplarını geri aç
     await revertTaseronLog(client, log);
     // AHY kopyasını sil: önce odeme_log_id bağıyla; eski kayıtlar için
@@ -30827,7 +30954,7 @@ app.get("/health", (req, res) => {
 app.get("/subcons", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT subcon_name FROM subcons ORDER BY subcon_name ASC"
+      "SELECT subcon_name FROM subcons WHERE COALESCE(to_jsonb(subcons)->>'tedarikci_turu','') <> 'TEDARIKCI' ORDER BY subcon_name ASC"
     );
     res.json({ subcons: result.rows.map(r => r.subcon_name) });
   } catch (err) {
