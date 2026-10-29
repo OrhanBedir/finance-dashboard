@@ -23492,11 +23492,15 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
     const grup = (l) => ({ ids: l.map((x) => x.id), adet: l.length, tutar: topla(l) });
     const ihtiyac = (l) => ({ ids: l.map((x) => x.id), adet: l.length, tutar: topla(l, "kalan") });
     const kirilimli = (h, b) => ({ ...ihtiyac([...h, ...b]), odemeye_hazir: ihtiyac(h), onay_bekleyen: ihtiyac(b) });
-    const vadeBugun = (x) => x.son_odeme_tarihi === bugun;
+    // 29.10.2026 (Orhan): "Bugün gereken para = onayda bekleyen para." İhtiyaç, ödenmemiş geçerli taleplerin TAMAMI
+    // (onay sürecinde + direktör onaylı ödeme bekleyen); geciken ve son ödeme günü girilmemiş olanlar da dahil.
+    // Yalnız son ödeme günü İLERİ tarih olan talep bugünün ihtiyacı sayılmaz (ayrı gösterilir). Ödenen talep nakit akışına geçer.
     const vadeGecti = (x) => !!x.son_odeme_tarihi && x.son_odeme_tarihi < bugun;
     const vadeYok = (x) => !x.son_odeme_tarihi;
-    const bugunHazir = hazir.filter(vadeBugun);
-    const bugunBekleyen = onay_bekleyen.filter(vadeBugun);
+    const vadeIleri = (x) => !!x.son_odeme_tarihi && x.son_odeme_tarihi > bugun;
+    const bugunIhtiyac = (x) => !vadeIleri(x);
+    const bugunHazir = hazir.filter(bugunIhtiyac);
+    const bugunBekleyen = onay_bekleyen.filter(bugunIhtiyac);
     res.json({
       ok: true, bugun, saat_dilimi: "Europe/Istanbul",
       satirlar: [...onay_bekleyen, ...hazir, ...sonGunSatirlar],
@@ -23504,10 +23508,11 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
         son_odeme: { tarih: sonGun, ...grup(sonGunSatirlar) },
         onay_bekleyen: { ...grup(onay_bekleyen), benim: grup(onay_bekleyen.filter((x) => x.benim_onaylayabilir)) },
         bugun_gereken: {
-          toplam_ihtiyac: ihtiyac([...bugunHazir, ...bugunBekleyen]), // ana değer = ödemeye hazır + bugün vadeli onay bekleyen
+          toplam_ihtiyac: ihtiyac([...bugunHazir, ...bugunBekleyen]), // ana değer = ödemeye hazır + onay bekleyen (ileri tarihli hariç)
           odemeye_hazir: ihtiyac(bugunHazir), bugun_onay_bekleyen: ihtiyac(bugunBekleyen),
-          geciken: kirilimli(hazir.filter(vadeGecti), onay_bekleyen.filter(vadeGecti)),   // ana değere eklenmez
-          vade_eksik: kirilimli(hazir.filter(vadeYok), onay_bekleyen.filter(vadeYok)),     // ana değere eklenmez
+          geciken: kirilimli(hazir.filter(vadeGecti), onay_bekleyen.filter(vadeGecti)),   // ana değerin İÇİNDE (bilgi)
+          vade_eksik: kirilimli(hazir.filter(vadeYok), onay_bekleyen.filter(vadeYok)),     // ana değerin İÇİNDE (bilgi)
+          ileri_tarihli: kirilimli(hazir.filter(vadeIleri), onay_bekleyen.filter(vadeIleri)), // ana değere eklenmez
         },
       },
       kullanici: benimEmail,

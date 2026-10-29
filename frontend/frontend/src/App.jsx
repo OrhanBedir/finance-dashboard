@@ -27848,12 +27848,13 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
       sekmeler: [{ kod: "benim", ad: "Onayımı bekleyen", ids: k.onay_bekleyen.benim.ids, tutar: k.onay_bekleyen.benim.tutar, varsayilan: true },
         { kod: "tum", ad: "Tümü", ids: k.onay_bekleyen.ids, tutar: k.onay_bekleyen.tutar }] },
     bugun: { baslik: `💰 Bugün Gereken Avans — ${avansGunUzun(veri.bugun)}`,
-      aciklama: "Bugünün toplam ihtiyacı = son ödeme günü bugün olan, ödenmemiş talepler: ödemeye hazır (nihai onaylı) + onay bekleyen. Onay bekleyenler henüz ödenemez. Geciken ve vade bilgisi eksik kayıtlar toplama eklenmez. Liste filtrelerinden bağımsızdır.",
+      aciklama: "Bugünün toplam ihtiyacı = henüz ödenmemiş tüm talepler: ödemeye hazır (direktör onaylı) + onay sürecindeki talepler; geciken ve son ödeme günü girilmemiş olanlar dahil. Son ödeme günü ileri tarih olanlar dahil değil. Muhasebe ödeyince talep buradan çıkar, nakit akışına ödeme gününde girer. Liste filtrelerinden bağımsızdır.",
       sekmeler: [{ kod: "toplam", ad: "Bugünün toplam ihtiyacı", ids: bg.toplam_ihtiyac.ids, tutar: bg.toplam_ihtiyac.tutar, alan: "kalan", varsayilan: "her_zaman" },
         { kod: "hazir", ad: "Ödemeye hazır", ids: bg.odemeye_hazir.ids, tutar: bg.odemeye_hazir.tutar, alan: "kalan" },
-        { kod: "bekleyen", ad: "Bugün vadeli, onay bekleyen", ids: bg.bugun_onay_bekleyen.ids, tutar: bg.bugun_onay_bekleyen.tutar, alan: "kalan" },
-        { kod: "geciken", ad: "Geciken", ids: bg.geciken.ids, tutar: bg.geciken.tutar, alan: "kalan" },
-        { kod: "eksik", ad: "Vade bilgisi eksik", ids: bg.vade_eksik.ids, tutar: bg.vade_eksik.tutar, alan: "kalan" }] },
+        { kod: "bekleyen", ad: "Onay bekleyen", ids: bg.bugun_onay_bekleyen.ids, tutar: bg.bugun_onay_bekleyen.tutar, alan: "kalan" },
+        { kod: "geciken", ad: "İçinde: geciken", ids: bg.geciken.ids, tutar: bg.geciken.tutar, alan: "kalan" },
+        { kod: "eksik", ad: "İçinde: vade bilgisi eksik", ids: bg.vade_eksik.ids, tutar: bg.vade_eksik.tutar, alan: "kalan" },
+        ...(bg.ileri_tarihli ? [{ kod: "ileri", ad: "İleri tarihli (dahil değil)", ids: bg.ileri_tarihli.ids, tutar: bg.ileri_tarihli.tutar, alan: "kalan" }] : [])] },
   };
   const m = modal && modaller[modal];
   return (
@@ -27881,7 +27882,8 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
           </div>
           <div style={{ fontSize: "11.5px", opacity: 0.9 }}>{bg.toplam_ihtiyac.adet} talep</div>
           <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "4px" }}>
-            Geciken: {avansToplamMetni(bg.geciken.tutar)} ({bg.geciken.adet}){bg.vade_eksik.adet ? ` · Vade bilgisi eksik: ${bg.vade_eksik.adet}` : ""} · toplama eklenmez
+            {bg.geciken.adet ? `İçinde geciken: ${avansToplamMetni(bg.geciken.tutar)} (${bg.geciken.adet})` : "Geciken yok"}{bg.vade_eksik.adet ? ` · vade bilgisi eksik: ${bg.vade_eksik.adet}` : ""}
+            {bg.ileri_tarihli?.adet ? ` · İleri tarihli ${avansToplamMetni(bg.ileri_tarihli.tutar)} (${bg.ileri_tarihli.adet}) dahil değil` : ""}
           </div>
         </button>
       </div>
