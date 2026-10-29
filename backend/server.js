@@ -574,6 +574,7 @@ const teknoHakedis = require("./teknoHakedis");
 const sahaKimlik = require("./sahaKimlik");
 const taseronCozum = require("./taseronCozum"); // 28.10.2026: Günlük İş Girişi ↔ Rollout taşeron çözümü
 const sahaKonum = require("./sahaKonum");
+const haritaIsDurumu = require("./haritaIsDurumu"); // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
@@ -13119,59 +13120,207 @@ app.get("/export/excel", async (req, res) => {
 });
 
 /* ═══ ROLLOUT SAHA HARİTASI (28.10.2026, Orhan) ═══════════════════════════════════════════════════════════════════
-   Kapsam /rollout/list ile aynı: alt marka (Teknocenter) MARKA ROLLOUT KAPSAMI'ndan geçer (başka firmanın sahası pin ya da arama
-   sonucu olarak dönmez). Bir fiziksel saha = tek pin (sahaKimlik); o sahadaki iş kayıtları (NR700/NR3500/TRP…) ayrı listelenir.
-   Konum saha_konum'dan (TSSR koordinatı; eksikse önbellekteki TSSR analizinden doldurulur — model çağrısı yapılmaz).
-   2026 kapsamı yalnız GERÇEKLEŞEN iş tarihlerinden (kurulum başlangıç/bitiş, on-air, QC kapanış, ENH bitiş); tarih yoksa
-   "tarih eksik" olarak ayrı işaretlenir, sessizce 2026 sayılmaz. Bursa deposu ofis_depo kaydından; mesafe kuş uçuşu. */
-const HARITA_TARIH_ALANLARI = ["installation_actual_start_date", "installation_actual_end_date", "onair_date", "qc_closed_date", "enh_actual_end_date"];
-const _gun = (v) => { if (!v) return null; if (v instanceof Date) return v.toISOString().slice(0, 10); const t = String(v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null; };
+   Kapsam /rollout/list ile aynı: alt marka (Teknocenter) MARKA ROLLOUT KAPSAMI'ndan geçer (başka firmanın sahası pin, arama
+   sonucu ya da küme sayısı olarak dönmez). Bir fiziksel saha = tek pin (sahaKimlik); o sahadaki iş kayıtları ayrı listelenir.
+   Konum saha_konum'dan (kayıtlı / TSSR koordinatı; eksikse önbellekteki TSSR analizinden doldurulur — model çağrısı yok).
+   Yıl / durum: haritaIsDurumu (atanan · devam eden · tamamlanan; kaynaksız iş "İş yılı doğrulanamadı").
+   ?firma=TEKNO — "Teknocenter · 2026" hızlı görünümü, SUNUCUDA süzülür:
+     • iş kolu taşeron alanı Teknocenter'a ait (TEKNO, TEKNOCENTER, TEKNO_xxx — Firma/Taşeron filtresinin sıkı eşleşmesi; öneksiz
+       2KX, AHY_2KX, ŞİMŞEK_2KX sayılmaz) YA DA Günlük İş Girişi'nde Teknocenter'a ait kalemi olan iş kodları;
+     • ERC yöneticisi: Rollout kaydı olmayan, yalnız Günlük İş Girişi'nde Teknocenter kalemi olan iş kodları da gelir;
+     • alt marka hesabı: yalnız kendi kapsamı içinde süzülür (düğme yetkiyi genişletmez); başka firma bu filtreyi isteyemez. */
+const HARITA_FIRMA_IZINLI = ["TEKNO"];
+const _gun = haritaIsDurumu.gun;
+// Firma süzgeci: K (alt marka) + istenen firma → { FM (eşleştirici), hata }
+async function haritaFirmaSuzgeci(req, K) {
+  const firma = String(req.query.firma || "").toUpperCase().trim();
+  if (!firma) return { firma: null, FM: null };
+  if (!HARITA_FIRMA_IZINLI.includes(firma)) return { hata: [400, "Geçersiz firma filtresi"] };
+  if (K && K.kod !== firma) return { hata: [403, "Bu firma filtresi yetkinizde değil"] };
+  const FM = (await rolloutFirmaEsleyicileri()).find((m) => m.kod === firma);
+  if (!FM) return { hata: [400, "Firma tanımı bulunamadı"] };
+  return { firma, FM };
+}
+// Günlük İş Girişi kalemleri (fiyat alanı ALINMAZ): iş kodu → [kalem]. esle: kalem taşeronu süzgeci
+async function haritaKalemleri(esle, kodlar = null) {
+  const r = await pool.query(`SELECT id, UPPER(TRIM(site_code)) AS sc, site_type, item_code, item_description, subcon_name, onair_date, qc_durum,
+      COALESCE(tamamlanan_qty, done_qty) AS miktar, to_jsonb(m)->>'boq_surum' AS boq_surum
+    FROM master_works m WHERE COALESCE(TRIM(subcon_name),'') <> '' ${kodlar ? "AND UPPER(TRIM(site_code)) = ANY($1::text[])" : ""}`, kodlar ? [kodlar] : []);
+  const out = new Map();
+  for (const x of r.rows) if (!esle || esle(x.subcon_name)) (out.get(x.sc) || out.set(x.sc, []).get(x.sc)).push(x);
+  return out;
+}
+// İş atamaları: iş kodu → [atama] (tablo yoksa boş)
+async function haritaAtamalari(kodlar) {
+  if (!kodlar.length) return new Map();
+  const r = await pool.query(`SELECT id, kategori, durum, plan_tarihi, baslama_ts, bitis_ts, site_codes FROM is_atama
+    WHERE site_codes && $1::text[]`, [kodlar]).catch(() => ({ rows: [] }));
+  const out = new Map();
+  for (const a of r.rows) for (const s of a.site_codes || []) {
+    const sc = String(s || "").replace(/\s+/g, "").toUpperCase();
+    if (kodlar.includes(sc)) (out.get(sc) || out.set(sc, []).get(sc)).push(a);
+  }
+  return out;
+}
+// Kapsamdaki satırlar (+ firma süzgeci): { rows (maskeli), kalemMap, yalnizGunluk: [iş kodu] }
+async function haritaKapsamSatirlari(K, FM) {
+  const ham = K ? markaRolloutMaskele(K, await markaRolloutSatirlari(K)) : (await pool.query(`SELECT * FROM rollout_progress`)).rows;
+  // Kalem süzgeci: firma görünümünde firmanın kalemleri; alt markada yalnız kendi kalemleri; ERC genel görünümde tümü
+  const kalemEsle = FM ? (ad) => FM.esle(ad) && (!K || K.esle(ad)) : K ? (ad) => K.esle(ad) : null;
+  const kalemMap = await haritaKalemleri(kalemEsle);
+  if (!FM) return { rows: ham, kalemMap, yalnizGunluk: [] };
+  const sc = (r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase();
+  const rows = ham.filter((r) => ROLLOUT_IS_KOLU_ALANLARI.some((L) => { const v = rolloutFirmaAdi(r[L.subcon]); return v && FM.esle(v); }) || kalemMap.has(sc(r)));
+  // Rollout kaydı hiç olmayan, yalnız Günlük İş Girişi kalemi olan iş kodları — yalnız ERC (alt marka kapsamı Rollout'tan gelir)
+  let yalnizGunluk = [];
+  if (!K) {
+    const tum = new Set((await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS sc FROM rollout_progress`)).rows.map((x) => x.sc));
+    yalnizGunluk = [...kalemMap.keys()].filter((k) => !tum.has(k));
+  }
+  return { rows, kalemMap, yalnizGunluk };
+}
+// Konumu olmayan sahanın nedeni (kayıtlar sessizce kaybolmaz)
+function haritaKonumEksikNedeni(k, tssrDurum, belgeVar) {
+  if (k && k.lat === null) return "Yalnız adres var — koordinat yok (adres çözümleme kapalı)";
+  if (k && k.dogruluk === "TERS_OLABILIR") return "TSSR koordinatı ters görünüyor — kontrol gerekli";
+  if (k && k.dogruluk === "GECERSIZ") return "TSSR koordinatı geçersiz — kontrol gerekli";
+  if (tssrDurum === "HAZIR" || tssrDurum === "KISMI") return "TSSR okundu ama koordinat yazmıyor";
+  if (tssrDurum) return "TSSR okunamadı";
+  return belgeVar ? "TSSR henüz okunmadı" : "TSSR belgesi yok";
+}
 app.get("/rollout/harita", authMiddleware, async (req, res) => {
   try {
     if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const K = await rolloutKapsam(req);
-    const rows = K ? markaRolloutMaskele(K, await markaRolloutSatirlari(K)) : (await pool.query(`SELECT * FROM rollout_progress`)).rows;
+    const fs = await haritaFirmaSuzgeci(req, K);
+    if (fs.hata) return res.status(fs.hata[0]).json({ ok: false, error: fs.hata[1] });
+    const FM = fs.FM;
+    const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, FM);
     await sahaKonum.tabloHazirla(pool);
     const gruplar = {}; let fizikselOlmayan = 0;
-    for (const r of rows) {
-      const f = sahaKimlik.fizikselSaha(r.site_code);
-      if (!f) { fizikselOlmayan++; continue; }
-      (gruplar[f.fiziksel_id] = gruplar[f.fiziksel_id] || { fiziksel_id: f.fiziksel_id, isler: [] }).isler.push(r);
-    }
+    const ekle = (kod, r) => {
+      const f = sahaKimlik.fizikselSaha(kod);
+      if (!f) { fizikselOlmayan++; return; }
+      (gruplar[f.fiziksel_id] = gruplar[f.fiziksel_id] || { fiziksel_id: f.fiziksel_id, isler: [] }).isler.push({ kod: String(kod).replace(/\s+/g, "").toUpperCase(), r });
+    };
+    for (const r of rows) ekle(r.site_code, r);
+    for (const kod of yalnizGunluk) ekle(kod, null);
     const ids = Object.keys(gruplar);
+    const tumKodlar = ids.flatMap((id) => gruplar[id].isler.map((x) => x.kod));
+    const atamaMap = await haritaAtamalari(tumKodlar);
     const konumGetir = async () => (ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []);
     let konumlar = await konumGetir();
-    const eksik = ids.filter((id) => !konumlar.some((k) => k.fiziksel_id === id));
-    if (eksik.length) {
-      const kodlar = eksik.flatMap((id) => gruplar[id].isler.map((r) => String(r.site_code || "").toUpperCase().trim()));
-      const a = await pool.query(`SELECT DISTINCT ON (site_code) site_code, belge_url, sonuc FROM tssr_ai_analiz WHERE site_code = ANY($1) AND durum IN ('HAZIR','KISMI') ORDER BY site_code, updated_at DESC`, [kodlar]).catch(() => ({ rows: [] }));
+    const tssrDurum = {};
+    if (tumKodlar.length) {
+      const a = await pool.query(`SELECT DISTINCT ON (site_code) site_code, belge_url, sonuc, durum FROM tssr_ai_analiz WHERE site_code = ANY($1) ORDER BY site_code, updated_at DESC`, [tumKodlar]).catch(() => ({ rows: [] }));
       let yazildi = 0;
-      for (const x of a.rows) { if (await sahaKonum.tssrdenKonumYaz(pool, x.site_code, x.sonuc, x.belge_url).catch(() => null)) yazildi++; }
+      for (const x of a.rows) {
+        tssrDurum[x.site_code] = x.durum;
+        const f = sahaKimlik.fizikselSaha(x.site_code);
+        if (f && !konumlar.some((k) => k.fiziksel_id === f.fiziksel_id) && ["HAZIR", "KISMI"].includes(x.durum)) {
+          if (await sahaKonum.tssrdenKonumYaz(pool, x.site_code, x.sonuc, x.belge_url).catch(() => null)) yazildi++;
+        }
+      }
       if (yazildi) konumlar = await konumGetir();
     }
     const kMap = Object.fromEntries(konumlar.map((k) => [k.fiziksel_id, k]));
     const depo = await sahaKonum.bursaDeposu(pool);
+    const adsAl = (r, kalemler) => {
+      const s = new Set();
+      if (r) for (const L of ROLLOUT_IS_KOLU_ALANLARI) { const v = rolloutFirmaAdi(r[L.subcon]); if (v && (!FM || FM.esle(v)) && (!K || K.esle(v))) s.add(v); }
+      for (const k of kalemler) { const v = rolloutFirmaAdi(k.subcon_name); if (v) s.add(v); }
+      return [...s];
+    };
     const sahalar = ids.sort().map((id) => {
       const g = gruplar[id];
-      const isler = g.isler.map((r) => {
-        const tarihler = HARITA_TARIH_ALANLARI.map((k) => _gun(r[k])).filter(Boolean).sort();
-        return { site_code: r.site_code, site_type: r.site_type || "", bolge: r.bolge || "", il: r.il || "", project_code: r.project_code || "", rf_subcon: r.rf_subcon || "",
-          gerceklesen_2026: tarihler.some((t) => t >= "2026-01-01" && t <= "2026-12-31"), son_gerceklesen: tarihler[tarihler.length - 1] || null, tarih_yok: !tarihler.length };
+      const isler = g.isler.map(({ kod, r }) => {
+        const kalemler = kalemMap.get(kod) || [];
+        const kollar = FM && r && !K ? haritaIsDurumu.firmaKollari(r, ROLLOUT_IS_KOLU_ALANLARI, (v) => FM.esle(v)) : null;
+        const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar, kalemler, atamalar: atamaMap.get(kod) || [] });
+        return { site_code: r?.site_code || kod, site_type: r?.site_type || kalemler[0]?.site_type || "", bolge: r?.bolge || "", il: r?.il || "", project_code: r?.project_code || "",
+          kaynak: r ? "ROLLOUT" : "GUNLUK", taseronlar: adsAl(r, kalemler), kalem_sayisi: kalemler.length,
+          durum: d.durum, durum_ad: d.durum_ad, yil_ici: d.yil_ici, dayanak: d.dayanak, yillar: d.yillar,
+          // eski alanlar (geri uyum)
+          gerceklesen_2026: d.durum === "TAMAMLANDI", son_gerceklesen: d.dayanak?.tarih || null, tarih_yok: d.durum === "YIL_DOGRULANAMADI" };
       });
       const k = kMap[id];
-      // 28.10.2026: konum kaynağı (TSSR belgesi / ham okuma) başka firmanın işinden geliyorsa alt markaya verilmez
+      // Konum kaynağı (TSSR belgesi / ham okuma) başka firmanın işinden geliyorsa alt markaya verilmez
       const kaynakBizim = !K || isler.some((x) => String(x.site_code || "").toUpperCase().trim() === String(k?.kaynak_site_code || "").toUpperCase().trim());
       const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [],
         belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null, ham: kaynakBizim ? k.ham : null } : null;
-      const kullanilabilir = konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
+      const kullanilabilir = !!konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
+      const belgeVar = g.isler.some(({ r }) => r && String(r.tssr_belge_url || "").trim());
+      const tdur = g.isler.map(({ kod }) => tssrDurum[kod]).find(Boolean) || null;
       return { fiziksel_id: id, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
-        isler, is_2026: isler.some((x) => x.gerceklesen_2026), tarih_eksik: isler.every((x) => x.tarih_yok),
+        isler, is_2026: isler.some((x) => x.yil_ici), yil_dogrulanamadi: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"), tarih_eksik: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"),
+        taseronlar: [...new Set(isler.flatMap((x) => x.taseronlar))],
         konum, konum_durumu: !k ? "YOK" : k.lat === null ? "YALNIZ_ADRES" : k.dogruluk,
+        konum_eksik_nedeni: kullanilabilir ? null : haritaKonumEksikNedeni(k, tdur, belgeVar),
         kus_ucusu_km: depo.dogrulandi && kullanilabilir ? Math.round(sahaKonum.kusUcusuKm(depo, konum) * 10) / 10 : null };
     });
-    res.json({ ok: true, kapsam: K ? K.ad : null, depo, sahalar, fiziksel_olmayan: fizikselOlmayan, rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
-      ozet: { saha: sahalar.length, konumlu: sahalar.filter((x) => x.konum).length, is_2026: sahalar.filter((x) => x.is_2026).length, tarih_eksik: sahalar.filter((x) => x.tarih_eksik).length } });
+    const kullan = (s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
+    res.json({ ok: true, kapsam: K ? K.ad : null, firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
+      hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
+      rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
+      ozet: { saha: sahalar.length, konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
+        is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
+        tarih_eksik: sahalar.filter((x) => x.yil_dogrulanamadi).length } });
   } catch (e) { console.error("ROLLOUT HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// Fiziksel saha kapsamda mı (rota / saha bilgisi): alt marka → kendi kapsamındaki iş kodları; firma süzgeci → o firmanın işleri
+async function haritaSahaKapsami(req, id) {
+  const K = await rolloutKapsam(req);
+  const fs = await haritaFirmaSuzgeci(req, K);
+  if (fs.hata) return { hata: fs.hata };
+  const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM);
+  const ayni = (kod) => sahaKimlik.fizikselSaha(kod)?.fiziksel_id === id;
+  const satirlar = rows.filter((r) => ayni(r.site_code));
+  const gunluk = yalnizGunluk.filter(ayni);
+  if (!satirlar.length && !gunluk.length) return { hata: [403, "Bu saha erişim kapsamınızda değil"] };
+  return { K, FM: fs.FM, satirlar, gunluk, kalemMap };
+}
+// Saha Bilgileri (salt okunur): iş kodları, iş kolu ilerlemesi, kapsamdaki kalemler (fiyatsız), yetkili belgeler, konum
+app.get("/rollout/harita/saha", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const id = String(req.query.fiziksel_id || "").toUpperCase().trim();
+    if (!id) return res.status(400).json({ ok: false, error: "fiziksel_id zorunlu" });
+    const S = await haritaSahaKapsami(req, id);
+    if (S.hata) return res.status(S.hata[0]).json({ ok: false, error: S.hata[1] });
+    const { K, FM, satirlar, gunluk, kalemMap } = S;
+    const kodlar = [...satirlar.map((r) => String(r.site_code).replace(/\s+/g, "").toUpperCase()), ...gunluk];
+    const atamaMap = await haritaAtamalari(kodlar);
+    const BELGE_AD = { tssr_belge_url: "TSSR", btk_belge_url: "BTK", los_belge_url: "LOS", fsc_belge_url: "FSC", emr_belge_url: "EMR", pac_belge_url: "PAC",
+      ysb_belge_url: "YSB", enh_proje_belge_url: "ENH proje", kabul_dosya_url: "Kabul dosyası", hasarsizlik_belge_url: "Hasarsızlık", memnuniyet_belge_url: "Memnuniyet" };
+    const KOL_AD = { rf: "RF kurulum", los: "LOS", tss: "TSS", tssr: "TSSR", btk: "BTK", trs: "TRS (MW)", enh: "ENH", enh_proje: "ENH proje", power: "Power", emr: "EMR", pac: "PAC", ysb: "YSB" };
+    const isler = [...satirlar.map((r) => ({ kod: String(r.site_code).replace(/\s+/g, "").toUpperCase(), r })), ...gunluk.map((kod) => ({ kod, r: null }))].map(({ kod, r }) => {
+      const kalemler = kalemMap.get(kod) || [];
+      const kollarF = FM && r && !K ? haritaIsDurumu.firmaKollari(r, ROLLOUT_IS_KOLU_ALANLARI, (v) => FM.esle(v)) : null;
+      const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar: kollarF, kalemler, atamalar: atamaMap.get(kod) || [] });
+      // İş kolu ilerlemesi: taşeronu yazılı kollar (alt markada maske sonrası yalnız kendi kolları; firma görünümünde firmanın kolları)
+      const ilerleme = [];
+      if (r) for (const L of ROLLOUT_IS_KOLU_ALANLARI) {
+        const tas = rolloutFirmaAdi(r[L.subcon]);
+        if (!tas || (kollarF && !kollarF.has(L.kolu))) continue;
+        const tarih = (rx) => L.alanlar.filter((a) => rx.test(a)).map((a) => ({ alan: haritaIsDurumu.ALAN_AD[a] || a, tarih: _gun(r[a]) })).filter((x) => x.tarih);
+        const bit = tarih(/(_actual_end_date|_finished_date)$|^(onair_date|qc_closed_date|tamamlanma_tarihi)$/), bas = tarih(/(_actual_start_date|_started_date)$/), pl = tarih(/(_plan_start_date|_plan_date)$|^(plan_start_date|inst_plan_start_date)$/);
+        ilerleme.push({ kolu: L.kolu, ad: KOL_AD[L.kolu] || L.kolu, taseron: tas, durum: bit.length ? "Tamamlandı" : bas.length ? "Devam ediyor" : pl.length ? "Planlandı" : "Tarih yok",
+          tarihler: [...pl, ...bas, ...bit], qc: L.kolu === "rf" ? (r.qc_durum || null) : null });
+      }
+      const belgeler = r ? Object.entries(BELGE_AD).flatMap(([a, ad]) => String(r[a] || "").split(/\s*\n\s*/).filter((u) => /^https?:\/\//.test(u)).map((url) => ({ ad, url }))) : [];
+      return { site_code: r?.site_code || kod, site_type: r?.site_type || "", bolge: r?.bolge || "", il: r?.il || "", project_code: r?.project_code || "",
+        kaynak: r ? "ROLLOUT" : "GUNLUK", durum: d.durum, durum_ad: d.durum_ad, dayanak: d.dayanak, ilerleme, belgeler,
+        kalemler: kalemler.map((k) => ({ item_code: k.item_code, aciklama: k.item_description, taseron: k.subcon_name, miktar: k.miktar != null ? Number(k.miktar) : null,
+          qc: k.qc_durum || null, onair: _gun(k.onair_date), boq_surum: k.boq_surum || null })) };
+    });
+    await sahaKonum.tabloHazirla(pool);
+    const k = (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = $1`, [id])).rows[0];
+    const kaynakBizim = !K || kodlar.includes(String(k?.kaynak_site_code || "").toUpperCase().trim());
+    res.json({ ok: true, fiziksel_id: id, firma: FM ? { kod: FM.kod, ad: FM.ad } : null, salt_okunur: true,
+      konum: k ? { lat: k.lat != null ? Number(k.lat) : null, lng: k.lng != null ? Number(k.lng) : null, kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [],
+        adres: k.adres || "", saha_adi: k.saha_adi || "", il: k.il || "", ilce: k.ilce || "", belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null } : null,
+      isler });
+  } catch (e) { console.error("ROLLOUT HARITA SAHA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 // Seçili saha → Bursa deposu: kuş uçuşu + (yalnız servis yapılandırılmışsa) karayolu. Kapsam dışı saha 403.
 app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
