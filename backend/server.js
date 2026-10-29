@@ -1220,6 +1220,9 @@ const MALI_YETKI_MATRISI = [
   { id: 200, email: "eren.simsek@simsektel.com", ad: "Erencan Şimşek", kapsam: "ERC", dogrulandi: true },
   // 29.10.2026 canlı kayıttan doğrulandı: "İLHAMİ ŞAHİN" direktör, marka TEKNO (alt marka), firma TEKNOCENTER; tek hesap.
   { id: 1694, email: "ilhami.sahin@simsektel.com", ad: "İlhami Şahin", kapsam: "TEKNO", dogrulandi: true },
+  // 29.10.2026 (Orhan: "teknodaki yetkiyi de full aç, İlhami Şahin gibi"): Teknocenter ortak yönetim hesabı — canlı kayıttan
+  // salt-okunur doğrulandı: id 1285, kullanıcı adı "teknocenter", admin, marka TEKNO; tek hesap. Kapsam yalnız Teknocenter.
+  { id: 1285, email: "teknocenter", ad: "Teknocenter (ortak hesap)", kapsam: "TEKNO", dogrulandi: true },
 ];
 // ERC kiracısı (marka ERC / TEKNO / AHY — AHY markasında kalan Şimşek ofis hesapları dahil), taşeron değil.
 // 2KX (ayrı kiracı) ve izole kiracılar etkilenmez.
