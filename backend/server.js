@@ -10081,7 +10081,9 @@ async function markaNakitSatirlari(marka, req) {
           AND m.tarih >= $2
           AND COALESCE(m.donem, to_char(m.tarih,'YYYY-MM')) >= '2026-07'`, [marka, baslangic]),
       // Maaş avansları: personel markası bazlı. İş avansları: ONAYDA SEÇİLEN
-      // firmaya göre (is_avans_talep.firma) — ödeme/direktör onay tarihiyle.
+      // firmaya göre (is_avans_talep.firma). 29.10.2026 (Orhan): nakit akışı GERÇEK ödemedir — yalnız muhasebenin
+      // ödediği (TAMAMLANDI) avans, ödeme gününde düşer. Eskiden direktör onaylı ama ödenmemiş talepler de direktör onay
+      // gününe yazılıyordu (29.10 Teknocenter: ₺30.250 görünüyordu, gerçekte ödenen ₺500; ₺29.750 ödeme bekliyordu).
       pool.query(`SELECT to_char(a.tarih,'YYYY-MM-DD') AS tarih, p.ad_soyad,
           'MAAS_AVANSI' AS tip, a.tutar, COALESCE(a.aciklama,'') AS aciklama,
           (LOWER(COALESCE(p.email,'')) = '${PM_KISISEL_EMAIL}') AS pm_kisisel
@@ -10089,7 +10091,7 @@ async function markaNakitSatirlari(marka, req) {
         WHERE UPPER(COALESCE(p.marka,'ERC')) IN (${altMarkaInSql()}) AND ${avansOdeyenSql("a")} = '${P.kod}'
           AND UPPER(COALESCE(a.avans_turu,'MAAS')) = 'MAAS'
         UNION ALL
-        SELECT to_char(COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi),'YYYY-MM-DD') AS tarih,
+        SELECT to_char(COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi),'YYYY-MM-DD') AS tarih,
           COALESCE(NULLIF(hp.ad_soyad,''), t.talep_eden_ad) AS ad_soyad,
           'IS_AVANSI' AS tip, t.tutar,
           -- Amaç odaklı açıklama: gider türü + açıklama (⚡AHY işareti temizlenir)
@@ -10105,8 +10107,8 @@ async function markaNakitSatirlari(marka, req) {
         FROM is_avans_talep t
         LEFT JOIN personel hp ON hp.id = t.personel_id
         WHERE UPPER(COALESCE(t.firma,'ERC')) = $1
-          AND t.durum IN ('DIREKTOR_ONAY','TAMAMLANDI')
-          AND COALESCE(t.odeme_tarihi, t.direktor_onay_tarihi) >= $2
+          AND t.durum = 'TAMAMLANDI'
+          AND COALESCE(t.odeme_tarihi, t.muhasebe_onay_tarihi) >= $2
         UNION ALL
         SELECT to_char(o.tarih,'YYYY-MM-DD') AS tarih,
           COALESCE(NULLIF(pp.ad_soyad,''), o.ad, o.email) AS ad_soyad,
