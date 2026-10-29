@@ -119,4 +119,44 @@ async function karayolu(pool, a, b, { fetchFn = fetch } = {}) {
   }
 }
 
-module.exports = { TR_KUTU, tssrKonumu, tssrdenKonumYaz, kusUcusuKm, bursaDeposu, karayolu, cizgiAl, tabloHazirla };
+// Karayolu süre tablosu (planlama): noktalar [{ anahtar, lat, lng }] → { tablo: { "A>B": { dk, km, kaynak } }, durum, mesaj }.
+// Önce önbellek (saha_rota_onbellek, yön bağımsız değil: A→B ayrı anahtar); eksik çiftler OSRM "table" servisiyle tek istekte
+// sorulur. Servis kapalı / hatalıysa eksik çiftler tabloda olmaz — planlayıcı bunları "Yol süresi doğrulanamadı" olarak ister.
+// Servise yalnız koordinatlar gider (saha adı / adresi gitmez).
+async function karayoluTablo(pool, noktalar, { fetchFn = fetch } = {}) {
+  const N = (noktalar || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  const anahtar = (a, b) => [a.lat, a.lng, b.lat, b.lng].map((x) => Number(x).toFixed(5)).join(",");
+  const tablo = {};
+  if (N.length < 2) return { tablo, durum: "OK" };
+  await tabloHazirla(pool);
+  const ciftler = [];
+  for (const a of N) for (const b of N) if (a !== b) ciftler.push([a, b]);
+  const c = await pool.query(`SELECT anahtar, mesafe_m, sure_s FROM saha_rota_onbellek WHERE anahtar = ANY($1)`, [ciftler.map(([a, b]) => anahtar(a, b))]);
+  const onb = new Map(c.rows.map((x) => [x.anahtar, x]));
+  const eksik = [];
+  for (const [a, b] of ciftler) {
+    const r = onb.get(anahtar(a, b));
+    if (r) tablo[`${a.anahtar}>${b.anahtar}`] = { dk: Number(r.sure_s) / 60, km: Math.round(Number(r.mesafe_m) / 100) / 10, kaynak: "ROTA_SERVISI" };
+    else eksik.push([a, b]);
+  }
+  if (!eksik.length) return { tablo, durum: "OK" };
+  const url = process.env.ROTA_SERVIS_URL;
+  if (!url) return { tablo, durum: "KAPALI", mesaj: "Yönlendirme servisi yapılandırılmadı — yol süreleri doğrulanamadı" };
+  try {
+    const r = await fetchFn(`${url.replace(/\/$/, "")}/table/v1/driving/${N.map((p) => `${p.lng},${p.lat}`).join(";")}?annotations=duration,distance`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (!Array.isArray(j?.durations)) throw new Error("tablo yanıtı yok");
+    for (const [a, b] of eksik) {
+      const i = N.indexOf(a), k = N.indexOf(b);
+      const s = j.durations?.[i]?.[k], m = j.distances?.[i]?.[k];
+      if (!Number.isFinite(s)) continue;
+      tablo[`${a.anahtar}>${b.anahtar}`] = { dk: s / 60, km: Number.isFinite(m) ? Math.round(m / 100) / 10 : null, kaynak: "ROTA_SERVISI" };
+      await pool.query(`INSERT INTO saha_rota_onbellek (anahtar, mesafe_m, sure_s, servis) VALUES ($1,$2,$3,$4) ON CONFLICT (anahtar) DO NOTHING`,
+        [anahtar(a, b), Number.isFinite(m) ? m : null, s, url]);
+    }
+    return { tablo, durum: "OK" };
+  } catch (e) { return { tablo, durum: "HATA", mesaj: `Yönlendirme servisi yanıt vermedi (${e.message}) — eksik yol süreleri doğrulanamadı` }; }
+}
+
+module.exports = { TR_KUTU, tssrKonumu, tssrdenKonumYaz, kusUcusuKm, bursaDeposu, karayolu, karayoluTablo, cizgiAl, tabloHazirla };

@@ -574,7 +574,9 @@ const teknoHakedis = require("./teknoHakedis");
 const sahaKimlik = require("./sahaKimlik");
 const taseronCozum = require("./taseronCozum"); // 28.10.2026: Günlük İş Girişi ↔ Rollout taşeron çözümü
 const sahaKonum = require("./sahaKonum");
-const haritaIsDurumu = require("./haritaIsDurumu"); // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
+const haritaIsDurumu = require("./haritaIsDurumu");
+const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
+const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap) // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
@@ -13444,12 +13446,12 @@ function haritaKonumEksikNedeni(k, tssrDurum, belgeVar) {
   if (tssrDurum) return "TSSR okunamadı";
   return belgeVar ? "TSSR henüz okunmadı" : "TSSR belgesi yok";
 }
-app.get("/rollout/harita", authMiddleware, async (req, res) => {
-  try {
-    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+// Harita verisi (harita ucu ve filtreli Excel aynı kaynağı kullanır). Hata: { durum, mesaj } fırlatır.
+async function haritaVerisi(req) {
+    if (taseronMu(req.user)) throw { durum: 403, mesaj: "Yetkiniz yok" };
     const K = await rolloutKapsam(req);
     const fs = await haritaFirmaSuzgeci(req, K);
-    if (fs.hata) return res.status(fs.hata[0]).json({ ok: false, error: fs.hata[1] });
+    if (fs.hata) throw { durum: fs.hata[0], mesaj: fs.hata[1] };
     const FM = fs.FM;
     const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, FM);
     await sahaKonum.tabloHazirla(pool);
@@ -13481,6 +13483,8 @@ app.get("/rollout/harita", authMiddleware, async (req, res) => {
     }
     const kMap = Object.fromEntries(konumlar.map((k) => [k.fiziksel_id, k]));
     const depo = await sahaKonum.bursaDeposu(pool);
+    const cleanupMap = new Map((await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, items, onay_durum, completion_date FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`,
+      [tumKodlar]).catch(() => ({ rows: [] }))).rows.map((x) => [x.sc, x]));
     const adsAl = (r, kalemler) => {
       const s = new Set();
       if (r) for (const L of ROLLOUT_IS_KOLU_ALANLARI) { const v = rolloutFirmaAdi(r[L.subcon]); if (v && (!FM || FM.esle(v)) && (!K || K.esle(v))) s.add(v); }
@@ -13493,8 +13497,16 @@ app.get("/rollout/harita", authMiddleware, async (req, res) => {
         const kalemler = kalemMap.get(kod) || [];
         const kollar = FM && r && !K ? haritaIsDurumu.firmaKollari(r, ROLLOUT_IS_KOLU_ALANLARI, (v) => FM.esle(v)) : null;
         const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar, kalemler, atamalar: atamaMap.get(kod) || [] });
+        // Montaj / QC / Clean Up filtreleri — alt markada ana montaj (RF iş kolu) başka firmadaysa montaj filtresine girmez, planlanamaz
+        const baskaFirmaMontaj = K && r && r._kol_sahip?.rf === "DIGER";
+        const montaj = baskaFirmaMontaj ? { kod: "BASKA_FIRMA", ad: "Ana montaj başka firmada", filtreler: [], belirsiz: null } : sahaFiltre.montajDurumu(r);
+        const cleanup = sahaFiltre.cleanupBekliyor(cleanupMap.get(kod));
+        const sure = sahaFiltre.isSuresi({ row: r, kod, kalemler, montaj });
         return { site_code: r?.site_code || kod, site_type: r?.site_type || kalemler[0]?.site_type || "", bolge: r?.bolge || "", il: r?.il || "", project_code: r?.project_code || "",
           kaynak: r ? "ROLLOUT" : "GUNLUK", taseronlar: adsAl(r, kalemler), kalem_sayisi: kalemler.length,
+          montaj, filtreler: [...montaj.filtreler, ...(cleanup ? ["CLEANUP"] : [])], belirsiz: montaj.belirsiz || null, sure,
+          planlanabilir: !baskaFirmaMontaj, rf_firma: !K && r ? (rolloutFirmaAdi(r.rf_subcon) || null) : null,
+          _kapsamGirdi: { row: r, kod, kalemler },
           durum: d.durum, durum_ad: d.durum_ad, yil_ici: d.yil_ici, dayanak: d.dayanak, yillar: d.yillar,
           // eski alanlar (geri uyum)
           gerceklesen_2026: d.durum === "TAMAMLANDI", son_gerceklesen: d.dayanak?.tarih || null, tarih_yok: d.durum === "YIL_DOGRULANAMADI" };
@@ -13507,21 +13519,26 @@ app.get("/rollout/harita", authMiddleware, async (req, res) => {
       const kullanilabilir = !!konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
       const belgeVar = g.isler.some(({ r }) => r && String(r.tssr_belge_url || "").trim());
       const tdur = g.isler.map(({ kod }) => tssrDurum[kod]).find(Boolean) || null;
+      const kapsam = sahaFiltre.kapsamRengi(isler.map((x) => x._kapsamGirdi));
+      for (const x of isler) { x.kapsam = sahaFiltre.kapsamRengi([x._kapsamGirdi]); delete x._kapsamGirdi; } // filtreyle işler daralınca ekran rengi yeniden birleştirir
       return { fiziksel_id: id, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
-        isler, is_2026: isler.some((x) => x.yil_ici), yil_dogrulanamadi: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"), tarih_eksik: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"),
+        kapsam, isler, is_2026: isler.some((x) => x.yil_ici), yil_dogrulanamadi: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"), tarih_eksik: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"),
         taseronlar: [...new Set(isler.flatMap((x) => x.taseronlar))],
         konum, konum_durumu: !k ? "YOK" : k.lat === null ? "YALNIZ_ADRES" : k.dogruluk,
         konum_eksik_nedeni: kullanilabilir ? null : haritaKonumEksikNedeni(k, tdur, belgeVar),
         kus_ucusu_km: depo.dogrulandi && kullanilabilir ? Math.round(sahaKonum.kusUcusuKm(depo, konum) * 10) / 10 : null };
     });
     const kullan = (s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
-    res.json({ ok: true, kapsam: K ? K.ad : null, firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
+    return ({ ok: true, kapsam: K ? K.ad : null, firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
       hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
       rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
       ozet: { saha: sahalar.length, konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
         is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
         tarih_eksik: sahalar.filter((x) => x.yil_dogrulanamadi).length } });
-  } catch (e) { console.error("ROLLOUT HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+}
+app.get("/rollout/harita", authMiddleware, async (req, res) => {
+  try { res.json(await haritaVerisi(req)); }
+  catch (e) { if (e && e.durum) return res.status(e.durum).json({ ok: false, error: e.mesaj }); console.error("ROLLOUT HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 // Fiziksel saha kapsamda mı (rota / saha bilgisi): alt marka → kendi kapsamındaki iş kodları; firma süzgeci → o firmanın işleri
 async function haritaSahaKapsami(req, id) {
@@ -13577,6 +13594,418 @@ app.get("/rollout/harita/saha", authMiddleware, async (req, res) => {
         adres: k.adres || "", saha_adi: k.saha_adi || "", il: k.il || "", ilce: k.ilce || "", belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null } : null,
       isler });
   } catch (e) { console.error("ROLLOUT HARITA SAHA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+/* ═══ PLAN YAP · EKİP PLANLAMA (29.10.2026, Orhan) ══════════════════════════════════════════════════════════════════
+   Mevcut İş Ata sistemine yazar (paralel atama sistemi yok): her saha işi / faaliyet bir is_atama kaydıdır; gün içi zaman
+   blokları (yol, malzeme teslim alma, montaj, faaliyet) is_atama_plan_segment'te tutulur ve sonraki planlarda meşguliyet sayılır.
+   Önizleme hiçbir şey yazmaz. Onay: sunucu planı güncel atamalarla YENİDEN hesaplar, önizlemeden farklıysa reddeder (409);
+   istek anahtarı tekrar tıklamada çift kayıt üretmez. Plan kaydı PR miktarını, QC'yi, Rollout tarihlerini, iş durumunu DEĞİŞTİRMEZ.
+   Yetki: İş Ata yetkisi (isAtamaYetkiliMi — Nurcan dahil); alt marka yalnız kendi firmasının ekiplerini ve kapsamındaki işleri
+   planlar; ana montajı (RF iş kolu) başka firmada olan iş, o firmanın ekibine atanamaz. Fiyat / maaş hiçbir yanıtta yok. */
+const PLAN_SAHASIZ_KATEGORI = ["MALZEME", "ARAC_BAKIM", "ISG_EGITIM", "DIGER"];
+const PLAN_DOLU_DURUM = "a.durum NOT IN ('TAMAMLANDI','IPTAL')";
+const planHata = (durum, mesaj, ek) => Object.assign(new Error(mesaj), { durum, ek });
+const plTarih = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null;
+const plSaat = (v) => /^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v).padStart(5, "0") : null;
+// timestamptz → Istanbul yerel tarih + saat
+const plYerel = (ts) => { const d = new Date(new Date(ts).getTime() + 3 * 3600e3); return { tarih: d.toISOString().slice(0, 10), saat: d.toISOString().slice(11, 16) }; };
+async function planTablolar() {
+  await isAtamaTablolar();
+  await pool.query(`ALTER TABLE is_kategori ADD COLUMN IF NOT EXISTS saha_zorunlu BOOLEAN DEFAULT true`);
+  await pool.query(`UPDATE is_kategori SET saha_zorunlu = false WHERE kod = ANY($1) AND saha_zorunlu IS DISTINCT FROM false`, [PLAN_SAHASIZ_KATEGORI]);
+  await pool.query(`ALTER TABLE is_atama ADD COLUMN IF NOT EXISTS plan_id INTEGER, ADD COLUMN IF NOT EXISTS plan_baslangic TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS plan_bitis TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS ekip_no INTEGER, ADD COLUMN IF NOT EXISTS arac_plaka TEXT,
+    ADD COLUMN IF NOT EXISTS plan_detay JSONB, ADD COLUMN IF NOT EXISTS konum_aciklama TEXT`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS plan_kayit (id SERIAL PRIMARY KEY, istek_anahtari TEXT UNIQUE NOT NULL, ekip_no INTEGER,
+    donem_bas DATE, donem_bit DATE, mod TEXT, girdi JSONB, ozet JSONB, olusturan TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS is_atama_plan_segment (id SERIAL PRIMARY KEY, plan_id INTEGER REFERENCES plan_kayit(id) ON DELETE CASCADE,
+    is_atama_id INTEGER, ekip_no INTEGER, arac_plaka TEXT, personeller TEXT[] DEFAULT '{}', tur TEXT, ad TEXT, site_code TEXT, kategori TEXT,
+    bas TIMESTAMPTZ NOT NULL, bit TIMESTAMPTZ NOT NULL, km NUMERIC, yol_kaynak TEXT, aciklama TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS is_atama_plan_segment_ekip_idx ON is_atama_plan_segment (ekip_no, bas)`);
+}
+// Ekipler (+ şef, telefon, plaka, üyeler, yetkinlik). Alt marka: yalnız kendi firmasının iç ekipleri. Maaş / ücret alanı OKUNMAZ.
+async function planEkipleri(req, ekipNo = null) {
+  const K = await rolloutKapsam(req);
+  const r = await pool.query(`SELECT e.ekip_no, e.ad, e.bolge, e.plaka, e.ekip_turu, e.bagli_firma, e.firma_id, e.sef_personel_id, s.subcon_name AS firma_adi
+    FROM ekipler e LEFT JOIN subcons s ON s.id = e.firma_id WHERE COALESCE(e.aktif,true) ${ekipNo != null ? "AND e.ekip_no = $1" : ""} ORDER BY e.ekip_no`,
+    ekipNo != null ? [Number(ekipNo)] : []);
+  const ekipler = r.rows.filter((e) => !K || (String(e.ekip_turu || "").toUpperCase() === "IC" && String(e.bagli_firma || "").toUpperCase() === K.kod));
+  if (!ekipler.length) return [];
+  const p = await pool.query(`SELECT id, ad_soyad, LOWER(TRIM(email)) AS email, telefon, unvan, ekip_arac_plaka, TRIM(ekip_bilgisi) AS ekip,
+      COALESCE(yuksekte_calisma,false) AS yuksekte_calisma, COALESCE(elektrik_isi,false) AS elektrik_isi
+    FROM personel WHERE COALESCE(aktif,true) AND TRIM(COALESCE(ekip_bilgisi,'')) = ANY($1::text[])`, [ekipler.map((e) => String(e.ekip_no))]).catch(() => ({ rows: [] }));
+  const es = await rolloutFirmaEsleyicileri();
+  return ekipler.map((e) => {
+    const uyeler = p.rows.filter((x) => x.ekip === String(e.ekip_no));
+    const sef = uyeler.find((x) => x.id === e.sef_personel_id) || uyeler.find((x) => /şef|sef/i.test(String(x.unvan || ""))) || null;
+    const ic = String(e.ekip_turu || "").toUpperCase() === "IC";
+    const firma = ic ? (String(e.bagli_firma || "").toUpperCase() || "SIMSEK") : (es.find((m) => m.esle(e.firma_adi || ""))?.kod || null);
+    return { ekip_no: e.ekip_no, ad: e.ad || `Ekip ${e.ekip_no}`, bolge: e.bolge || null, ekip_turu: e.ekip_turu || null, firma, firma_adi: e.firma_adi || null,
+      sef: sef ? { ad: sef.ad_soyad, telefon: sef.telefon || null, kaynak: e.sef_personel_id === sef.id ? "Ekip şefi kaydı" : "Ünvanında şef geçen üye" } : null,
+      plaka: e.plaka || sef?.ekip_arac_plaka || uyeler.find((x) => x.ekip_arac_plaka)?.ekip_arac_plaka || null,
+      uyeler: uyeler.map((x) => ({ ad: x.ad_soyad, email: x.email || null, unvan: x.unvan || null, yuksekte_calisma: x.yuksekte_calisma, elektrik_isi: x.elektrik_isi })),
+      yetkinlik: { yuksekte_calisma: uyeler.some((x) => x.yuksekte_calisma), elektrik_isi: uyeler.some((x) => x.elektrik_isi) } };
+  });
+}
+// Ekibin / kişilerin / aracın mevcut meşguliyeti (plan dönemi): plan blokları + saatsiz açık atamalar (tüm gün) + araç bakım
+async function planMesguliyet(ekip, bas, bit) {
+  const mailler = ekip.uyeler.map((u) => u.email).filter(Boolean);
+  const out = [];
+  const s = await pool.query(`SELECT s.bas, s.bit, s.ad, s.tur, s.is_atama_id FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
+    WHERE s.bas < ($3::date + 1)::timestamptz AND s.bit > $2::date::timestamptz AND (s.ekip_no = $1 OR (s.arac_plaka IS NOT NULL AND s.arac_plaka = $4) OR s.personeller && $5::text[])
+      AND (a.id IS NULL OR ${PLAN_DOLU_DURUM})`, [ekip.ekip_no, bas, bit, ekip.plaka || "__yok__", mailler]).catch(() => ({ rows: [] }));
+  for (const x of s.rows) { const a = plYerel(x.bas), b = plYerel(x.bit); out.push({ tarih: a.tarih, bas: a.saat, bit: a.tarih === b.tarih ? b.saat : "23:59", aciklama: `Mevcut plan: ${x.ad || x.tur}` }); }
+  const l = await pool.query(`SELECT DISTINCT a.id, a.kategori, to_char(a.plan_tarihi,'YYYY-MM-DD') AS gun, a.site_codes FROM is_atama a
+      LEFT JOIN LATERAL jsonb_array_elements(COALESCE(a.personeller,'[]'::jsonb)) k ON true
+    WHERE ${PLAN_DOLU_DURUM} AND a.plan_id IS NULL AND a.plan_tarihi BETWEEN $1 AND $2
+      AND (LOWER(TRIM(k->>'email')) = ANY($3::text[]) OR (a.kategori = 'ARAC_BAKIM' AND a.arac_plaka = $4))`, [bas, bit, mailler, ekip.plaka || "__yok__"]).catch(() => ({ rows: [] }));
+  for (const x of l.rows) out.push({ tarih: x.gun, aciklama: `Mevcut atama #${x.id} (${x.kategori}${(x.site_codes || []).length ? ` · ${x.site_codes.join(", ")}` : ""}) — saatsiz, tüm gün meşgul sayıldı` });
+  return out;
+}
+// Doğrulanmış depo / ofis noktaları (koordinatı kayıtlı) — konum tahmin edilmez
+async function planNoktalari() {
+  const r = await pool.query(`SELECT id, tur, ad, bolge, adres, lat, lng FROM ofis_depo WHERE UPPER(COALESCE(durum,'AKTİF')) <> 'PASİF' ORDER BY id`).catch(() => ({ rows: [] }));
+  return r.rows.map((x) => ({ id: x.id, tur: x.tur, ad: x.ad, bolge: x.bolge, adres: x.adres || "", lat: Number(x.lat), lng: Number(x.lng) }))
+    .map((x) => ({ ...x, dogrulandi: Number.isFinite(x.lat) && Number.isFinite(x.lng) && x.lat !== 0 && x.lat >= 35.5 && x.lat <= 42.6 && x.lng >= 25.4 && x.lng <= 45 }));
+}
+// Önizleme / onay ortak hazırlığı
+async function planHazirla(req, b) {
+  if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) throw planHata(403, "Plan yapma (İş Ata) yetkiniz yok");
+  await planTablolar();
+  const ekip = (await planEkipleri(req, b?.ekip_no))[0];
+  if (!ekip) throw planHata(403, "Ekip bulunamadı ya da kapsamınızda değil");
+  const kisiHata = await isAtamaPersonelKapsamHatasi(req, ekip.uyeler.filter((u) => u.email).map((u) => ({ email: u.email, ad: u.ad })));
+  if (kisiHata) throw planHata(403, kisiHata);
+  const K = await rolloutKapsam(req);
+  const es = await rolloutFirmaEsleyicileri();
+  const grup = (ad) => (ad ? es.find((m) => m.esle(ad))?.kod || null : null);
+  const altMi = (kod) => ALT_MARKALAR.some((m) => m.kod === kod);
+  const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, null);
+  const rowMap = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
+  const engeller = [], uyarilar = [];
+  if (!ekip.uyeler.some((u) => u.email)) engeller.push(`${ekip.ad}: ekipte e-postası kayıtlı personel yok — İş Ata kaydı kişiye bağlanamaz`);
+  if (!ekip.plaka) uyarilar.push(`${ekip.ad}: araç plakası kayıtlı değil`);
+  if (!ekip.sef) uyarilar.push(`${ekip.ad}: ekip şefi kayıtlı değil`);
+  await sahaKonum.tabloHazirla(pool);
+  const noktalar = await planNoktalari();
+  const isler = [];
+  for (const x of Array.isArray(b?.isler) ? b.isler : []) {
+    const kod = String(x?.kod || "").replace(/\s+/g, "").toUpperCase();
+    if (!kod) continue;
+    const r = rowMap.get(kod) || null;
+    if (!r && !yalnizGunluk.includes(kod)) { engeller.push(`${kod}: erişim kapsamınızda değil`); continue; }
+    const kalemler = kalemMap.get(kod) || [];
+    if (K && r && r._kol_sahip?.rf === "DIGER") { engeller.push(`${kod}: ana montaj (RF iş kolu) başka firmada — Teknocenter kalemi görünürlük sağlar ama montaj ataması vermez`); continue; }
+    const sahip = r ? grup(rolloutFirmaAdi(r.rf_subcon)) : grup(kalemler[0]?.subcon_name);
+    if (!K && altMi(ekip.firma) && sahip !== ekip.firma) { engeller.push(`${kod}: ana montaj ${r?.rf_subcon || "kayıtsız"} — ${ekip.ad} (${ekip.firma}) ekibine atanamaz`); continue; }
+    if (!K && !altMi(ekip.firma) && altMi(sahip)) { engeller.push(`${kod}: ana montaj ${sahip} firmasına ait (${r?.rf_subcon || kalemler[0]?.subcon_name}) — ${ekip.ad} ekibine atanamaz`); continue; }
+    const f = sahaKimlik.fizikselSaha(kod);
+    const k = f ? (await pool.query(`SELECT lat, lng, dogruluk, saha_adi, il, ilce FROM saha_konum WHERE fiziksel_id = $1`, [f.fiziksel_id])).rows[0] : null;
+    const konum = k && k.lat != null && ["KESIN", "CELISKILI"].includes(k.dogruluk) ? { lat: Number(k.lat), lng: Number(k.lng) } : null;
+    const montaj = sahaFiltre.montajDurumu(r);
+    const otomatik = sahaFiltre.isSuresi({ row: r, kod, kalemler, montaj });
+    let sureGun = otomatik.gun, sureKaynak = otomatik.gun != null ? `Kural: ${otomatik.gerekce}` : null;
+    if (x.sure_gun != null && x.sure_gun !== "") {
+      const v = Number(String(x.sure_gun).replace(",", "."));
+      if (!(v > 0 && v <= 30)) engeller.push(`${kod}: süre 0–30 ekip-gün aralığında olmalı`);
+      else if (String(x.sure_gerekce || "").trim().length < 3) engeller.push(`${kod}: süre değişikliği için gerekçe yazın`);
+      else { sureGun = v; sureKaynak = `Kullanıcı: ${String(x.sure_gerekce).trim().slice(0, 200)}${otomatik.gun != null ? ` (kural: ${otomatik.gun} gün)` : ""}`; }
+    }
+    if (r && !montaj.malzeme_ok && (x.kategori || "NEW_SITE") === "NEW_SITE") uyarilar.push(`${kod}: Rollout'ta malzeme OK değil`);
+    if (montaj.belirsiz) uyarilar.push(`${kod}: durum belirsiz — ${montaj.belirsiz.join("; ")}`);
+    const kap = sahaFiltre.kapsamRengi([{ row: r, kod, kalemler }]);
+    if (["STANDALONE", "ANTEN_VAR"].includes(kap.renk) && !ekip.yetkinlik.yuksekte_calisma) uyarilar.push(`${kod}: ${kap.ad} — ekipte yüksekte çalışma yetkinliği kayıtlı üye yok`);
+    if (/ENH/.test(String(x.kategori || "")) && !ekip.yetkinlik.elektrik_isi) uyarilar.push(`${kod}: ENH işi — ekipte elektrik işi yetkinliği kayıtlı üye yok`);
+    const par = x.par && typeof x.par === "object" ? { par_id: String(x.par.par_id || "").trim().slice(0, 60) || null, kesinti: ["VAR", "YOK"].includes(x.par.kesinti) ? x.par.kesinti : null,
+      kesinti_dk: Number(x.par.kesinti_dk) > 0 ? Number(x.par.kesinti_dk) : null, bas: plSaat(x.par.bas), bit: plSaat(x.par.bit) } : null;
+    isler.push({ kod, ad: f?.fiziksel_id || kod, fiziksel_id: f?.fiziksel_id || kod, konum, sureGun, sureKaynak, sureGerekce: otomatik.gerekce, otomatik_sure: otomatik,
+      kategori: x.kategori || "NEW_SITE", isAd: { STANDALONE_POLE: "Standalone montaj (pole)", STANDALONE_KABIN_ANTEN: "Standalone montaj (kabinet + anten)", LTE_ANTEN: "Antenli montaj / değişim", RRU: "RRU montaj / söküm" }[otomatik.kural] || "Montaj", kapsam: kap, montaj, par,
+      erisim: par?.bas && par?.bit ? { bas: par.bas, bit: par.bit } : null,
+      enErken: b?.mod === "MANUEL" && plTarih(x.baslangic_tarih) ? { tarih: x.baslangic_tarih, saat: plSaat(x.baslangic_saat) } : null, il: k?.il || r?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", bolge: r?.bolge || null });
+  }
+  // Başlangıç konumu ve teslim noktaları — yalnız doğrulanmış kayıttan
+  const noktaBul = (id) => noktalar.find((n) => n.id === Number(id) && n.dogrulandi) || null;
+  let baslangic = null;
+  if (b?.baslangic?.tur === "DEPO") { const n = noktaBul(b.baslangic.id); if (!n) engeller.push("Başlangıç noktası (depo / ofis) koordinatı doğrulanmamış"); else baslangic = { ad: n.ad, lat: n.lat, lng: n.lng }; }
+  else if (b?.baslangic?.tur === "SAHA") {
+    const f = sahaKimlik.fizikselSaha(b.baslangic.kod);
+    const k = f ? (await pool.query(`SELECT lat, lng, dogruluk FROM saha_konum WHERE fiziksel_id = $1`, [f.fiziksel_id])).rows[0] : null;
+    if (!k || k.lat == null || !["KESIN", "CELISKILI"].includes(k.dogruluk)) engeller.push("Başlangıç sahasının doğrulanmış koordinatı yok"); else baslangic = { ad: f.fiziksel_id, lat: Number(k.lat), lng: Number(k.lng) };
+  } else engeller.push("Ekibin başlangıç konumunu seçin");
+  const md = String(b?.malzeme?.durum || "");
+  if (!["TESLIM", "EKIPTE", "GEREKMIYOR"].includes(md)) engeller.push("Malzeme durumunu seçin (teslim alınacak / ekipte / gerekmiyor)");
+  const teslimler = [];
+  if (md === "TESLIM") for (const [i, x] of (b.malzeme.teslimler || []).entries()) {
+    const n = noktaBul(x.depo_id);
+    if (!n) { engeller.push(`${i + 1}. teslim noktasının koordinatı doğrulanmamış — depo konumu tahmin edilmez`); continue; }
+    if (!plTarih(x.tarih) || !plSaat(x.saat)) { engeller.push(`${i + 1}. teslim için tarih ve saat seçin`); continue; }
+    teslimler.push({ tarih: x.tarih, saat: plSaat(x.saat), sureDk: Number(x.sure_dk) > 0 ? Number(x.sure_dk) : 30, nokta: { ad: n.ad, lat: n.lat, lng: n.lng, acilis: plSaat(x.acilis), kapanis: plSaat(x.kapanis) },
+      hazir: plTarih(x.hazir_tarih) ? { tarih: x.hazir_tarih, saat: plSaat(x.hazir_saat) } : null });
+  }
+  // Diğer faaliyetler (sabit tarih / saat)
+  const katlar = new Map((await pool.query(`SELECT kod, ad, COALESCE(saha_zorunlu,true) AS saha_zorunlu FROM is_kategori WHERE aktif`)).rows.map((k) => [k.kod, k]));
+  const faaliyetler = [];
+  for (const x of Array.isArray(b?.faaliyetler) ? b.faaliyetler : []) {
+    const kt = katlar.get(String(x?.kategori || ""));
+    if (!kt) { engeller.push(`Faaliyet kategorisi geçersiz: ${x?.kategori}`); continue; }
+    const kod = String(x.kod || "").replace(/\s+/g, "").toUpperCase() || null;
+    if (kt.saha_zorunlu && !kod) { engeller.push(`${kt.ad}: Site ID / iş kodu seçin`); continue; }
+    if (kod && !rowMap.has(kod) && !yalnizGunluk.includes(kod)) { engeller.push(`${kt.ad} · ${kod}: erişim kapsamınızda değil`); continue; }
+    if (!plTarih(x.tarih) || !plSaat(x.saat) || !(Number(x.sure_dk) > 0)) { engeller.push(`${kt.ad}: tarih, saat ve süre girin`); continue; }
+    faaliyetler.push({ kategori: kt.kod, ad: `${kt.ad}${kod ? ` · ${kod}` : ""}`, kod, tarih: x.tarih, saat: plSaat(x.saat), sureDk: Number(x.sure_dk),
+      konum_aciklama: String(x.konum_aciklama || "").trim().slice(0, 200) || null, aciklama: String(x.aciklama || "").trim().slice(0, 500) || null });
+  }
+  // Karayolu süre tablosu (rota servisi + kullanıcının MANUEL varsayımları)
+  const nok = [];
+  if (baslangic) nok.push({ anahtar: "BASLANGIC", ...baslangic });
+  teslimler.forEach((t, i) => nok.push({ anahtar: `TESLIM:${i}`, lat: t.nokta.lat, lng: t.nokta.lng }));
+  for (const x of isler) if (x.konum) nok.push({ anahtar: `IS:${x.kod}`, ...x.konum });
+  const rt = await sahaKonum.karayoluTablo(pool, nok);
+  const yolTablosu = { ...rt.tablo };
+  // Aynı koordinattaki noktalar arası yol 0 (ör. başlangıç = teslim deposu)
+  for (const a of nok) for (const c of nok) if (a !== c && Math.abs(a.lat - c.lat) < 1e-6 && Math.abs(a.lng - c.lng) < 1e-6) yolTablosu[`${a.anahtar}>${c.anahtar}`] = { dk: 0, km: 0, kaynak: "AYNI_NOKTA" };
+  for (const [anah, v] of Object.entries(b?.yol_manuel || {})) if (Number(v) > 0 && /^[A-Z:0-9_#]+>[A-Z:0-9_#]+$/i.test(anah)) yolTablosu[anah] = { dk: Number(v), km: null, kaynak: "MANUEL" };
+  const donem = planlayici.varsayilanDonem(new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10), plTarih(b?.donem?.baslangic));
+  if (plTarih(b?.donem?.bitis)) donem.bitis = b.donem.bitis;
+  const calisma = {};
+  for (const k of ["bas", "bit", "molaBas"]) if (plSaat(b?.calisma?.[k])) calisma[k] = plSaat(b.calisma[k]);
+  for (const k of ["molaDk", "kapasiteSaat", "minBlokDk", "surusPayYuzde"]) if (b?.calisma?.[k] !== undefined && Number.isFinite(Number(b.calisma[k]))) calisma[k] = Number(b.calisma[k]);
+  const mesgul = await planMesguliyet(ekip, donem.baslangic, donem.bitis);
+  // Ekibin önceki plandaki son konumu (dönem başından önce / içinde): başlangıç noktasıyla çelişiyorsa uyar
+  const sonSeg = (await pool.query(`SELECT s.site_code, s.bit FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
+      WHERE s.ekip_no = $1 AND s.tur = 'MONTAJ' AND s.site_code IS NOT NULL AND s.bit <= ($2::date + 1)::timestamptz AND (a.id IS NULL OR ${PLAN_DOLU_DURUM})
+      ORDER BY s.bit DESC LIMIT 1`, [ekip.ekip_no, donem.bitis]).catch(() => ({ rows: [] }))).rows[0];
+  const oncekiKonum = sonSeg ? { kod: sonSeg.site_code, fiziksel_id: sahaKimlik.fizikselSaha(sonSeg.site_code)?.fiziksel_id || sonSeg.site_code, bitis: plYerel(sonSeg.bit) } : null;
+  if (oncekiKonum && plYerel(sonSeg.bit).tarih >= planlayici.gunEkle(donem.baslangic, -1) && baslangic?.ad !== oncekiKonum.fiziksel_id)
+    uyarilar.push(`Ekip önceki planda ${oncekiKonum.bitis.tarih} ${oncekiKonum.bitis.saat}'e kadar ${oncekiKonum.fiziksel_id} sahasında — başlangıç konumu olarak bu sahayı seçmeyi düşünün`);
+  const plan = engeller.length && !isler.length && !faaliyetler.length ? null : planlayici.planla({ donem, calisma, konaklama: b?.konaklama === "DONUS" ? "DONUS" : "BOLGEDE",
+    baslangicKonum: baslangic || { ad: "Başlangıç" }, malzeme: { durum: md || "GEREKMIYOR", teslimler }, isler, faaliyetler, mesgul, yolTablosu,
+    mod: b?.mod === "MANUEL" ? "MANUEL" : "ASISTAN" });
+  if (plan?.hata) engeller.push(plan.hata);
+  // Kullanıcıya gösterilen yol bacakları (anahtar → ad) — manuel giriş için
+  const nokAd = { BASLANGIC: baslangic?.ad || "Başlangıç" };
+  teslimler.forEach((t, i) => { nokAd[`TESLIM:${i}`] = t.nokta.ad; });
+  for (const x of isler) nokAd[`IS:${x.kod}`] = x.ad;
+  return { ekip, isler, faaliyetler, plan, engeller, uyarilar, mesgul, onceki_konum: oncekiKonum, rota: { durum: rt.durum, mesaj: rt.mesaj || null }, nokta_adlari: nokAd,
+    imza: plan && !plan.hata ? require("crypto").createHash("sha256").update(JSON.stringify(plan.gunler.map((g) => g.segmentler.map((s) => [s.tur, s.kod, s.bas, s.bit])))).digest("hex").slice(0, 16) : null };
+}
+const planCevap = (H) => ({ ok: true, ekip: H.ekip, isler: H.isler.map(({ otomatik_sure, ...x }) => ({ ...x, otomatik_sure })), faaliyetler: H.faaliyetler,
+  plan: H.plan, engeller: H.engeller, uyarilar: [...H.uyarilar, ...(H.plan?.uyarilar || [])], rota: H.rota, nokta_adlari: H.nokta_adlari, imza: H.imza, mesgul: H.mesgul, onceki_konum: H.onceki_konum });
+app.get("/plan/ekipler", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Plan yapma (İş Ata) yetkiniz yok" });
+    await planTablolar();
+    const bugun = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    const ekipler = await planEkipleri(req);
+    for (const e of ekipler) e.mevcut = await planMesguliyet(e, bugun, planlayici.gunEkle(bugun, 21));
+    res.json({ ok: true, ekipler, noktalar: await planNoktalari(), kategoriler: (await pool.query(`SELECT kod, ad, ikon, COALESCE(saha_zorunlu,true) AS saha_zorunlu FROM is_kategori WHERE aktif ORDER BY sira`)).rows,
+      tatiller: planlayici.TR_TATIL, varsayilan_donem: planlayici.varsayilanDonem(bugun), rota_servisi: !!process.env.ROTA_SERVIS_URL });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/plan/onizle", authMiddleware, async (req, res) => {
+  try { res.json(planCevap(await planHazirla(req, req.body || {}))); }
+  catch (e) { res.status(e.durum || 500).json({ ok: false, error: e.message }); }
+});
+app.post("/plan/onayla", authMiddleware, async (req, res) => {
+  const b = req.body || {};
+  const anahtar = String(b.istek_anahtari || "").trim();
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(anahtar)) return res.status(400).json({ ok: false, error: "İstek anahtarı eksik" });
+  try {
+    await planTablolar();
+    const onceki = (await pool.query(`SELECT id, ozet FROM plan_kayit WHERE istek_anahtari = $1`, [anahtar])).rows[0];
+    if (onceki) return res.json({ ok: true, tekrar: true, plan_id: onceki.id, ozet: onceki.ozet }); // çift tıklama: aynı kayıt
+    const H = await planHazirla(req, b);
+    if (H.engeller.length) return res.status(400).json({ ok: false, error: "Plan kaydedilemez — engeller var", engeller: H.engeller });
+    if (!H.plan || H.plan.hata) return res.status(400).json({ ok: false, error: H.plan?.hata || "Plan oluşturulamadı" });
+    if (H.plan.eksik_yollar.length) return res.status(400).json({ ok: false, error: "Yol süresi doğrulanamayan bacaklar var — tahmini süre girin", eksik_yollar: H.plan.eksik_yollar });
+    if (b.imza && b.imza !== H.imza) return res.status(409).json({ ok: false, error: "Güncel atamalar / yol süreleri değişti; plan farklı çıktı. Yeniden önizleyip onaylayın.", yeni: planCevap(H) });
+    const segs = H.plan.gunler.flatMap((g) => g.segmentler);
+    if (!segs.length) return res.status(400).json({ ok: false, error: "Planda kaydedilecek iş yok" });
+    const kisiler = H.ekip.uyeler.filter((u) => u.email).map((u) => ({ email: u.email, ad: u.ad }));
+    const mailler = kisiler.map((k) => k.email);
+    const ben = String(req.user?.email || "").toLowerCase().trim();
+    const db = await pool.connect();
+    try {
+      await db.query("BEGIN");
+      const pk = await db.query(`INSERT INTO plan_kayit (istek_anahtari, ekip_no, donem_bas, donem_bit, mod, girdi, ozet, olusturan) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT (istek_anahtari) DO NOTHING RETURNING id`, [anahtar, H.ekip.ekip_no, H.plan.donem.baslangic, H.plan.donem.bitis, b.mod === "MANUEL" ? "MANUEL" : "ASISTAN",
+        JSON.stringify({ ...b, istek_anahtari: undefined }), JSON.stringify({ kalanlar: H.plan.kalanlar, uyarilar: H.plan.uyarilar, varsayimlar: H.plan.varsayimlar }), ben]);
+      if (!pk.rows[0]) { await db.query("ROLLBACK"); const o = (await pool.query(`SELECT id, ozet FROM plan_kayit WHERE istek_anahtari = $1`, [anahtar])).rows[0]; return res.json({ ok: true, tekrar: true, plan_id: o?.id, ozet: o?.ozet }); }
+      const planId = pk.rows[0].id;
+      // Onay anında çakışma son kontrolü (kilitli): ekip / araç / kişi için dönemde başka plan bloğu oluştu mu
+      const cak = await db.query(`SELECT s.id, s.ad, s.bas, s.bit FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
+        WHERE s.plan_id <> $1 AND (a.id IS NULL OR ${PLAN_DOLU_DURUM}) AND (s.ekip_no = $2 OR (s.arac_plaka IS NOT NULL AND s.arac_plaka = $3) OR s.personeller && $4::text[])
+          AND EXISTS (SELECT 1 FROM jsonb_to_recordset($5::jsonb) AS y(bas timestamptz, bit timestamptz) WHERE y.bas < s.bit AND y.bit > s.bas) LIMIT 3`,
+        [planId, H.ekip.ekip_no, H.ekip.plaka || "__yok__", mailler, JSON.stringify(segs.map((s) => ({ bas: s.bas, bit: s.bit })))]);
+      if (cak.rows.length) { await db.query("ROLLBACK"); return res.status(409).json({ ok: false, error: `Çakışma: ekip / araç / kişi bu saatte başka plana atanmış (${cak.rows.map((x) => x.ad).join(", ")})` }); }
+      const atamaIdler = {};
+      const isMeta = new Map(H.isler.map((x) => [x.kod, x]));
+      // Saha işleri: montaj bloğu olan her iş kodu tek is_atama (çok günlük iş günlük bloklarla)
+      for (const kod of [...new Set(segs.filter((s) => s.tur === "MONTAJ").map((s) => s.kod))]) {
+        const x = isMeta.get(kod); const bl = segs.filter((s) => s.tur === "MONTAJ" && s.kod === kod);
+        const ins = await db.query(`INSERT INTO is_atama (kategori, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not, plan_id, plan_baslangic, plan_bitis, ekip_no, arac_plaka, plan_detay)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+          [x.kategori || "NEW_SITE", [kod], x.bolge || detectRegion(kod) || null, JSON.stringify(kisiler), bl[0].bas.slice(0, 10), ben, req.user?.name || null,
+           `Plan #${planId} (${b.mod === "MANUEL" ? "manuel" : "Akıllı Asistan önerisi, kullanıcı onaylı"})`, planId, bl[0].bas, bl[bl.length - 1].bit, H.ekip.ekip_no, H.ekip.plaka || null,
+           JSON.stringify({ sure_gun: x.sureGun, sure_kaynak: x.sureKaynak, kapsam: x.kapsam?.ad, par: x.par || null, bloklar: bl.length })]);
+        atamaIdler[`IS:${kod}`] = ins.rows[0].id;
+        if ((x.kategori || "") === "CLEANUP" && kisiler[0]) await db.query(`INSERT INTO rollout_cleanup (site_code, atanan_email, atanan_ad, is_atama_id) VALUES ($1,$2,$3,$4)
+          ON CONFLICT (site_code) DO UPDATE SET atanan_email = EXCLUDED.atanan_email, atanan_ad = EXCLUDED.atanan_ad, is_atama_id = EXCLUDED.is_atama_id, updated_at = NOW()`, [kod, kisiler[0].email, kisiler[0].ad, ins.rows[0].id]);
+        await islemGecmisiYaz(req, "is_atama", ins.rows[0].id, "OLUSTURMA", null, { kategori: x.kategori || "NEW_SITE", site_codes: [kod], personeller: mailler, plan_id: planId, ekip_no: H.ekip.ekip_no });
+      }
+      for (const [i, f] of H.faaliyetler.entries()) {
+        const ins = await db.query(`INSERT INTO is_atama (kategori, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not, plan_id, plan_baslangic, plan_bitis, ekip_no, arac_plaka, plan_detay, konum_aciklama)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+          [f.kategori, f.kod ? [f.kod] : [], f.kod ? detectRegion(f.kod) || null : H.ekip.bolge, JSON.stringify(kisiler), f.tarih, ben, req.user?.name || null,
+           f.aciklama || `Plan #${planId} faaliyet`, planId, `${f.tarih}T${f.saat}:00+03:00`, `${f.tarih}T${planlayici.saat(planlayici.dk(f.saat) + f.sureDk)}:00+03:00`,
+           H.ekip.ekip_no, H.ekip.plaka || null, JSON.stringify({ faaliyet: true }), f.konum_aciklama]);
+        atamaIdler[`F:${f.tarih}T${f.saat}|${f.kategori}`] = ins.rows[0].id;
+        if (f.kategori === "CLEANUP" && f.kod && kisiler[0]) await db.query(`INSERT INTO rollout_cleanup (site_code, atanan_email, atanan_ad, is_atama_id) VALUES ($1,$2,$3,$4)
+          ON CONFLICT (site_code) DO UPDATE SET atanan_email = EXCLUDED.atanan_email, atanan_ad = EXCLUDED.atanan_ad, is_atama_id = EXCLUDED.is_atama_id, updated_at = NOW()`, [f.kod, kisiler[0].email, kisiler[0].ad, ins.rows[0].id]);
+      }
+      for (const s of segs) {
+        const atamaId = s.tur === "MONTAJ" ? atamaIdler[`IS:${s.kod}`] : s.tur === "FAALIYET" ? atamaIdler[`F:${s.bas.slice(0, 16)}|${s.kategori}`] : null;
+        await db.query(`INSERT INTO is_atama_plan_segment (plan_id, is_atama_id, ekip_no, arac_plaka, personeller, tur, ad, site_code, kategori, bas, bit, km, yol_kaynak, aciklama)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, [planId, atamaId || null, H.ekip.ekip_no, H.ekip.plaka || null, mailler, s.tur, s.ad, s.kod || null, s.kategori || null,
+          s.bas, s.bit, s.km ?? null, s.kaynak || null, s.aciklama || null]);
+      }
+      await db.query("COMMIT");
+      res.json({ ok: true, plan_id: planId, atama_sayisi: Object.keys(atamaIdler).length, kalanlar: H.plan.kalanlar });
+    } catch (e) { await db.query("ROLLBACK").catch(() => {}); throw e; } finally { db.release(); }
+  } catch (e) { console.error("PLAN ONAY ERROR:", e.message); res.status(e.durum || 500).json({ ok: false, error: e.message }); }
+});
+// Kayıtlı planlar (dönem) — kapsamdaki ekipler
+app.get("/plan/kayitlar", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await planTablolar();
+    const ekipler = await planEkipleri(req);
+    const r = await pool.query(`SELECT id, ekip_no, to_char(donem_bas,'YYYY-MM-DD') AS donem_bas, to_char(donem_bit,'YYYY-MM-DD') AS donem_bit, mod, olusturan, created_at
+      FROM plan_kayit WHERE ekip_no = ANY($1::int[]) ORDER BY id DESC LIMIT 50`, [ekipler.map((e) => e.ekip_no)]);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── Müşteriye gönderilecek haftalık plan Excel'i: yalnız kapsamdaki ekipler; fiyat / maliyet / maaş YOK ──
+app.get("/plan/musteri-excel", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await planTablolar();
+    const bas = plTarih(req.query.bas), bit = plTarih(req.query.bit);
+    if (!bas || !bit || bit < bas) return res.status(400).json({ ok: false, error: "Dönem başlangıç / bitiş tarihi girin" });
+    const ekipler = await planEkipleri(req);
+    const istenen = req.query.ekip_no ? ekipler.filter((e) => String(e.ekip_no) === String(req.query.ekip_no)) : ekipler;
+    const eMap = new Map(istenen.map((e) => [e.ekip_no, e]));
+    const s = await pool.query(`SELECT s.*, a.durum AS atama_durum, a.plan_detay FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
+      WHERE s.ekip_no = ANY($1::int[]) AND s.bas < ($3::date + 1)::timestamptz AND s.bit > $2::date::timestamptz AND (a.id IS NULL OR a.durum <> 'IPTAL') ORDER BY s.ekip_no, s.bas`,
+      [[...eMap.keys()], bas, bit]);
+    const K = await rolloutKapsam(req);
+    const kapsamKodlar = K ? new Set((await haritaKapsamSatirlari(K, null)).rows.map((r) => String(r.site_code).replace(/\s+/g, "").toUpperCase())) : null;
+    const konumlar = new Map((await pool.query(`SELECT fiziksel_id, il, ilce FROM saha_konum`).catch(() => ({ rows: [] }))).rows.map((x) => [x.fiziksel_id, x]));
+    const rp = new Map((await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, il FROM rollout_progress`).catch(() => ({ rows: [] }))).rows.map((x) => [x.sc, x]));
+    // gün × ekip × iş satırları
+    const gruplar = new Map();
+    for (const x of s.rows) {
+      if (x.site_code && kapsamKodlar && !kapsamKodlar.has(x.site_code)) continue;
+      const y = plYerel(x.bas), z = plYerel(x.bit);
+      const anahtar = `${y.tarih}|${x.ekip_no}|${x.tur === "MONTAJ" || x.tur === "FAALIYET" ? (x.site_code || x.ad) : "_YOL_"}`;
+      const g = gruplar.get(anahtar) || { tarih: y.tarih, ekip_no: x.ekip_no, isler: [], yollar: [], teslim: [], bas: y.saat, bit: z.saat };
+      if (y.saat < g.bas) g.bas = y.saat; if (z.saat > g.bit) g.bit = z.saat;
+      if (x.tur === "YOL") {
+        // Molayla bölünen aynı yol tek satır: ilk çıkış – son varış (mola dahil), km bir kez
+        const o = g.yollar.find((v) => v.ad === x.ad && v.bit === y.saat) || g.yollar.find((v) => v.ad === x.ad);
+        if (o) { o.bit = z.saat; o.bolundu = true; } else g.yollar.push({ ad: x.ad, bas: y.saat, bit: z.saat, km: x.km, manuel: x.yol_kaynak === "MANUEL" });
+      }
+      else if (x.tur === "TESLIM") g.teslim.push(`${x.ad.replace("Malzeme teslim alma — ", "")} ${y.saat}–${z.saat}`);
+      else g.isler.push(x);
+      gruplar.set(anahtar, g);
+    }
+    // Yol / teslim satırlarını aynı günün iş satırına bağla (iş yoksa ayrı "Yol / malzeme teslim" satırı)
+    const satirlar = [];
+    const gunEkip = new Map();
+    for (const g of gruplar.values()) {
+      g.yollar = g.yollar.map((v) => `${v.ad} ${v.bas}–${v.bit}${v.bolundu ? " (mola dahil)" : ""}${v.km ? ` · ${v.km} km` : ""}${v.manuel ? " [manuel süre]" : ""}`);
+      const k = `${g.tarih}|${g.ekip_no}`; (gunEkip.get(k) || gunEkip.set(k, []).get(k)).push(g);
+    }
+    for (const [k, liste] of [...gunEkip.entries()].sort()) {
+      const yolG = liste.find((g) => !g.isler.length) || { yollar: [], teslim: [] };
+      const isG = liste.filter((g) => g.isler.length);
+      const e = eMap.get(Number(k.split("|")[1]));
+      const ortak = { ekip: e?.ad || `Ekip ${k.split("|")[1]}`, sef: e?.sef ? `${e.sef.ad}${e.sef.telefon ? ` · ${e.sef.telefon}` : " · telefon kayıtlı değil"}` : "Ekip şefi kayıtlı değil", plaka: e?.plaka || "Kayıtlı değil" };
+      if (!isG.length) { satirlar.push({ tarih: k.split("|")[0], site: "—", il: "—", is: yolG.teslim.length ? "Malzeme teslim alma + yol" : "Yol / seyahat", ...ortak, plan: `${yolG.bas || ""}–${yolG.bit || ""}`, teslim: yolG.teslim.join("; ") || "—", yol: yolG.yollar.join("; ") || "—", par: "—", durum: "Planlandı", aciklama: "" }); continue; }
+      isG.forEach((g, i) => {
+        const x = g.isler[0];
+        const f = x.site_code ? sahaKimlik.fizikselSaha(x.site_code) : null;
+        const kn = f ? konumlar.get(f.fiziksel_id) : null;
+        const pd = x.plan_detay || {};
+        const par = pd.par;
+        satirlar.push({ tarih: g.tarih, site: x.site_code || "—", il: [kn?.il || rp.get(x.site_code)?.il, kn?.ilce].filter(Boolean).join(" / ") || "Kayıtlı değil", is: x.tur === "FAALIYET" ? x.ad : `${x.kategori === "NEW_SITE" ? "Montaj" : x.kategori} — ${x.aciklama || ""}`.trim(),
+          ...ortak, plan: `${g.bas}–${g.bit}`, teslim: i === 0 ? (yolG.teslim.join("; ") || "—") : "—", yol: i === 0 ? ([...yolG.yollar, ...g.yollar].join("; ") || "—") : (g.yollar.join("; ") || "—"),
+          par: par && (par.par_id || par.kesinti) ? `${par.par_id ? `PAR ${par.par_id}` : "PAR: Bekleniyor"} · kesinti: ${par.kesinti === "VAR" ? `var${par.kesinti_dk ? ` (${par.kesinti_dk} dk)` : ""}` : par.kesinti === "YOK" ? "yok" : "bekleniyor"}${par.bas ? ` · ${par.bas}–${par.bit}` : ""}` : "Bekleniyor",
+          durum: x.atama_durum === "TAMAMLANDI" ? "Tamamlandı" : x.atama_durum === "BASLADI" ? "Başladı" : "Planlandı", aciklama: /kısmi/.test(x.aciklama || "") ? "Çok günlük iş — devam ediyor" : "" });
+      });
+    }
+    const wb = new ExcelJS.Workbook(); wb.creator = "ERC / Omnix";
+    const ws = wb.addWorksheet("Haftalık Plan", { views: [{ state: "frozen", ySplit: 3, showGridLines: false }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1 } });
+    const KOL = [["Tarih", 12], ["Site ID / iş kodu", 24], ["İl / ilçe", 18], ["Yapılacak iş", 34], ["Ekip", 16], ["Ekip şefi · telefon", 26], ["Araç plakası", 13],
+      ["Planlanan çalışma", 13], ["Malzeme teslim alma (yer · zaman)", 28], ["Yol / seyahat", 40], ["PAR ID · kesinti", 26], ["Plan durumu", 13], ["Açıklama", 26]];
+    ws.columns = KOL.map(([, w]) => ({ width: w }));
+    ws.mergeCells(1, 1, 1, KOL.length);
+    ws.getCell(1, 1).value = `Haftalık Saha Çalışma Planı · ${bas.split("-").reverse().join(".")} – ${bit.split("-").reverse().join(".")}`;
+    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: "FF1E3A5F" } };
+    ws.mergeCells(2, 1, 2, KOL.length);
+    ws.getCell(2, 1).value = "Saatler Türkiye saatidir. Planlanan değerlerdir; gerçekleşme ayrıca bildirilir. Yol süreleri karayolu tahminidir (canlı trafik içermez).";
+    ws.getCell(2, 1).font = { italic: true, size: 9, color: { argb: "FF64748B" } };
+    const h = ws.getRow(3); KOL.forEach(([ad], i) => { h.getCell(i + 1).value = ad; });
+    h.font = { bold: true, color: { argb: "FFFFFFFF" } }; h.alignment = { vertical: "middle", wrapText: true }; h.height = 30;
+    h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } }; });
+    let n = 4;
+    for (const x of satirlar.sort((a, b) => (a.tarih + a.ekip + a.plan).localeCompare(b.tarih + b.ekip + b.plan))) {
+      const r = ws.getRow(n++);
+      [x.tarih.split("-").reverse().join("."), x.site, x.il, x.is, x.ekip, x.sef, x.plaka, x.plan, x.teslim, x.yol, x.par, x.durum, x.aciklama].forEach((v, i) => { r.getCell(i + 1).value = v; });
+      r.alignment = { vertical: "top", wrapText: true };
+      r.eachCell({ includeEmpty: true }, (c) => { c.border = { bottom: { style: "thin", color: { argb: "FFE2E8F0" } } }; if (n % 2 === 0) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } }; });
+    }
+    if (n === 4) { ws.getCell(4, 1).value = "Bu dönemde kayıtlı plan yok."; }
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="haftalik_plan_${bas}_${bit}.xlsx"`);
+    await wb.xlsx.write(res); res.end();
+  } catch (e) { console.error("PLAN EXCEL ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+// ── Filtrelenen sahaları Excel indir: haritayla AYNI kaynak (haritaVerisi) + istemcinin gösterdiği saha listesi ──
+app.post("/rollout/harita/excel", authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const Kx = await rolloutKapsam(req);
+    if (Kx && (!Kx.goruntule || !Kx.excel)) return res.status(403).json({ ok: false, error: "Rollout Excel yetkiniz yok" });
+    req.query = { ...req.query, firma: b.firma || "" };
+    const V = await haritaVerisi(req);
+    const ids = new Set((Array.isArray(b.fiziksel_idler) ? b.fiziksel_idler : []).map((x) => String(x).toUpperCase()));
+    const FILTRE_AD = { MONTAJ_BEKLIYOR: "Malzeme OK · Montaj bekliyor", QC_OK: "Montaj tamamlanan · QC OK", QC_NOK: "Montaj eksik / kontrol bekleyen · QC NOK", CLEANUP: "Clean Up bekleyen" };
+    const filtre = FILTRE_AD[b.filtre] ? b.filtre : null;
+    const sahalar = V.sahalar.filter((s) => ids.has(s.fiziksel_id));
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Filtrelenen sahalar", { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
+    const KOL = [["Site ID", 12], ["İş kodu", 26], ["Bölge", 10], ["İl / ilçe", 18], ["Saha adı", 20], ["Montaj / QC durumu", 30], ["Clean Up", 11], ["Kapsam", 30], ["İş süresi (ekip-gün)", 14],
+      ["Ekip / taşeron", 22], ["Konum", 22], ["Konum notu", 34], ["Durum uyarısı", 34]];
+    ws.columns = KOL.map(([, w]) => ({ width: w }));
+    ws.mergeCells(1, 1, 1, KOL.length);
+    ws.getCell(1, 1).value = `Rollout sahaları${filtre ? ` · ${FILTRE_AD[filtre]}` : ""}${V.firma ? ` · ${V.firma.ad}` : ""} · ${new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10)}`;
+    ws.getCell(1, 1).font = { bold: true, size: 13 };
+    const h = ws.getRow(2); KOL.forEach(([ad], i) => { h.getCell(i + 1).value = ad; }); h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } }; });
+    let n = 3;
+    for (const s of sahalar) for (const i of s.isler.filter((x) => !filtre || (x.filtreler || []).includes(filtre))) {
+      const r = ws.getRow(n++);
+      [s.fiziksel_id, i.site_code, s.bolge, [s.il, s.ilce].filter(Boolean).join(" / "), s.saha_adi, i.montaj?.ad || "", (i.filtreler || []).includes("CLEANUP") ? "Bekliyor" : "—",
+        i.kapsam?.ad || "", i.sure?.gun ?? `— (${i.sure?.gerekce || ""})`, (i.taseronlar || []).join(", "),
+        s.konum ? `${s.konum.lat.toFixed(6)}, ${s.konum.lng.toFixed(6)}` : "Konum eksik", s.konum ? `${s.konum.kaynak} · ${s.konum.dogruluk}` : (s.konum_eksik_nedeni || ""), (i.belirsiz || []).join("; ")]
+        .forEach((v, k) => { r.getCell(k + 1).value = v; });
+      r.alignment = { vertical: "top", wrapText: true };
+    }
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="rollout_sahalar.xlsx"`);
+    await wb.xlsx.write(res); res.end();
+  } catch (e) { if (e && e.durum) return res.status(e.durum).json({ ok: false, error: e.mesaj }); res.status(500).json({ ok: false, error: e.message }); }
 });
 // Seçili saha → Bursa deposu: kuş uçuşu + (yalnız servis yapılandırılmışsa) karayolu. Kapsam dışı saha 403.
 app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
@@ -14056,6 +14485,12 @@ const IS_KATEGORI_SEED = [
   // Rollout iş kolu görünümü (03.09.2026): Gizleme ve GPS ayrı iş kolu
   ["GIZLEME",      "Gizleme / Kamuflaj",      "🧱", true,  "installation_actual_start_date", null,                           false, ["tssr_belge_url"], ["Baca gizleme","Nonstandart","Panjur"], 10],
   ["GPS",          "DSS-GPS Readiness",       "🛰", true,  null,                             null,                           false, [], [], 11],
+  // 29.10.2026 (Orhan): ekip planlama faaliyetleri — araç bakım / eğitim / malzeme / diğer için saha zorunlu değil (saha_zorunlu=false)
+  ["ISSUE",        "Issue giderme",           "🛠", true,  null,                             null,                           false, ["tssr_belge_url"], [], 12],
+  ["MALZEME",      "Malzeme teslim alma / iade", "📦", false, null,                          null,                           false, [], ["Teslim alma", "İade"], 13],
+  ["ARAC_BAKIM",   "Araç bakım",              "🔧", false, null,                             null,                           false, [], [], 14],
+  ["ISG_EGITIM",   "İSG eğitimi",             "🦺", false, null,                             null,                           false, [], [], 15],
+  ["DIGER",        "Diğer",                   "📌", false, null,                             null,                           false, [], [], 16],
 ];
 let isAtamaTabloHazir = false;
 async function isAtamaTablolar() {
@@ -14238,7 +14673,10 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
     const k = (await pool.query(`SELECT * FROM is_kategori WHERE kod = $1 AND aktif`, [String(kategori || "")])).rows[0];
     if (!k) return res.status(400).json({ ok: false, error: "Geçersiz iş kategorisi" });
     const sites = [...new Set((Array.isArray(site_codes) ? site_codes : [site_codes]).map(isAtamaSiteTemizle).filter(Boolean))];
-    if (!sites.length) return res.status(400).json({ ok: false, error: "En az bir saha seçin" });
+    // 29.10.2026: araç bakım / eğitim / malzeme / diğer faaliyetlerde saha zorunlu değil (konum ve açıklama girilir)
+    await planTablolar();
+    const sahaZorunlu = (await pool.query(`SELECT COALESCE(saha_zorunlu,true) AS z FROM is_kategori WHERE kod = $1`, [k.kod])).rows[0]?.z !== false;
+    if (!sites.length && sahaZorunlu) return res.status(400).json({ ok: false, error: "En az bir saha seçin" });
     if (k.tekil_site && sites.length > 1) return res.status(400).json({ ok: false, error: `${k.ad} için tek saha seçilmeli` });
     const kisiler = (Array.isArray(personeller) ? personeller : [])
       .map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() }))
@@ -14269,12 +14707,13 @@ app.post("/is-atama", authMiddleware, async (req, res) => {
       eksik = eksik.filter((s) => !pr.rows.some((x) => x.site_code === s));
     }
     if (eksik.length) return res.status(400).json({ ok: false, error: `Bu saha Rollout Data, PO ve PR listesinde yok: ${eksik.join(", ")} — önce Günlük İş Girişi'nden PR talebi oluşturun.` });
-    const bolge = rp.rows.find((x) => x.bolge)?.bolge || (detectRegion(sites[0]) || null);
+    const bolge = rp.rows.find((x) => x.bolge)?.bolge || (sites.length ? detectRegion(sites[0]) || null : (String(req.body?.bolge || "").trim() || null));
     const ins = await pool.query(
-      `INSERT INTO is_atama (kategori, alt_tip, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not, taseron_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      `INSERT INTO is_atama (kategori, alt_tip, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, atayan_not, taseron_id, konum_aciklama)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
       [k.kod, alt_tip || null, sites, bolge, JSON.stringify(kisiler), plan_tarihi || null,
-       String(req.user?.email || "").toLowerCase().trim(), req.user?.name || null, atayan_not || null, taseron ? taseron.id : null]);
+       String(req.user?.email || "").toLowerCase().trim(), req.user?.name || null, atayan_not || null, taseron ? taseron.id : null,
+       String(req.body?.konum_aciklama || "").trim().slice(0, 200) || null]);
     const id = ins.rows[0].id;
     await islemGecmisiYaz(req, "is_atama", id, "OLUSTURMA", null, { kategori: k.kod, alt_tip: alt_tip || null, site_codes: sites,
       personeller: kisiler.map((x) => x.email), plan_tarihi: plan_tarihi || null, taseron_id: taseron ? taseron.id : null });
