@@ -7204,11 +7204,302 @@ function FirmaTaseronFiltre({ secenekler, markalar, secim, onSecim, kolu, onKolu
    pin kartında o sahadaki iş kayıtları ayrı. 2026 = doğrulanmış gerçekleşen iş tarihi; tarih eksikse ayrıca gösterilir.
    Konum kaynağı (TSSR koordinatı / adres / elle) ve doğruluğu kartta; Bursa deposuna kuş uçuşu her zaman, karayolu yalnız
    yönlendirme servisi yapılandırılmışsa. Kalabalık bölgede kümelendirme; yakınlaşınca Site ID etiketi. */
-function RolloutHaritaPin({ x, y, k, secili, uyari, onClick }) {
+// 29.10.2026: pin rengi + harfi iş kapsamından (yalnız renkle bilgi verilmez): S Standalone · A anten revizyonlu (zor) ·
+// ✓ anten değişimsiz (kolay) · ? kapsam doğrulanamadı. Seçili pin büyür ve koyu çerçeve alır; koordinat uyarısı kesikli çerçeve.
+const RH_KAPSAM = {
+  STANDALONE: { renk: "#dc2626", yazi: "#fff", harf: "S", ad: "Standalone" },
+  ANTEN_VAR: { renk: "#eab308", yazi: "#422006", harf: "A", ad: "Anten değişimli / revizyonlu — zor" },
+  ANTEN_YOK: { renk: "#16a34a", yazi: "#fff", harf: "✓", ad: "Anten değişimsiz — kolay" },
+  BELIRSIZ: { renk: "#94a3b8", yazi: "#0f172a", harf: "?", ad: "İş kapsamı doğrulanamadı" },
+};
+const rhKapsamBirlestir = (isler) => (isler.some((i) => i.kapsam?.renk === "STANDALONE") ? "STANDALONE" : isler.some((i) => i.kapsam?.renk === "ANTEN_VAR") ? "ANTEN_VAR"
+  : isler.length && isler.every((i) => i.kapsam?.renk === "ANTEN_YOK") ? "ANTEN_YOK" : "BELIRSIZ");
+const RH_FILTRE = { MONTAJ_BEKLIYOR: "Malzeme OK · Montaj bekliyor", QC_OK: "Montaj tamamlanan · QC OK", QC_NOK: "Montaj eksik / kontrol bekleyen · QC NOK", CLEANUP: "Clean Up bekleyen" };
+/* ═══ PLAN YAP (29.10.2026, Orhan) — Rollout haritası filtrelenmiş saha listesinden ekip planı ═══════════════════════
+   A) ekip seç → B) başlangıç / malzeme teslim alma / çalışma saatleri → C) kendim ya da Akıllı Asistan + işler / faaliyetler
+   → D) önizle, düzenle, onayla (mevcut İş Ata sistemine). Önizleme kayıt yazmaz; onayda sunucu güncel atamalarla yeniden
+   hesaplar. Kuş uçuşu mesafe yol süresi sayılmaz; rota servisi yoksa kullanıcıdan "manuel varsayım" süre istenir. */
+async function planIstek(yol, govde, yontem = "POST") {
+  const r = await fetch(`${API_BASE}${yol}`, { method: yontem, headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` },
+    body: govde ? JSON.stringify(govde) : undefined });
+  let j = {}; try { j = await r.json(); } catch {}
+  return { durum: r.status, j };
+}
+async function planDosyaIndir(yol, dosyaAdi, govde = null) {
+  const r = await fetch(`${API_BASE}${yol}`, { method: govde ? "POST" : "GET", headers: { ...(govde ? { "Content-Type": "application/json" } : {}), Authorization: `Bearer ${localStorage.getItem("token") || localStorage.getItem("finance_token") || ""}` },
+    body: govde ? JSON.stringify(govde) : undefined });
+  if (!r.ok) { let m = "İndirilemedi"; try { m = (await r.json()).error || m; } catch {} throw new Error(m); }
+  const b = await r.blob(); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = dosyaAdi; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 2000);
+}
+const PLAN_TUR = { YOL: ["🚚", "#e0f2fe", "#075985", "Yol"], TESLIM: ["📦", "#fef3c7", "#92400e", "Malzeme teslim alma"], MONTAJ: ["🔧", "#dcfce7", "#166534", "Saha işi"], FAALIYET: ["📌", "#ede9fe", "#5b21b6", "Faaliyet"] };
+// Plan Yap sarmalayıcıları bileşen DIŞINDA (render içinde tanımlanırsa her çizimde yeniden kurulur: odak / tıklama kaybolur)
+function PlanKart({ children, style }) { return <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", background: "#fff", marginBottom: 10, ...style }}>{children}</div>; }
+function PlanB2({ children, ...p }) { return <button type="button" className="rhmap-btn rhmap-btn-l" {...p}>{children}</button>; }
+function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
+  const [adim, setAdim] = useState("A");
+  const [kaynak, setKaynak] = useState(null); const [kaynakHata, setKaynakHata] = useState("");
+  const [ekipNo, setEkipNo] = useState(null);
+  const [form, setForm] = useState({ donemBas: "", donemBit: "", bas: "08:00", bit: "18:00", molaBas: "12:00", molaDk: 60, kapasiteSaat: 8, minBlokDk: 60, surusPayYuzde: 0,
+    konaklama: "BOLGEDE", baslangic: "", malzemeDurum: "", teslimler: [] });
+  const [mod, setMod] = useState("ASISTAN");
+  const [isler, setIsler] = useState(() => (adaylar || []).map((x) => ({ ...x, sec: true, sure_gun: "", sure_gerekce: "", par_id: "", kesinti: "", kesinti_dk: "", erisim_bas: "", erisim_bit: "", baslangic_tarih: "", baslangic_saat: "" })));
+  const [faaliyetler, setFaaliyetler] = useState([]);
+  const [yolManuel, setYolManuel] = useState({});
+  const [onizleme, setOnizleme] = useState(null); const [yukleniyor, setYukleniyor] = useState(false); const [hata, setHata] = useState("");
+  const [kaydediliyor, setKaydediliyor] = useState(false); const [sonuc, setSonuc] = useState(null); const [planlananlar, setPlanlananlar] = useState([]);
+  const anahtarRef = useRef(null), gonderimRef = useRef(false);
+  useEffect(() => { (async () => {
+    const r = await planIstek("/plan/ekipler", null, "GET");
+    if (!r.j?.ok) { setKaynakHata(r.j?.error || "Ekip listesi alınamadı"); return; }
+    setKaynak(r.j); setForm((f) => ({ ...f, donemBas: r.j.varsayilan_donem.baslangic, donemBit: r.j.varsayilan_donem.bitis }));
+  })(); }, []);
+  useEffect(() => { const f = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
+  const ekip = kaynak?.ekipler.find((e) => e.ekip_no === ekipNo) || null;
+  const noktalar = kaynak?.noktalar || [];
+  const F = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const govde = () => ({
+    ekip_no: ekipNo, mod, konaklama: form.konaklama,
+    donem: { baslangic: form.donemBas, bitis: form.donemBit },
+    calisma: { bas: form.bas, bit: form.bit, molaBas: form.molaBas, molaDk: Number(form.molaDk), kapasiteSaat: Number(form.kapasiteSaat), minBlokDk: Number(form.minBlokDk), surusPayYuzde: Number(form.surusPayYuzde) },
+    baslangic: form.baslangic.startsWith("D:") ? { tur: "DEPO", id: Number(form.baslangic.slice(2)) } : form.baslangic.startsWith("S:") ? { tur: "SAHA", kod: form.baslangic.slice(2) } : null,
+    malzeme: { durum: form.malzemeDurum, teslimler: form.teslimler.map((t) => ({ tarih: t.tarih, saat: t.saat, depo_id: Number(t.depo_id), sure_dk: Number(t.sure_dk) || 30, acilis: t.acilis, kapanis: t.kapanis, hazir_tarih: t.hazir_tarih, hazir_saat: t.hazir_saat })) },
+    isler: isler.filter((x) => x.sec && !planlananlar.includes(x.kod)).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_gerekce: x.sure_gerekce,
+      baslangic_tarih: x.baslangic_tarih, baslangic_saat: x.baslangic_saat,
+      par: { par_id: x.par_id, kesinti: x.kesinti, kesinti_dk: x.kesinti_dk, bas: x.erisim_bas, bit: x.erisim_bit } })),
+    faaliyetler: faaliyetler.map((f) => ({ ...f, sure_dk: Number(f.sure_dk) })), yol_manuel: yolManuel,
+  });
+  const onizle = async () => {
+    setYukleniyor(true); setHata(""); setOnizleme(null);
+    const r = await planIstek("/plan/onizle", govde());
+    setYukleniyor(false);
+    if (!r.j?.ok) { setHata(r.j?.error || "Önizleme alınamadı"); return; }
+    anahtarRef.current = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    setOnizleme(r.j); setAdim("D");
+  };
+  const onayla = async () => {
+    if (kaydediliyor || !onizleme || gonderimRef.current) return; // çift tıklama: ikinci istek gönderilmez (sunucu da tekrar kaydı engeller)
+    gonderimRef.current = true;
+    setKaydediliyor(true); setHata("");
+    const r = await planIstek("/plan/onayla", { ...govde(), istek_anahtari: anahtarRef.current, imza: onizleme.imza });
+    setKaydediliyor(false); gonderimRef.current = false;
+    if (r.durum === 409 && r.j?.yeni) { setOnizleme(r.j.yeni); anahtarRef.current = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`; setHata(r.j.error); return; }
+    if (!r.j?.ok) { setHata([r.j?.error, ...(r.j?.engeller || [])].filter(Boolean).join(" · ") || "Kaydedilemedi"); return; }
+    const kodlar = (onizleme.plan?.gunler || []).flatMap((g) => g.segmentler).filter((s) => s.tur === "MONTAJ").map((s) => s.kod);
+    setPlanlananlar((p) => [...new Set([...p, ...kodlar])]);
+    setSonuc({ ...r.j, ekip: onizleme.ekip, donem: onizleme.plan.donem }); setAdim("SONUC"); onKaydedildi && onKaydedildi();
+  };
+  const baskaEkip = () => { setEkipNo(null); setOnizleme(null); setSonuc(null); setFaaliyetler([]); setYolManuel({}); setAdim("A"); };
+  const adimBaslik = { A: "1 · Ekip seç", B: "2 · Başlangıç ve malzeme", C: "3 · Planlama yöntemi ve işler", D: "4 · Planı önizle ve onayla", SONUC: "Plan kaydedildi" };
+  const etiket = { display: "block", fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 3 };
+  const girdi = { padding: "8px 10px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
+  const adayKonumlu = isler.filter((x) => x.konum_var);
+  const montajAday = isler.filter((x) => !planlananlar.includes(x.kod));
+  const ileriB = form.baslangic && form.malzemeDurum && (form.malzemeDurum !== "TESLIM" || (form.teslimler.length && form.teslimler.every((t) => t.tarih && t.saat && t.depo_id)));
   return (
-    <g transform={`translate(${x},${y}) scale(${k})`} onClick={onClick} style={{ cursor: "pointer" }}>
-      <path d="M0 0 C-6 -8 -10 -12 -10 -18 A10 10 0 1 1 10 -18 C10 -12 6 -8 0 0Z" fill={secili ? "#dc2626" : uyari ? "#d97706" : "#2563eb"} stroke="#fff" strokeWidth="2" />
-      <circle cx="0" cy="-18" r="3.6" fill="#fff" />
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.6)", zIndex: 1300, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Plan Yap" style={{ background: "#f8fafc", borderRadius: 14, width: "min(1100px,100%)", height: "min(920px,100%)", display: "flex", flexDirection: "column", overflow: "hidden", textAlign: "left", fontSize: 15, color: "#0f172a" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#1e3a5f", color: "#fff" }}>
+          <b style={{ fontSize: 17 }}>🗓 Plan Yap</b><span style={{ opacity: .85 }}>{adimBaslik[adim]}</span>
+          {ekip && <span style={{ marginLeft: 8, background: "rgba(255,255,255,.15)", borderRadius: 999, padding: "2px 10px", fontSize: 13 }}>{ekip.ad}</span>}
+          <button type="button" onClick={onClose} style={{ marginLeft: "auto", background: "none", border: "1px solid rgba(255,255,255,.5)", color: "#fff", borderRadius: 8, padding: "4px 10px", cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {kaynakHata && <div style={{ color: "#b91c1c", fontWeight: 700 }}>{kaynakHata}</div>}
+          {!kaynak && !kaynakHata && <div style={{ color: "#64748b" }}>Ekipler yükleniyor…</div>}
+          {hata && <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 10, padding: "10px 12px", marginBottom: 10, fontWeight: 700 }}>{hata}</div>}
+
+          {kaynak && adim === "A" && <>
+            <div style={{ marginBottom: 8, color: "#475569" }}>{montajAday.length} iş planlanmayı bekliyor. Ekip seçin; şef, telefon ve plaka ekip kaydından gelir (eksikse "kayıtlı değil" yazar).</div>
+            {!kaynak.ekipler.length && <PlanKart>Yetkinizdeki aktif ekip yok.</PlanKart>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 10 }}>
+              {kaynak.ekipler.map((e) => <button key={e.ekip_no} type="button" onClick={() => { setEkipNo(e.ekip_no); setAdim("B"); }}
+                style={{ textAlign: "left", border: `2px solid ${ekipNo === e.ekip_no ? "#1e3a5f" : "#e2e8f0"}`, borderRadius: 12, background: "#fff", padding: 12, cursor: "pointer", fontSize: 14 }}>
+                <div style={{ fontSize: 17, fontWeight: 800 }}>{e.ad}</div>
+                <div style={{ color: "#475569" }}>{[e.bolge, e.firma === "SIMSEK" ? "Şimşek" : e.firma].filter(Boolean).join(" · ")}</div>
+                <div style={{ marginTop: 6 }}>Şef: <b>{e.sef ? e.sef.ad : "kayıtlı değil"}</b>{e.sef && <> · {e.sef.telefon || "telefon kayıtlı değil"}</>}</div>
+                <div>Araç: <b>{e.plaka || "plaka kayıtlı değil"}</b> · {e.uyeler.length} kişi</div>
+                <div style={{ fontSize: 13, color: "#475569" }}>Yüksekte çalışma: {e.yetkinlik.yuksekte_calisma ? "var" : "kayıtlı yok"} · Elektrik işi: {e.yetkinlik.elektrik_isi ? "var" : "kayıtlı yok"}</div>
+                <div style={{ marginTop: 6, fontSize: 13 }}><b>Mevcut atamalar (21 gün):</b> {e.mevcut.length ? e.mevcut.slice(0, 4).map((m, i) => <div key={i} style={{ color: "#92400e" }}>{m.tarih}{m.bas ? ` ${m.bas}–${m.bit}` : ""} · {m.aciklama}</div>) : "yok"}{e.mevcut.length > 4 && <div>+{e.mevcut.length - 4} daha</div>}</div>
+              </button>)}
+            </div>
+          </>}
+
+          {kaynak && adim === "B" && ekip && <>
+            <PlanKart>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Plan dönemi ve çalışma saatleri</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <label><span style={etiket}>Dönem başlangıcı</span><input type="date" style={girdi} value={form.donemBas} onChange={(e) => F("donemBas", e.target.value)} /></label>
+                <label><span style={etiket}>Dönem bitişi</span><input type="date" style={girdi} value={form.donemBit} onChange={(e) => F("donemBit", e.target.value)} /></label>
+                <label><span style={etiket}>Çalışma başlangıcı</span><input type="time" style={girdi} value={form.bas} onChange={(e) => F("bas", e.target.value)} /></label>
+                <label><span style={etiket}>Çalışma bitişi</span><input type="time" style={girdi} value={form.bit} onChange={(e) => F("bit", e.target.value)} /></label>
+                <label><span style={etiket}>Mola başlangıcı</span><input type="time" style={girdi} value={form.molaBas} onChange={(e) => F("molaBas", e.target.value)} /></label>
+                <label><span style={etiket}>Mola (dk)</span><input type="number" min="0" style={{ ...girdi, width: 90 }} value={form.molaDk} onChange={(e) => F("molaDk", e.target.value)} /></label>
+                <label><span style={etiket}>Günlük üretim kapasitesi (saat)</span><input type="number" step="0.5" min="1" style={{ ...girdi, width: 110 }} value={form.kapasiteSaat} onChange={(e) => F("kapasiteSaat", e.target.value)} /></label>
+                <label><span style={etiket}>En kısa iş bloğu (dk)</span><input type="number" min="15" style={{ ...girdi, width: 110 }} value={form.minBlokDk} onChange={(e) => F("minBlokDk", e.target.value)} /></label>
+                <label><span style={etiket}>Sürüş molası payı (%)</span><input type="number" min="0" style={{ ...girdi, width: 110 }} value={form.surusPayYuzde} onChange={(e) => F("surusPayYuzde", e.target.value)} /></label>
+              </div>
+              <div style={{ fontSize: 13, color: "#64748b", marginTop: 6 }}>Pazar çalışılmaz; resmî tatiller uyarıyla atlanır. PAR / kesinti aralığı çalışma kapasitesi değildir — işe özel erişim penceresi olarak girilir.</div>
+            </PlanKart>
+            <PlanKart>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Ekibin başlangıç konumu ve konaklama</div>
+              <select style={{ ...girdi, minWidth: 300 }} value={form.baslangic} onChange={(e) => F("baslangic", e.target.value)}>
+                <option value="">Seçin…</option>
+                <optgroup label="Doğrulanmış depo / ofis">{noktalar.filter((n) => n.dogrulandi).map((n) => <option key={n.id} value={`D:${n.id}`}>{n.ad} ({n.bolge})</option>)}</optgroup>
+                <optgroup label="Saha (ekip şu an sahada)">{adayKonumlu.map((x) => <option key={x.kod} value={`S:${x.kod}`}>{x.fiziksel_id} · {x.kod}</option>)}</optgroup>
+              </select>
+              {noktalar.some((n) => !n.dogrulandi) && <div style={{ fontSize: 13, color: "#b45309", marginTop: 4 }}>Koordinatı doğrulanmamış noktalar listede yok: {noktalar.filter((n) => !n.dogrulandi).map((n) => n.ad).join(", ")}</div>}
+              <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
+                <label><input type="radio" checked={form.konaklama === "BOLGEDE"} onChange={() => F("konaklama", "BOLGEDE")} /> Bölge içinde konaklama</label>
+                <label><input type="radio" checked={form.konaklama === "DONUS"} onChange={() => F("konaklama", "DONUS")} /> Her gün başlangıç noktasına dönüş (dönüş yolu kapasiteden düşülür)</label>
+              </div>
+            </PlanKart>
+            <PlanKart>
+              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Ekip malzemeleri ne zaman ve nereden teslim alacak?</div>
+              {[["TESLIM", "Teslim alınacak"], ["EKIPTE", "Malzeme ekipte / daha önce teslim alındı"], ["GEREKMIYOR", "Bu iş için teslim alma gerekmiyor"]].map(([k, ad]) =>
+                <label key={k} style={{ display: "block", padding: "3px 0" }}><input type="radio" checked={form.malzemeDurum === k} onChange={() => { F("malzemeDurum", k); if (k === "TESLIM" && !form.teslimler.length) F("teslimler", [{ tarih: form.donemBas, saat: "08:00", depo_id: noktalar.find((n) => n.dogrulandi)?.id || "", sure_dk: 30, acilis: "08:00", kapanis: "17:30", hazir_tarih: "", hazir_saat: "" }]); }} /> {ad}</label>)}
+              {form.malzemeDurum === "TESLIM" && form.teslimler.map((t, i) => {
+                const T = (k, v) => F("teslimler", form.teslimler.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+                return <div key={i} style={{ border: "1px dashed #cbd5e1", borderRadius: 10, padding: 10, marginTop: 8 }}>
+                  <div style={{ fontWeight: 700 }}>{i + 1}. teslim alma {form.teslimler.length > 1 && <button type="button" className="rhmap-btn" style={{ marginLeft: 8 }} onClick={() => F("teslimler", form.teslimler.filter((_, j) => j !== i))}>Kaldır</button>}</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+                    <label><span style={etiket}>Teslim alma tarihi</span><input type="date" style={girdi} value={t.tarih} onChange={(e) => T("tarih", e.target.value)} /></label>
+                    <label><span style={etiket}>Teslim alma saati</span><input type="time" style={girdi} value={t.saat} onChange={(e) => T("saat", e.target.value)} /></label>
+                    <label><span style={etiket}>Depo / teslim noktası</span><select style={girdi} value={t.depo_id} onChange={(e) => T("depo_id", e.target.value)}><option value="">Seçin…</option>{noktalar.filter((n) => n.dogrulandi).map((n) => <option key={n.id} value={n.id}>{n.ad}</option>)}</select></label>
+                    <label><span style={etiket}>Teslim alma süresi (dk)</span><input type="number" min="5" style={{ ...girdi, width: 100 }} value={t.sure_dk} onChange={(e) => T("sure_dk", e.target.value)} /></label>
+                    <label><span style={etiket}>Depo açılış</span><input type="time" style={girdi} value={t.acilis} onChange={(e) => T("acilis", e.target.value)} /></label>
+                    <label><span style={etiket}>Depo kapanış</span><input type="time" style={girdi} value={t.kapanis} onChange={(e) => T("kapanis", e.target.value)} /></label>
+                    <label><span style={etiket}>Malzemenin depoda hazır olacağı tarih (varsa)</span><input type="date" style={girdi} value={t.hazir_tarih} onChange={(e) => T("hazir_tarih", e.target.value)} /></label>
+                    <label><span style={etiket}>Hazır olma saati</span><input type="time" style={girdi} value={t.hazir_saat} onChange={(e) => T("hazir_saat", e.target.value)} /></label>
+                  </div>
+                </div>;
+              })}
+              {form.malzemeDurum === "TESLIM" && <button type="button" className="rhmap-btn" style={{ marginTop: 8 }} onClick={() => F("teslimler", [...form.teslimler, { tarih: form.donemBas, saat: "13:00", depo_id: "", sure_dk: 30, acilis: "08:00", kapanis: "17:30", hazir_tarih: "", hazir_saat: "" }])}>+ Başka teslim noktası / ziyareti</button>}
+              <div style={{ fontSize: 13, color: "#64748b", marginTop: 6 }}>Planlanan teslim, gerçekleşmiş teslim kaydı olarak yazılmaz. Montaj teslimden önce başlamaz.</div>
+            </PlanKart>
+            <div style={{ display: "flex", gap: 8 }}><PlanB2 onClick={() => setAdim("A")}>← Ekip</PlanB2><PlanB2 onClick={() => setAdim("C")} disabled={!ileriB} style={{ background: ileriB ? "#1e3a5f" : "#cbd5e1", color: "#fff" }}>Devam →</PlanB2></div>
+          </>}
+
+          {kaynak && adim === "C" && ekip && <>
+            <PlanKart>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Nasıl planlayalım?</div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {[["MANUEL", "Kendim planlayacağım", "Sıra sizin seçtiğiniz sırada; isterseniz işe gün / saat verin."], ["ASISTAN", "Akıllı Asistan önerisi", "Sahalar karayolu süresine göre gruplanır ve sıralanır; öneri taslaktır, siz onaylamadan kayıt olmaz."]].map(([k, ad, ac]) =>
+                  <button key={k} type="button" onClick={() => setMod(k)} style={{ flex: "1 1 280px", textAlign: "left", border: `2px solid ${mod === k ? "#1e3a5f" : "#e2e8f0"}`, background: mod === k ? "#eff6ff" : "#fff", borderRadius: 12, padding: 12, cursor: "pointer" }}>
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>{ad}</div><div style={{ fontSize: 13, color: "#475569" }}>{ac}</div></button>)}
+              </div>
+            </PlanKart>
+            <PlanKart>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>İşler ({montajAday.filter((x) => x.sec).length} seçili)</div>
+              {!montajAday.length && <div style={{ color: "#64748b" }}>Planlanacak montaj işi kalmadı — aşağıdan diğer faaliyetleri ekleyebilirsiniz.</div>}
+              {montajAday.map((x) => {
+                const i = isler.indexOf(x);
+                const S = (k, v) => setIsler((l) => l.map((y, j) => (j === i ? { ...y, [k]: v } : y)));
+                const tasi = (d) => setIsler((l) => { const a = [...l]; const j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; });
+                return <div key={x.kod} style={{ borderTop: "1px solid #f1f5f9", padding: "8px 0" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input type="checkbox" checked={x.sec} onChange={(e) => S("sec", e.target.checked)} />
+                    <b style={{ fontSize: 16 }}>{x.fiziksel_id}</b><code>{x.kod}</code>
+                    <span className="rhmap-k">{x.montaj_ad}{x.kapsam_ad ? ` · ${x.kapsam_ad}` : ""}{x.konum_var ? "" : " · konum yok"}</span>
+                    {mod === "MANUEL" && <span style={{ marginLeft: "auto" }}><button type="button" className="rhmap-btn" onClick={() => tasi(-1)} aria-label="Yukarı">↑</button> <button type="button" className="rhmap-btn" onClick={() => tasi(1)} aria-label="Aşağı">↓</button></span>}
+                  </div>
+                  {x.sec && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: 13 }}>
+                    <span style={{ alignSelf: "center" }}>Süre: <b>{x.sure_gun_oto != null ? `${String(x.sure_gun_oto).replace(".", ",")} ekip-gün` : "otomatik yok"}</b> <span className="rhmap-k">({x.sure_gerekce_oto})</span></span>
+                    <input placeholder="Yeni süre (gün)" style={{ ...girdi, width: 120 }} value={x.sure_gun} onChange={(e) => S("sure_gun", e.target.value)} />
+                    {x.sure_gun !== "" && <input placeholder="Değişiklik gerekçesi (zorunlu)" style={{ ...girdi, width: 240 }} value={x.sure_gerekce} onChange={(e) => S("sure_gerekce", e.target.value)} />}
+                    <input placeholder="PAR ID" style={{ ...girdi, width: 120 }} value={x.par_id} onChange={(e) => S("par_id", e.target.value)} />
+                    <select style={girdi} value={x.kesinti} onChange={(e) => S("kesinti", e.target.value)}><option value="">Kesinti: bekleniyor</option><option value="VAR">Kesintili çalışma</option><option value="YOK">Kesinti yok</option></select>
+                    {x.kesinti === "VAR" && <input placeholder="Kesinti (dk)" style={{ ...girdi, width: 100 }} value={x.kesinti_dk} onChange={(e) => S("kesinti_dk", e.target.value)} />}
+                    <span style={{ alignSelf: "center" }}>Erişim / PAR penceresi:</span><input type="time" style={girdi} value={x.erisim_bas} onChange={(e) => S("erisim_bas", e.target.value)} /><input type="time" style={girdi} value={x.erisim_bit} onChange={(e) => S("erisim_bit", e.target.value)} />
+                    {mod === "MANUEL" && <><span style={{ alignSelf: "center" }}>Başlangıç (isteğe bağlı):</span><input type="date" style={girdi} value={x.baslangic_tarih} onChange={(e) => S("baslangic_tarih", e.target.value)} /><input type="time" style={girdi} value={x.baslangic_saat} onChange={(e) => S("baslangic_saat", e.target.value)} /></>}
+                  </div>}
+                </div>;
+              })}
+            </PlanKart>
+            <PlanKart>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Diğer faaliyetler (Clean Up, ENH montaj, issue, malzeme iade, araç bakım, İSG eğitimi…)</div>
+              {faaliyetler.map((f, i) => {
+                const S = (k, v) => setFaaliyetler((l) => l.map((y, j) => (j === i ? { ...y, [k]: v } : y)));
+                const kat = kaynak.kategoriler.find((k) => k.kod === f.kategori);
+                return <div key={i} style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f1f5f9", padding: "8px 0" }}>
+                  <select style={girdi} value={f.kategori} onChange={(e) => S("kategori", e.target.value)}>{kaynak.kategoriler.filter((k) => ["CLEANUP", "ENH_MONTAJ", "ISSUE", "MALZEME", "ARAC_BAKIM", "ISG_EGITIM", "DIGER"].includes(k.kod)).map((k) => <option key={k.kod} value={k.kod}>{k.ikon} {k.ad}</option>)}</select>
+                  <input type="date" style={girdi} value={f.tarih} onChange={(e) => S("tarih", e.target.value)} />
+                  <input type="time" style={girdi} value={f.saat} onChange={(e) => S("saat", e.target.value)} />
+                  <input type="number" min="15" placeholder="Süre (dk)" style={{ ...girdi, width: 100 }} value={f.sure_dk} onChange={(e) => S("sure_dk", e.target.value)} />
+                  <input placeholder={kat?.saha_zorunlu ? "Site ID / iş kodu (zorunlu)" : "Site ID / iş kodu (isteğe bağlı)"} style={{ ...girdi, width: 200 }} value={f.kod} onChange={(e) => S("kod", e.target.value)} list="plan-is-kodlari" />
+                  <input placeholder="Konum (ör. Bursa servis)" style={{ ...girdi, width: 180 }} value={f.konum_aciklama} onChange={(e) => S("konum_aciklama", e.target.value)} />
+                  <input placeholder="Açıklama" style={{ ...girdi, width: 200 }} value={f.aciklama} onChange={(e) => S("aciklama", e.target.value)} />
+                  <button type="button" className="rhmap-btn" onClick={() => setFaaliyetler((l) => l.filter((_, j) => j !== i))}>Kaldır</button>
+                </div>;
+              })}
+              <datalist id="plan-is-kodlari">{isler.map((x) => <option key={x.kod} value={x.kod} />)}</datalist>
+              <button type="button" className="rhmap-btn" onClick={() => setFaaliyetler((l) => [...l, { kategori: "CLEANUP", tarih: form.donemBas, saat: "09:00", sure_dk: 120, kod: "", konum_aciklama: "", aciklama: "" }])}>+ Faaliyet ekle</button>
+            </PlanKart>
+            <div style={{ display: "flex", gap: 8 }}><PlanB2 onClick={() => setAdim("B")}>← Geri</PlanB2><PlanB2 onClick={onizle} disabled={yukleniyor} style={{ background: "#1e3a5f", color: "#fff" }}>{yukleniyor ? "Hesaplanıyor…" : "Planı önizle →"}</PlanB2></div>
+          </>}
+
+          {adim === "D" && onizleme && <>
+            {onizleme.engeller.length > 0 && <PlanKart style={{ borderColor: "#fecaca", background: "#fff1f2" }}><b style={{ color: "#991b1b" }}>Kaydı engelleyen durumlar</b>{onizleme.engeller.map((x, i) => <div key={i} style={{ color: "#991b1b" }}>⛔ {x}</div>)}</PlanKart>}
+            {(onizleme.plan?.eksik_yollar || []).length > 0 && <PlanKart style={{ borderColor: "#fde68a", background: "#fffbeb" }}>
+              <b>Yol süresi doğrulanamadı</b> <span className="rhmap-k">({onizleme.rota?.mesaj || "rota servisi bu bacakları vermedi"})</span>
+              <div style={{ fontSize: 13, margin: "4px 0" }}>Tahmini karayolu süresini girin; manuel varsayım olarak işaretlenir. Kuş uçuşu mesafe kullanılmaz.</div>
+              {onizleme.plan.eksik_yollar.map((e) => { const k = `${e.a}>${e.b}`; return <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 0" }}>
+                <span style={{ minWidth: 280 }}>{e.a_ad} → {e.b_ad}</span><input type="number" min="1" placeholder="dk" style={{ ...girdi, width: 100 }} value={yolManuel[k] || ""} onChange={(ev) => setYolManuel((m) => ({ ...m, [k]: ev.target.value }))} /> dk</div>; })}
+            </PlanKart>}
+            {onizleme.uyarilar.length > 0 && <PlanKart style={{ borderColor: "#fde68a" }}><b>Uyarılar</b>{onizleme.uyarilar.map((x, i) => <div key={i} style={{ color: "#92400e" }}>⚠ {x}</div>)}</PlanKart>}
+            {onizleme.plan && !onizleme.plan.hata && <>
+              <PlanKart>
+                <div style={{ fontWeight: 800 }}>{onizleme.ekip.ad} · {onizleme.plan.donem.baslangic} – {onizleme.plan.donem.bitis} · {mod === "ASISTAN" ? "Akıllı Asistan önerisi (taslak)" : "Kendi planınız (taslak)"}</div>
+                {onizleme.plan.sira_gerekce && <div style={{ fontSize: 14, marginTop: 4 }}><b>Neden bu sıra?</b> {onizleme.plan.sira_gerekce}{onizleme.plan.toplam_yol_dk != null ? ` Toplam yol ≈ ${Math.round(onizleme.plan.toplam_yol_dk)} dk.` : ""}</div>}
+                <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>Yol süresi kaynağı: {onizleme.rota?.durum === "OK" ? "rota servisi (karayolu, canlı trafik yok)" : onizleme.rota?.mesaj || "—"}{Object.keys(yolManuel).length ? " + manuel varsayımlar" : ""}</div>
+                <details style={{ marginTop: 6 }}><summary style={{ cursor: "pointer", fontWeight: 700 }}>Varsayımlar ({onizleme.plan.varsayimlar.length})</summary>{onizleme.plan.varsayimlar.map((v, i) => <div key={i} style={{ fontSize: 13 }}>• {v}</div>)}
+                  {onizleme.isler.map((x) => <div key={x.kod} style={{ fontSize: 13 }}>• {x.kod}: {x.sureGun != null ? `${String(x.sureGun).replace(".", ",")} ekip-gün — ${x.sureKaynak}` : `süre yok — ${x.sureGerekce}`}</div>)}</details>
+              </PlanKart>
+              {onizleme.plan.gunler.filter((g) => g.segmentler.length || g.not).map((g) => <PlanKart key={g.tarih} style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", background: g.calisma ? "#f1f5f9" : "#fee2e2" }}>
+                  <b>{g.tarih.split("-").reverse().join(".")} {g.gun_adi}</b>{g.not && <span style={{ color: "#92400e", fontSize: 13 }}>{g.not}</span>}
+                  {g.calisma && <span className="rhmap-k" style={{ marginLeft: "auto" }}>Kullanılan {Math.round(g.kullanilan_dk / 6) / 10} sa · kalan {Math.round(g.kalan_dk / 6) / 10} sa · montaj {Math.round(g.montaj_dk / 6) / 10}/{Math.round(g.kapasite_dk / 6) / 10} sa</span>}
+                </div>
+                {g.segmentler.map((s, i) => { const [ik, bg, fg, ad] = PLAN_TUR[s.tur] || ["•", "#f1f5f9", "#334155", s.tur]; return <div key={i} style={{ display: "flex", gap: 10, padding: "6px 12px", borderTop: "1px solid #f1f5f9", fontSize: 14 }}>
+                  <span style={{ minWidth: 96, fontVariantNumeric: "tabular-nums" }}>{s.bas_saat}–{s.bit_saat}</span>
+                  <span style={{ background: bg, color: fg, borderRadius: 999, padding: "1px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", alignSelf: "flex-start" }}>{ik} {ad}</span>
+                  <span><b>{s.ad}</b>{s.aciklama ? ` — ${s.aciklama}` : ""}{s.tur === "YOL" ? ` · ${s.km != null ? `${s.km} km · ` : ""}${s.kaynak === "MANUEL" ? "manuel varsayım" : s.kaynak === "AYNI_NOKTA" ? "aynı nokta" : "rota servisi"}` : ""}</span>
+                </div>; })}
+              </PlanKart>)}
+              {onizleme.plan.kalanlar.length > 0 && <PlanKart style={{ borderColor: "#fde68a" }}><b>Sonraki döneme kalan ({onizleme.plan.kalanlar.length})</b>
+                {onizleme.plan.kalanlar.map((k) => <div key={k.kod} style={{ fontSize: 14 }}>• {k.kod}{k.kalan_saat != null ? ` · ${String(k.kalan_saat).replace(".", ",")} saat` : ""} — {k.neden}</div>)}</PlanKart>}
+            </>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <PlanB2 onClick={() => setAdim("C")}>← Düzenle</PlanB2>
+              <PlanB2 onClick={onizle} disabled={yukleniyor}>{yukleniyor ? "Hesaplanıyor…" : "Yeniden önizle"}</PlanB2>
+              <PlanB2 onClick={onayla} disabled={kaydediliyor || onizleme.engeller.length > 0 || (onizleme.plan?.eksik_yollar || []).length > 0 || !onizleme.plan || !!onizleme.plan.hata}
+                style={{ background: onizleme.engeller.length || (onizleme.plan?.eksik_yollar || []).length ? "#cbd5e1" : "#15803d", color: "#fff" }}>{kaydediliyor ? "Kaydediliyor…" : "✓ Onayla ve İş Ata'ya kaydet"}</PlanB2>
+            </div>
+          </>}
+
+          {adim === "SONUC" && sonuc && <>
+            <PlanKart style={{ borderColor: "#86efac", background: "#f0fdf4" }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>✓ Plan #{sonuc.plan_id} {sonuc.tekrar ? "zaten kayıtlıydı (tekrar tıklama — yeni kayıt açılmadı)" : "kaydedildi"}</div>
+              <div>{sonuc.ekip?.ad} · {sonuc.donem?.baslangic} – {sonuc.donem?.bitis}{sonuc.atama_sayisi != null ? ` · ${sonuc.atama_sayisi} İş Ata kaydı` : ""}</div>
+              <div style={{ fontSize: 13, color: "#475569" }}>PR miktarları, QC ve iş tamamlandı durumu değişmedi.</div>
+            </PlanKart>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <PlanB2 onClick={() => planDosyaIndir(`/plan/musteri-excel?bas=${sonuc.donem.baslangic}&bit=${sonuc.donem.bitis}`, `haftalik_plan_${sonuc.donem.baslangic}.xlsx`).catch((e) => setHata(e.message))}>⬇ Müşteri Excel'i (haftalık plan)</PlanB2>
+              <PlanB2 onClick={baskaEkip} style={{ background: "#1e3a5f", color: "#fff" }}>Başka ekip planla</PlanB2>
+              <PlanB2 onClick={onClose}>Kapat</PlanB2>
+            </div>
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RolloutHaritaPin({ x, y, k, secili, uyari, renk = "BELIRSIZ", onClick }) {
+  const K = RH_KAPSAM[renk] || RH_KAPSAM.BELIRSIZ;
+  return (
+    <g transform={`translate(${x},${y}) scale(${k * (secili ? 1.3 : 1)})`} onClick={onClick} style={{ cursor: "pointer" }}>
+      <path d="M0 0 C-7 -9 -12 -13 -12 -21 A12 12 0 1 1 12 -21 C12 -13 7 -9 0 0Z" fill={K.renk} stroke={secili ? "#0f172a" : "#fff"} strokeWidth={secili ? 3.5 : 2} strokeDasharray={uyari ? "3 2" : undefined} />
+      <text x="0" y="-16.5" textAnchor="middle" fontSize="12" fontWeight="900" fill={K.yazi}>{K.harf}</text>
     </g>
   );
 }
@@ -7254,6 +7545,9 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const [konumum, setKonumum] = useState(null);    // { durum: ISTENIYOR|OK|RED|HATA, lat, lng, mesaj }
   const [sahaBilgi, setSahaBilgi] = useState(null); // { yukleniyor } | yanıt | { hata }
   const [cerceveSayac, setCerceveSayac] = useState(0); // hızlı düğmeye tekrar basınca yeniden çerçevele
+  const [filtre, setFiltre] = useState(""); // Saha Filtreleri (montaj / QC / Clean Up) — harita, liste ve Excel aynı
+  const [planAcik, setPlanAcik] = useState(false);
+  const [excelHata, setExcelHata] = useState("");
   const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
   const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null);
   const [svgW, setSvgW] = useState(800);
@@ -7282,7 +7576,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const kapsamdaki = useMemo(() => (veri?.sahalar || [])
     .map((s) => (ekranSuz && !firma ? { ...s, isler: s.isler.filter((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) } : s))
     .filter((s) => s.isler.length)
-    .filter((s) => bolge === "ALL" || String(s.bolge).toLocaleLowerCase("tr-TR") === String(bolge).toLocaleLowerCase("tr-TR")), [veri, ekranSuz, firma, ekranKodlari, bolge]);
+    .filter((s) => bolge === "ALL" || String(s.bolge).toLocaleLowerCase("tr-TR") === String(bolge).toLocaleLowerCase("tr-TR"))
+    .map((s) => (filtre ? { ...s, isler: s.isler.filter((i) => (i.filtreler || []).includes(filtre)) } : s)).filter((s) => s.isler.length)
+    .map((s) => ({ ...s, renk: rhKapsamBirlestir(s.isler) })), [veri, ekranSuz, firma, ekranKodlari, bolge, filtre]);
+  const belirsizler = useMemo(() => kapsamdaki.filter((s) => s.isler.some((i) => i.belirsiz)), [kapsamdaki]);
   const yilaGore = useMemo(() => kapsamdaki.filter((s) => !yalniz2026 || s.is_2026), [kapsamdaki, yalniz2026]);
   const yilsiz = useMemo(() => kapsamdaki.filter((s) => s.yil_dogrulanamadi), [kapsamdaki]);
   const gorunen = tekSaha && secili ? yilaGore.filter((s) => s.fiziksel_id === secili) : yilaGore;
@@ -7304,7 +7601,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     noktalaraSigdir(pts, enKucuk);
   };
   // Seçim haritayı yeniden çerçevelemez (pin ile kart aynı kaydı gösterir); arama ile tek saha seçilince o sahaya yaklaşılır
-  useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, ekranSuz, cerceveSayac]); // eslint-disable-line
+  useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, ekranSuz, cerceveSayac, filtre]); // eslint-disable-line
   // Depodan güzergâh (yalnız kullanıcı "Kayıtlı Bursa deposundan"ı seçince istenir) — gelince harita depo + yol + sahaya sığar
   const rotaCizgi = secili && gorunum === "ROTA" && rota?.ok !== false && rota?.karayolu?.durum === "OK" && Array.isArray(rota.karayolu.cizgi) && rota.karayolu.cizgi.length > 1 ? rota.karayolu.cizgi : null;
   const rotaYolu = useMemo(() => rotaCizgi ? rotaCizgi.map(([lng, lat], i) => { const [x, y] = proj(lng, lat); return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`; }).join("") : "", [rotaCizgi]); // eslint-disable-line
@@ -7384,7 +7681,8 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   };
   const dis = (o, h) => ({ google: `https://www.google.com/maps/dir/?api=1${o ? `&origin=${o}` : ""}&destination=${h}&travelmode=driving`,
     yandex: `https://yandex.com.tr/harita/?rtext=${o || ""}~${h}&rtt=auto` });
-  const DisBaglantilar = ({ o }) => {
+  // Fonksiyon olarak çağrılır (render içinde bileşen tanımlanırsa tıklama yutulabilir)
+  const disBaglantilar = (o) => {
     if (!seciliSaha?.konum) return null;
     const u = dis(o, `${seciliSaha.konum.lat},${seciliSaha.konum.lng}`);
     return <div className="rhmap-dugmeler2">
@@ -7435,6 +7733,11 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
             <option value="ALL">Tüm bölgeler</option>
             {bolgeler.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
+          <select className="rhmap-btn" value={filtre} onChange={(e) => { setFiltre(e.target.value); setSecili(null); setTekSaha(false); }} aria-label="Saha Filtreleri"
+            style={filtre ? { borderColor: "#1e3a5f", background: "#eff6ff" } : undefined}>
+            <option value="">Saha Filtreleri: tümü</option>
+            {Object.entries(RH_FILTRE).map(([k, ad]) => <option key={k} value={k}>{ad}</option>)}
+          </select>
           <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13.5 }} title="Atanan, devam eden ve tamamlanan 2026 işleri">
             <input type="checkbox" checked={yalniz2026} onChange={(e) => setYalniz2026(e.target.checked)} /> Yalnız 2026 işleri (atanan · devam eden · tamamlanan)</label>
           <div style={{ position: "relative", minWidth: 230 }}>
@@ -7476,7 +7779,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                         <circle r="16" fill="#1e3a5f" stroke="#fff" strokeWidth="2.5" opacity=".92" /><text y="5" textAnchor="middle" fontSize="14" fill="#fff" fontWeight="800">{grup.length}</text>
                       </g>);
                   }
-                  return grup.map(({ s, x, y }) => <RolloutHaritaPin key={s.fiziksel_id} x={x} y={y} k={pinK} secili={s.fiziksel_id === secili} uyari={s.konum.dogruluk !== "KESIN"} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }} />);
+                  return grup.map(({ s, x, y }) => <RolloutHaritaPin key={s.fiziksel_id} x={x} y={y} k={pinK} renk={s.renk} secili={s.fiziksel_id === secili} uyari={s.konum.dogruluk !== "KESIN"} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }} />);
                 })}
                 {etiketler.map(({ s, x, y }) => (
                   <g key={`e-${s.fiziksel_id}`} transform={`translate(${x},${y}) scale(${pinK})`} style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }}>
@@ -7487,6 +7790,11 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
             {veri && <div className="rhmap-zoom"><button type="button" onClick={() => zoom(1 / 1.4)} aria-label="Yakınlaştır">+</button><button type="button" onClick={() => zoom(1.4)} aria-label="Uzaklaştır">−</button></div>}
             {veri && !pinli.length && <div style={{ position: "absolute", left: 16, top: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 12px", fontSize: 14, color: "#475569" }}>
               {!kapsamdaki.length ? "Bu görünümde saha yok." : !yilaGore.length ? "Bu görünümde 2026 işi olan saha yok." : "Bu görünümdeki sahaların konumu eksik — sağdaki listeye bakın."}</div>}
+            {veri && <div aria-label="Pin renk açıklaması" style={{ position: "absolute", left: 10, bottom: 26, background: "rgba(255,255,255,.95)", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 12.5, lineHeight: 1.7 }}>
+              {Object.entries(RH_KAPSAM).map(([k, v]) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 18, height: 18, borderRadius: 9, background: v.renk, color: v.yazi, fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{v.harf}</span>{v.ad}</div>)}
+              <div className="rhmap-k" style={{ fontSize: 11 }}>Kesikli çerçeve: koordinat uyarılı</div>
+            </div>}
             <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0){rotaYolu ? <> · Güzergâh: OSRM, harita verisi © OpenStreetMap katkıcıları (ODbL)</> : null}</div>
           </div>
           <div className={`rhmap-panel${seciliSaha ? " secili" : ""}`}>
@@ -7501,6 +7809,28 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
               {yalniz2026 && kapsamdaki.length - yilaGore.length - yilsiz.length > 0 && <div className="rhmap-k">{kapsamdaki.length - yilaGore.length - yilsiz.length} saha yalnız 2026 dışı tarihli (gösterilmiyor).</div>}
               {ekranSuz && !firma && <div className="rhmap-k" style={{ marginTop: 4 }}>Rollout ekranındaki filtreler uygulanıyor. "Tümünü göster" ile kaldırın.</div>}
               <div className="rhmap-k" style={{ margin: "6px 0 10px" }}>Konum kaynağı kayıtlı / TSSR koordinatıdır; adresten konum üretme kapalı. Bir pine ya da Site ID'ye tıklayın.</div>
+              {filtre && <div style={{ fontWeight: 800, color: "#1e3a5f", marginBottom: 6 }}>Saha filtresi: {RH_FILTRE[filtre]}</div>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <button type="button" className="rhmap-btn rhmap-btn-l" disabled={!yilaGore.length}
+                  onClick={() => { setExcelHata(""); planDosyaIndir("/rollout/harita/excel", `rollout_sahalar${filtre ? `_${filtre.toLowerCase()}` : ""}.xlsx`, { firma, filtre, fiziksel_idler: yilaGore.map((s) => s.fiziksel_id) }).catch((e) => setExcelHata(e.message)); }}>⬇ Filtrelenen Sahaları Excel İndir</button>
+                <button type="button" className="rhmap-btn rhmap-btn-l" style={{ background: "#1e3a5f", color: "#fff" }} onClick={() => setPlanAcik(true)}>🗓 Plan Yap</button>
+              </div>
+              {excelHata && <div style={{ color: "#b91c1c", fontSize: 13 }}>{excelHata}</div>}
+              <details className="rhmap-liste" open={!!filtre}>
+                <summary>{filtre ? "Filtrelenen sahalar" : "Görünümdeki sahalar"} ({yilaGore.length})</summary>
+                {yilaGore.slice(0, 300).map((s) => <div key={s.fiziksel_id} className="sat">
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ width: 18, height: 18, borderRadius: 9, background: RH_KAPSAM[s.renk]?.renk, color: RH_KAPSAM[s.renk]?.yazi, fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }} title={RH_KAPSAM[s.renk]?.ad}>{RH_KAPSAM[s.renk]?.harf}</span>
+                    <button type="button" onClick={() => sec(s.fiziksel_id)} style={{ background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", padding: 0, fontWeight: 800, fontSize: 15 }}>{s.fiziksel_id}</button>
+                    {!konumVar(s) && <span style={{ color: "#b45309", fontSize: 12 }}>konum eksik</span>}
+                  </div>
+                  {s.isler.map((i) => <div key={i.site_code} className="rhmap-k">{i.site_code} · {i.montaj?.ad || ""}{i.sure?.gun != null ? ` · ${String(i.sure.gun).replace(".", ",")} gün` : ""}{(i.filtreler || []).includes("CLEANUP") ? " · Clean Up bekliyor" : ""}</div>)}
+                </div>)}
+              </details>
+              {belirsizler.length > 0 && <details className="rhmap-liste">
+                <summary style={{ color: "#b45309" }}>Durumu belirsiz / çelişkili ({belirsizler.length})</summary>
+                {belirsizler.map((s) => <div key={s.fiziksel_id} className="sat"><b>{s.fiziksel_id}</b>{s.isler.filter((i) => i.belirsiz).map((i) => <div key={i.site_code} style={{ fontSize: 13, color: "#b45309" }}>{i.site_code}: {i.belirsiz.join("; ")}</div>)}</div>)}
+              </details>}
               <details className="rhmap-liste" open={konumsuz.length > 0 && konumsuz.length <= 30}>
                 <summary>Konumu eksik sahalar ({konumsuz.length})</summary>
                 {konumsuz.slice(0, 300).map((s) => <div key={s.fiziksel_id} className="sat">
@@ -7550,12 +7880,12 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                 {(konumum.durum === "RED" || konumum.durum === "HATA") && <div>
                   <div style={{ color: "#b91c1c", fontWeight: 700 }}>{konumum.mesaj}</div>
                   <div style={{ fontSize: 14, marginTop: 4 }}>Seçenekler: tarayıcı ayarlarından bu siteye konum izni verip yeniden deneyin, Bursa deposundan başlayın ya da yol tarifini harita uygulamasında açın (başlangıcı uygulama kendisi belirler).</div>
-                  <DisBaglantilar o={null} />
+                  {disBaglantilar(null)}
                 </div>}
                 {konumum.durum === "OK" && <div>
                   <div>Kuş uçuşu: <b>{rhKusUcusu(konumum, seciliSaha.konum).toFixed(1)} km</b> <span className="rhmap-k">(yol mesafesi değil)</span></div>
                   <div className="rhmap-k" style={{ marginTop: 4 }}>Konumunuz yalnız bu tarayıcıda kullanılır; sunucuya ya da rota servisine gönderilmez. Karayolu mesafesi ve süre harita uygulamasında görünür.</div>
-                  <DisBaglantilar o={`${konumum.lat},${konumum.lng}`} />
+                  {disBaglantilar(`${konumum.lat},${konumum.lng}`)}
                 </div>}
               </div>}
               {rota && <div className="rhmap-kutu">
@@ -7564,7 +7894,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                   <div>Kuş uçuşu: <b>{rota.kus_ucusu_km != null ? `${rota.kus_ucusu_km} km` : "—"}</b> <span className="rhmap-k">(yol mesafesi değil)</span></div>
                   <div>Karayolu: {rota.karayolu?.durum === "OK" ? <b>{rota.karayolu.km.toFixed(1)} km · ~{Math.round(rota.karayolu.dakika)} dk</b> : <span className="rhmap-k">{rota.karayolu?.mesaj || "hesaplanmadı"}</span>}</div>
                   {rotaYolu && <div className="rhmap-k"><span style={{ display: "inline-block", width: 18, height: 4, background: "#2563eb", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />Haritadaki mavi çizgi: depodan sahaya karayolu güzergâhı</div>}
-                  {depo?.dogrulandi && <DisBaglantilar o={`${depo.lat},${depo.lng}`} />}
+                  {depo?.dogrulandi && disBaglantilar(`${depo.lat},${depo.lng}`)}
                 </>}
               </div>}
             </div>}
@@ -7605,6 +7935,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
           </div>
         </div>
       </div>
+      {planAcik && <PlanYapModal firma={firma} onClose={() => setPlanAcik(false)} onKaydedildi={() => { setVeriler({}); }}
+        adaylar={yilaGore.flatMap((s) => s.isler.filter((i) => i.planlanabilir !== false && !["TAMAM_QC_OK", "TAMAM_QC_BEKLIYOR", "BASKA_FIRMA"].includes(i.montaj?.kod) || filtre === "CLEANUP")
+          .map((i) => ({ kod: String(i.site_code).replace(/\s+/g, "").toUpperCase(), fiziksel_id: s.fiziksel_id, montaj_ad: i.montaj?.ad || "", kapsam_ad: i.kapsam?.ad || "", konum_var: konumVar(s),
+            sure_gun_oto: filtre === "CLEANUP" ? null : i.sure?.gun ?? null, sure_gerekce_oto: filtre === "CLEANUP" ? "Clean Up süresini girin" : i.sure?.gerekce || "", kategori: filtre === "CLEANUP" ? "CLEANUP" : "NEW_SITE" })))} />}
     </div>
   );
 }
