@@ -116,4 +116,4 @@ function isSuresi({ row, kod, kalemler, montaj }) {
   return { gun: null, kural: null, gerekce: "Kapsam süre kurallarından birine uymuyor — süreyi girin" };
 }
 
-module.exports = { montajDurumu, cleanupBekliyor, kapsamRengi, kalemAnten, isSuresi, standaloneMi };
+module.exports = { montajDurumu, cleanupBekliyor, kapsamRengi, kalemAnten, isSuresi, standaloneMi, YARDIMCI_RX };

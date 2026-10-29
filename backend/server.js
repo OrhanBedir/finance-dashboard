@@ -581,6 +581,8 @@ const taseronCozum = require("./taseronCozum"); // 28.10.2026: Günlük İş Gir
 const sahaKonum = require("./sahaKonum");
 const haritaIsDurumu = require("./haritaIsDurumu");
 const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
+const kmzKonum = require("./kmzKonum"); // 29.10.2026: Türk Telekom KMZ konum kaynağı (yalnız konum)
+const haritaPinDurum = require("./haritaPinDurum"); // 29.10.2026: pin rengi = iş durumu; anten / bant detayı
 const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
 const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
 const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
@@ -13416,8 +13418,9 @@ app.get("/export/excel", async (req, res) => {
 const HARITA_FIRMA_IZINLI = ["TEKNO"];
 const _gun = haritaIsDurumu.gun;
 // Firma süzgeci: K (alt marka) + istenen firma → { FM (eşleştirici), hata }
-async function haritaFirmaSuzgeci(req, K) {
-  const firma = String(req.query.firma || "").toUpperCase().trim();
+async function haritaFirmaSuzgeci(req, K, firmaOzel) {
+  // 29.10.2026: POST (Excel) gövdesindeki firma doğrudan verilir — Express 5'te req.query'ye atama yapılamaz (sessizce yok sayılıyordu)
+  const firma = String((firmaOzel ?? req.query.firma) || "").toUpperCase().trim();
   if (!firma) return { firma: null, FM: null };
   if (!HARITA_FIRMA_IZINLI.includes(firma)) return { hata: [400, "Geçersiz firma filtresi"] };
   if (K && K.kod !== firma) return { hata: [403, "Bu firma filtresi yetkinizde değil"] };
@@ -13428,7 +13431,7 @@ async function haritaFirmaSuzgeci(req, K) {
 // Günlük İş Girişi kalemleri (fiyat alanı ALINMAZ): iş kodu → [kalem]. esle: kalem taşeronu süzgeci
 async function haritaKalemleri(esle, kodlar = null) {
   const r = await pool.query(`SELECT id, UPPER(TRIM(site_code)) AS sc, site_type, item_code, item_description, subcon_name, onair_date, qc_durum,
-      COALESCE(tamamlanan_qty, done_qty) AS miktar, to_jsonb(m)->>'boq_surum' AS boq_surum
+      COALESCE(tamamlanan_qty, done_qty) AS miktar, done_qty AS pr_miktar, tamamlanan_qty AS fiziki_miktar, to_jsonb(m)->>'boq_surum' AS boq_surum
     FROM master_works m WHERE COALESCE(TRIM(subcon_name),'') <> '' ${kodlar ? "AND UPPER(TRIM(site_code)) = ANY($1::text[])" : ""}`, kodlar ? [kodlar] : []);
   const out = new Map();
   for (const x of r.rows) if (!esle || esle(x.subcon_name)) (out.get(x.sc) || out.set(x.sc, []).get(x.sc)).push(x);
@@ -13464,6 +13467,13 @@ async function haritaKapsamSatirlari(K, FM) {
   const yalnizGunluk = await yalnizGunlukBul((v) => FM.esle(v) && (!K || K.gunlukEsle(v)));
   return { rows, kalemMap, yalnizGunluk };
 }
+// Konum kaynağının açıklaması (KMZ: dosya, KML kaydı, içe alma zamanı, dosya içi kayıt tarihi — iş yılı DEĞİL)
+function haritaKonumKaynagi(k) {
+  if (!k) return {};
+  const ad = k.kaynak === "KMZ" ? "Türk Telekom KMZ konum dosyası" : k.kaynak === "TSSR_KOORDINAT" ? "TSSR'da yazan koordinat" : k.kaynak === "MANUEL" ? "Elle girilen" : k.kaynak === "ADRES" ? "Yalnız adres" : k.kaynak || "";
+  return { kaynak_ad: ad, kaynak_dosya: k.kaynak_dosya || null, kml_kaydi: k.kml_kaydi || null,
+    ice_alma_zamani: k.ice_alma_zamani ? new Date(k.ice_alma_zamani).toISOString() : null, kaynak_tarih: k.kaynak_tarih ? haritaIsDurumu.gun(k.kaynak_tarih) : null };
+}
 // Konumu olmayan sahanın nedeni (kayıtlar sessizce kaybolmaz)
 function haritaKonumEksikNedeni(k, tssrDurum, belgeVar) {
   if (k && k.lat === null) return "Yalnız adres var — koordinat yok (adres çözümleme kapalı)";
@@ -13474,10 +13484,10 @@ function haritaKonumEksikNedeni(k, tssrDurum, belgeVar) {
   return belgeVar ? "TSSR henüz okunmadı" : "TSSR belgesi yok";
 }
 // Harita verisi (harita ucu ve filtreli Excel aynı kaynağı kullanır). Hata: { durum, mesaj } fırlatır.
-async function haritaVerisi(req) {
+async function haritaVerisi(req, { firma } = {}) {
     if (taseronMu(req.user)) throw { durum: 403, mesaj: "Yetkiniz yok" };
     const K = await rolloutKapsam(req);
-    const fs = await haritaFirmaSuzgeci(req, K);
+    const fs = await haritaFirmaSuzgeci(req, K, firma);
     if (fs.hata) throw { durum: fs.hata[0], mesaj: fs.hata[1] };
     const FM = fs.FM;
     const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, FM);
@@ -13495,12 +13505,13 @@ async function haritaVerisi(req) {
     const atamaMap = await haritaAtamalari(tumKodlar);
     const konumGetir = async () => (ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []);
     let konumlar = await konumGetir();
-    const tssrDurum = {};
+    const tssrDurum = {}, tssrSonuc = {};
     if (tumKodlar.length) {
       const a = await pool.query(`SELECT DISTINCT ON (site_code) site_code, belge_url, sonuc, durum FROM tssr_ai_analiz WHERE site_code = ANY($1) ORDER BY site_code, updated_at DESC`, [tumKodlar]).catch(() => ({ rows: [] }));
       let yazildi = 0;
       for (const x of a.rows) {
         tssrDurum[x.site_code] = x.durum;
+        if (["HAZIR", "KISMI"].includes(x.durum) && x.sonuc) tssrSonuc[String(x.site_code).replace(/\s+/g, "").toUpperCase()] = x.sonuc;
         const f = sahaKimlik.fizikselSaha(x.site_code);
         if (f && !konumlar.some((k) => k.fiziksel_id === f.fiziksel_id) && ["HAZIR", "KISMI"].includes(x.durum)) {
           if (await sahaKonum.tssrdenKonumYaz(pool, x.site_code, x.sonuc, x.belge_url).catch(() => null)) yazildi++;
@@ -13509,6 +13520,11 @@ async function haritaVerisi(req) {
       if (yazildi) konumlar = await konumGetir();
     }
     const kMap = Object.fromEntries(konumlar.map((k) => [k.fiziksel_id, k]));
+    // KMZ'de olup uygulanmamış (belirsiz / onay bekleyen) konumlar: yalnız konum eksik nedenini açıklamak için (koordinat verilmez)
+    const kmzBekleyen = {};
+    { const eksikIds = ids.filter((id) => !(kMap[id] && kMap[id].lat !== null && ["KESIN", "CELISKILI"].includes(kMap[id].dogruluk)));
+      if (eksikIds.length) for (const a of (await pool.query(`SELECT DISTINCT ON (fiziksel_id) fiziksel_id, sinif_kmz, sinif, neden FROM saha_konum_kmz_aday
+          WHERE fiziksel_id = ANY($1) ORDER BY fiziksel_id, ice_alma_id DESC`, [eksikIds]).catch(() => ({ rows: [] }))).rows) kmzBekleyen[a.fiziksel_id] = a; }
     const depo = await sahaKonum.bursaDeposu(pool);
     const cleanupMap = new Map((await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, items, onay_durum, completion_date FROM rollout_cleanup WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`,
       [tumKodlar]).catch(() => ({ rows: [] }))).rows.map((x) => [x.sc, x]));
@@ -13524,15 +13540,20 @@ async function haritaVerisi(req) {
         const kalemler = kalemMap.get(kod) || [];
         const kollar = FM && r && !K ? haritaIsDurumu.firmaKollari(r, ROLLOUT_IS_KOLU_ALANLARI, (v) => FM.esle(v)) : null;
         const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar, kalemler, atamalar: atamaMap.get(kod) || [] });
-        // Montaj / QC / Clean Up filtreleri — alt markada ana montaj (RF iş kolu) başka firmadaysa montaj filtresine girmez, planlanamaz
-        const baskaFirmaMontaj = K && r && r._kol_sahip?.rf === "DIGER";
+        // Montaj / QC / Clean Up filtreleri — ana montaj (RF iş kolu) başka firmadaysa montaj filtresine girmez, planlanamaz.
+        // 29.10.2026: ERC yöneticisinin firma görünümünde (?firma=TEKNO) de aynı kural (başka firmanın montajı firmanın durumu sayılmaz)
+        const rfAd = r ? rolloutFirmaAdi(r.rf_subcon) : null;
+        const rfBizim = !r ? false : K ? r._kol_sahip?.rf === "BEN" : FM ? !!(rfAd && FM.esle(rfAd)) : true;
+        const baskaFirmaMontaj = !!r && (K ? r._kol_sahip?.rf === "DIGER" : FM ? !!(rfAd && !FM.esle(rfAd)) : false);
         const montaj = baskaFirmaMontaj ? { kod: "BASKA_FIRMA", ad: "Ana montaj başka firmada", filtreler: [], belirsiz: null } : sahaFiltre.montajDurumu(r);
+        const pin = haritaPinDurum.isPinDurumu({ montaj, rfBizim, row: r, kalemler, atamalar: atamaMap.get(kod) || [] });
+        const anten = haritaPinDurum.isAntenDetayi({ kod, row: r, kalemler, tssr: tssrSonuc[kod] || null });
         const cleanup = sahaFiltre.cleanupBekliyor(cleanupMap.get(kod));
         const sure = sahaFiltre.isSuresi({ row: r, kod, kalemler, montaj });
         return { site_code: r?.site_code || kod, site_type: r?.site_type || kalemler[0]?.site_type || "", bolge: r?.bolge || "", il: r?.il || "", project_code: r?.project_code || "",
           kaynak: r ? "ROLLOUT" : "GUNLUK", taseronlar: adsAl(r, kalemler), kalem_sayisi: kalemler.length,
           montaj, filtreler: [...montaj.filtreler, ...(cleanup ? ["CLEANUP"] : [])], belirsiz: montaj.belirsiz || null, sure,
-          planlanabilir: !baskaFirmaMontaj, rf_firma: !K && r ? (rolloutFirmaAdi(r.rf_subcon) || null) : null,
+          planlanabilir: !baskaFirmaMontaj, rf_firma: !K && r ? (rolloutFirmaAdi(r.rf_subcon) || null) : null, montaj_bizim: rfBizim, pin, anten,
           _kapsamGirdi: { row: r, kod, kalemler },
           durum: d.durum, durum_ad: d.durum_ad, yil_ici: d.yil_ici, dayanak: d.dayanak, yillar: d.yillar,
           // eski alanlar (geri uyum)
@@ -13541,25 +13562,37 @@ async function haritaVerisi(req) {
       const k = kMap[id];
       // Konum kaynağı (TSSR belgesi / ham okuma) başka firmanın işinden geliyorsa alt markaya verilmez
       const kaynakBizim = !K || isler.some((x) => String(x.site_code || "").toUpperCase().trim() === String(k?.kaynak_site_code || "").toUpperCase().trim());
-      const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [],
-        belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null, ham: kaynakBizim ? k.ham : null } : null;
+      const konum = k && k.lat !== null && k.lng !== null ? { lat: Number(k.lat), lng: Number(k.lng), kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: [...(k.uyarilar || [])],
+        belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null, ham: kaynakBizim ? k.ham : null, ...haritaKonumKaynagi(k) } : null;
+      // KMZ konumu ile TSSR koordinatı farklıysa uyarı (KMZ konumu sessizce değiştirilmez; TSSR de sessizce yok sayılmaz)
+      if (konum && k.kaynak === "KMZ") for (const { kod } of g.isler) {
+        const t = tssrSonuc[kod] ? sahaKonum.tssrKonumu(tssrSonuc[kod].konum) : null;
+        if (t && t.lat != null && t.dogruluk === "KESIN") {
+          const fark = Math.round(sahaKonum.kusUcusuKm(t, konum) * 1000);
+          if (fark > kmzKonum.MEVCUT_TOLERANS_M) konum.uyarilar.push(`${kod} TSSR koordinatı KMZ konumundan ${fark >= 1000 ? `${(fark / 1000).toFixed(1)} km` : `${fark} m`} farklı — kontrol edin`);
+        }
+      }
       const kullanilabilir = !!konum && ["KESIN", "CELISKILI"].includes(konum.dogruluk);
       const belgeVar = g.isler.some(({ r }) => r && String(r.tssr_belge_url || "").trim());
       const tdur = g.isler.map(({ kod }) => tssrDurum[kod]).find(Boolean) || null;
       const kapsam = sahaFiltre.kapsamRengi(isler.map((x) => x._kapsamGirdi));
       for (const x of isler) { x.kapsam = sahaFiltre.kapsamRengi([x._kapsamGirdi]); delete x._kapsamGirdi; } // filtreyle işler daralınca ekran rengi yeniden birleştirir
-      return { fiziksel_id: id, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
+      const pin = haritaPinDurum.pinBirlestir(isler);
+      return { fiziksel_id: id, pin, bolge: isler.find((x) => x.bolge)?.bolge || "", il: k?.il || isler.find((x) => x.il)?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
         kapsam, isler, is_2026: isler.some((x) => x.yil_ici), yil_dogrulanamadi: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"), tarih_eksik: isler.every((x) => x.durum === "YIL_DOGRULANAMADI"),
         taseronlar: [...new Set(isler.flatMap((x) => x.taseronlar))],
         konum, konum_durumu: !k ? "YOK" : k.lat === null ? "YALNIZ_ADRES" : k.dogruluk,
-        konum_eksik_nedeni: kullanilabilir ? null : haritaKonumEksikNedeni(k, tdur, belgeVar),
+        konum_eksik_nedeni: kullanilabilir ? null : kmzBekleyen[id] ? (kmzBekleyen[id].sinif_kmz === "KABUL" ? "KMZ'de konum var — içe alma onayı bekliyor" : `KMZ konumu belirsiz: ${kmzBekleyen[id].neden || ""}`)
+          : haritaKonumEksikNedeni(k, tdur, belgeVar),
         kus_ucusu_km: depo.dogrulandi && kullanilabilir ? Math.round(sahaKonum.kusUcusuKm(depo, konum) * 10) / 10 : null };
     });
     const kullan = (s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
     return ({ ok: true, kapsam: K ? K.ad : null, firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
       hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
       rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
-      ozet: { saha: sahalar.length, konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
+      kmz_yetkili: !K && ["admin", "platform_admin"].includes(req.user?.role), // KMZ konum içe alma düğmesi (yalnız ERC yöneticisi)
+      ozet: { saha: sahalar.length, is_kaydi: sahalar.reduce((a, s) => a + s.isler.length, 0), konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
+        konum_kmz: sahalar.filter((s) => kullan(s) && s.konum.kaynak === "KMZ").length,
         is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
         tarih_eksik: sahalar.filter((x) => x.yil_dogrulanamadi).length } });
 }
@@ -13611,16 +13644,241 @@ app.get("/rollout/harita/saha", authMiddleware, async (req, res) => {
       return { site_code: r?.site_code || kod, site_type: r?.site_type || "", bolge: r?.bolge || "", il: r?.il || "", project_code: r?.project_code || "",
         kaynak: r ? "ROLLOUT" : "GUNLUK", durum: d.durum, durum_ad: d.durum_ad, dayanak: d.dayanak, ilerleme, belgeler,
         kalemler: kalemler.map((k) => ({ item_code: k.item_code, aciklama: k.item_description, taseron: k.subcon_name, miktar: k.miktar != null ? Number(k.miktar) : null,
-          qc: k.qc_durum || null, onair: _gun(k.onair_date), boq_surum: k.boq_surum || null })) };
+          pr_miktar: k.pr_miktar != null ? Number(k.pr_miktar) : null, fiziki_miktar: k.fiziki_miktar != null ? Number(k.fiziki_miktar) : null,
+          durum: haritaPinDurum.kalemDurumu(k).aciklama, qc: k.qc_durum || null, onair: _gun(k.onair_date), boq_surum: k.boq_surum || null })) };
     });
     await sahaKonum.tabloHazirla(pool);
     const k = (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = $1`, [id])).rows[0];
     const kaynakBizim = !K || kodlar.includes(String(k?.kaynak_site_code || "").toUpperCase().trim());
     res.json({ ok: true, fiziksel_id: id, firma: FM ? { kod: FM.kod, ad: FM.ad } : null, salt_okunur: true,
       konum: k ? { lat: k.lat != null ? Number(k.lat) : null, lng: k.lng != null ? Number(k.lng) : null, kaynak: k.kaynak, dogruluk: k.dogruluk, uyarilar: k.uyarilar || [],
-        adres: k.adres || "", saha_adi: k.saha_adi || "", il: k.il || "", ilce: k.ilce || "", belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null } : null,
+        adres: k.adres || "", saha_adi: k.saha_adi || "", il: k.il || "", ilce: k.ilce || "", belge_url: kaynakBizim ? k.belge_url : null, sayfa: kaynakBizim ? k.sayfa : null,
+        ...haritaKonumKaynagi(k) } : null,
       isler });
   } catch (e) { console.error("ROLLOUT HARITA SAHA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+/* ═══ KMZ KONUM İÇE ALMA (29.10.2026, Orhan — Türk Telekom KMZ) ═════════════════════════════════════════════════════
+   KMZ YALNIZ konum kaynağıdır: firma sahipliği, iş yılı, anten, montaj durumu, PR / QC / taşeron / hakediş kayıtları
+   DEĞİŞMEZ. Yalnız ERC yöneticisi (alt marka / taşeron değil) kullanır. Akış:
+     1) POST /saha-konum/kmz/onizle  — dosya okunur (kmzKonum: güvenli ZIP + XML), sistemdeki fiziksel Site ID'lerle TAM eşleşir,
+        önizleme kaydı + adaylar saklanır; saha_konum'a HİÇBİR ŞEY yazılmaz. Yanıtta yalnız sistemle eşleşen noktalar vardır.
+     2) POST /saha-konum/kmz/:id/uygula — yalnız seçilen sahalar: YENI (geçerli koordinatı olmayan) ve açıkça "KMZ" seçilmiş
+        CELISKI. Belirsiz / geçersiz / eşleşmeyen ASLA yazılmaz. Eski değer saha_konum_gecmis'e yazılır (geri alınabilir).
+     3) GET /saha-konum/kmz/:id/rapor — önizleme Excel'i (eşleşen, çelişen, belirsiz, geçersiz, eşleşmeyen, KMZ'de olmayan).
+   Kaynak dosya adı, SHA-256, KML dosyası + Placemark kimliği, içe alma zamanı ve dosya içi kayıt tarihi saklanır. Dosya içi
+   tarih KONUM tarihidir; iş yılı filtresine girmez. */
+const uploadKmz = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024, files: 1 } });
+let _kmzTabloHazir = false;
+async function kmzTablolar() {
+  await sahaKonum.tabloHazirla(pool);
+  if (_kmzTabloHazir) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS saha_konum_ice_alma (id SERIAL PRIMARY KEY, dosya_adi TEXT, sha256 TEXT, boyut INTEGER,
+    kml_sayisi INTEGER, okunan_nokta INTEGER, kayit_tarihleri TEXT[], ozet JSONB, durum TEXT DEFAULT 'ONIZLEME', yukleyen TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(), uygulayan TEXT, uygulandi_at TIMESTAMPTZ, uygulama JSONB)`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS saha_konum_kmz_aday (id SERIAL PRIMARY KEY, ice_alma_id INTEGER REFERENCES saha_konum_ice_alma(id) ON DELETE CASCADE,
+    fiziksel_id TEXT, lat NUMERIC(10,7), lng NUMERIC(10,7), sinif_kmz TEXT, sinif TEXT, neden TEXT, teknocenter BOOLEAN, kayit_sayisi INTEGER,
+    kml_dosya TEXT, placemark_id TEXT, ad TEXT, ham TEXT, saha_adi TEXT, il TEXT, ilce TEXT, adres TEXT, saha_durum TEXT, saha_tipi TEXT, kml_tarih DATE)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS saha_konum_kmz_aday_ice_idx ON saha_konum_kmz_aday (ice_alma_id, fiziksel_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS saha_konum_kmz_aday_fid_idx ON saha_konum_kmz_aday (fiziksel_id)`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS saha_konum_gecmis (id SERIAL PRIMARY KEY, fiziksel_id TEXT, onceki JSONB, yeni JSONB, ice_alma_id INTEGER,
+    degistiren TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+  _kmzTabloHazir = true;
+}
+// Yalnız ERC yöneticisi: alt marka (Teknocenter / AHY) ve taşeron hesabı KMZ içe alamaz, önizleyemez
+async function kmzYetkili(req) {
+  if (!req.user || taseronMu(req.user)) return false;
+  if (!["admin", "platform_admin"].includes(req.user.role)) return false;
+  return !(await rolloutKapsam(req));
+}
+// Sistemdeki doğrulanmış fiziksel Site ID'ler (Rollout + Günlük İş Girişi iş kodları, sahaKimlik ile)
+async function kmzSistemKimlikleri() {
+  const r = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc FROM rollout_progress WHERE COALESCE(TRIM(site_code),'') <> ''
+    UNION SELECT UPPER(TRIM(site_code)) FROM master_works WHERE COALESCE(TRIM(site_code),'') <> ''`);
+  const out = new Map(); // fiziksel_id → [iş kodu]
+  for (const x of r.rows) { const f = sahaKimlik.fizikselSaha(x.sc); if (f) (out.get(f.fiziksel_id) || out.set(f.fiziksel_id, []).get(f.fiziksel_id)).push(x.sc); }
+  return out;
+}
+// Teknocenter yetkili kapsamı (haritadaki firma görünümüyle AYNI kural): fiziksel_id → [iş kodu]
+async function kmzTeknoKimlikleri() {
+  const FM = (await rolloutFirmaEsleyicileri()).find((m) => m.kod === "TEKNO");
+  if (!FM) return new Map();
+  const { rows, yalnizGunluk } = await haritaKapsamSatirlari(null, FM);
+  const out = new Map();
+  for (const kod of [...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) {
+    const f = sahaKimlik.fizikselSaha(kod); if (f) (out.get(f.fiziksel_id) || out.set(f.fiziksel_id, []).get(f.fiziksel_id)).push(kod);
+  }
+  return out;
+}
+// Yanıt / rapor satırı (ham KMZ alanlarından yalnız konum ve saha tanımı)
+const kmzSatir = (x, isKodlari) => ({ fiziksel_id: x.fiziksel_id, sinif: x.sinif, neden: x.neden, teknocenter: x.teknocenter, is_kodlari: isKodlari || [],
+  kmz: { lat: x.lat, lng: x.lng, ham: x.kaynak?.ham ?? x.ham, kml_dosya: x.kaynak?.kml_dosya ?? x.kml_dosya, placemark_id: x.kaynak?.placemark_id ?? x.placemark_id,
+    ad: x.kaynak?.ad ?? x.ad, kayit_sayisi: x.kayit_sayisi, saha_adi: x.saha_adi, il: x.il, ilce: x.ilce, saha_durum: x.saha_durum, saha_tipi: x.saha_tipi, kml_tarih: x.kml_tarih },
+  mevcut: x.mevcut || null });
+
+app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), async (req, res) => {
+  try {
+    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: "KMZ dosyası seçilmedi" });
+    if (!/\.kmz$/i.test(req.file.originalname || "")) return res.status(400).json({ ok: false, error: "Yalnız .kmz dosyası yüklenebilir" });
+    let okuma;
+    try { okuma = kmzKonum.kmzOku(req.file.buffer, req.file.originalname); }
+    catch (e) { return res.status(400).json({ ok: false, error: `KMZ okunamadı: ${e.message}` }); }
+    await kmzTablolar();
+    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    const ids = okuma.gruplar.map((g) => g.fiziksel_id).filter((id) => sistem.has(id));
+    const mevcut = new Map((ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []).map((k) => [k.fiziksel_id, k]));
+    const E = kmzKonum.eslestir(okuma, { sistemIdler: new Set(sistem.keys()), teknoIdler: new Set(tekno.keys()), mevcut });
+    const kmzIdler = new Set(okuma.gruplar.map((g) => g.fiziksel_id));
+    const onceki = (await pool.query(`SELECT id, created_at, durum FROM saha_konum_ice_alma WHERE sha256 = $1 ORDER BY id DESC LIMIT 1`, [okuma.ozet.sha256])).rows[0] || null;
+    const ozet = { ...E.ozet, teknocenter_toplam: tekno.size, teknocenter_kmz_disi: [...tekno.keys()].filter((id) => !kmzIdler.has(id)).length };
+    const ia = (await pool.query(`INSERT INTO saha_konum_ice_alma (dosya_adi, sha256, boyut, kml_sayisi, okunan_nokta, kayit_tarihleri, ozet, yukleyen)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
+      [okuma.ozet.dosya_adi, okuma.ozet.sha256, okuma.ozet.boyut, okuma.ozet.kml_sayisi, okuma.ozet.okunan_nokta, okuma.ozet.kayit_tarihleri,
+        JSON.stringify({ ...ozet, dosya: okuma.ozet, gecersiz: okuma.gecersiz, kodsuz_sayisi: okuma.kodsuz.length }), req.user.email || null])).rows[0];
+    // Adaylar (tüm benzersiz Site ID noktaları; geçersizler özet içinde) — tek sorguda
+    const S = E.satirlar;
+    for (let i = 0; i < S.length; i += 500) {
+      const parca = S.slice(i, i + 500), deg = [], par = [];
+      parca.forEach((x, n) => {
+        const b = n * 20;
+        deg.push(`(${Array.from({ length: 20 }, (_, j) => `$${b + j + 1}`).join(",")})`);
+        par.push(ia.id, x.fiziksel_id, x.lat, x.lng, x.sinif_kmz, x.sinif, x.neden || null, x.teknocenter, x.kayit_sayisi, x.kaynak.kml_dosya, x.kaynak.placemark_id,
+          x.kaynak.ad, x.kaynak.ham, x.saha_adi || null, x.il || null, x.ilce || null, x.adres || null, x.saha_durum || null, x.saha_tipi || null, x.kml_tarih || null);
+      });
+      await pool.query(`INSERT INTO saha_konum_kmz_aday (ice_alma_id, fiziksel_id, lat, lng, sinif_kmz, sinif, neden, teknocenter, kayit_sayisi, kml_dosya, placemark_id,
+        ad, ham, saha_adi, il, ilce, adres, saha_durum, saha_tipi, kml_tarih) VALUES ${deg.join(",")}`, par);
+    }
+    res.json({ ok: true, ice_alma_id: ia.id, olusturma: ia.created_at, dosya: okuma.ozet, ozet,
+      onceki_ice_alma: onceki ? { id: onceki.id, tarih: onceki.created_at, durum: onceki.durum } : null,
+      // Yalnız sistemle eşleşen noktalar (ham KMZ'nin tamamı gönderilmez)
+      satirlar: S.filter((x) => x.sinif !== "ESLESMEYEN").map((x) => kmzSatir(x, sistem.get(x.fiziksel_id))),
+      gecersiz: okuma.gecersiz.filter((g) => !g.fiziksel_id || sistem.has(g.fiziksel_id)),
+      teknocenter_kmz_disi: [...tekno.entries()].filter(([id]) => !kmzIdler.has(id)).map(([id, kodlar]) => ({ fiziksel_id: id, is_kodlari: kodlar })).sort((a, b) => a.fiziksel_id.localeCompare(b.fiziksel_id)),
+      notlar: [
+        "Önizleme hiçbir konumu değiştirmedi.",
+        `Dosya içi kayıt tarihi: ${okuma.ozet.kayit_tarihleri.join(", ") || "yok"} — konum tarihidir, iş yılı filtresini etkilemez.`,
+        okuma.ozet.dis_baglanti ? `${okuma.ozet.dis_baglanti} dış bağlantı (NetworkLink) izlenmedi.` : "Dış bağlantı yok; arşiv dışından veri okunmadı.",
+        `${okuma.tekrarlayici_sayisi} tekrarlayıcı (repeater) noktası saha sayılmadı; ${okuma.kodsuz.length} noktadan Site ID çıkarılamadı.`,
+      ] });
+  } catch (e) { console.error("KMZ ONIZLE ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+
+app.get("/saha-konum/kmz/ice-almalar", authMiddleware, async (req, res) => {
+  try {
+    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await kmzTablolar();
+    const r = await pool.query(`SELECT id, dosya_adi, sha256, okunan_nokta, kayit_tarihleri, durum, yukleyen, created_at, uygulayan, uygulandi_at,
+      ozet->'eslesen_fiziksel_saha' AS eslesen, uygulama->'yazilan' AS yazilan FROM saha_konum_ice_alma ORDER BY id DESC LIMIT 30`);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Seçilen sahaları uygula. Gövde: { secimler: [{ fiziksel_id, kaynak: "KMZ" }] } — listede olmayan saha değişmez.
+app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    await kmzTablolar();
+    const iaId = Number(req.params.id);
+    const ia = (await client.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
+    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    const secimler = (Array.isArray(req.body?.secimler) ? req.body.secimler : []).filter((x) => x && x.kaynak === "KMZ")
+      .map((x) => String(x.fiziksel_id || "").toUpperCase().trim()).filter(Boolean);
+    const tekil = [...new Set(secimler)];
+    if (!tekil.length) return res.status(400).json({ ok: false, error: "Uygulanacak saha seçilmedi" });
+    if (tekil.length > 5000) return res.status(400).json({ ok: false, error: "Tek seferde en çok 5000 saha" });
+    const adaylar = new Map((await client.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 AND fiziksel_id = ANY($2)`, [iaId, tekil])).rows.map((a) => [a.fiziksel_id, a]));
+    const sistem = await kmzSistemKimlikleri();
+    await client.query("BEGIN");
+    const mevcutlar = new Map((await client.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1) FOR UPDATE`, [tekil])).rows.map((k) => [k.fiziksel_id, k]));
+    const yazilan = [], atlanan = [];
+    for (const id of tekil) {
+      const a = adaylar.get(id);
+      if (!a) { atlanan.push({ fiziksel_id: id, neden: "Bu içe almada aday yok" }); continue; }
+      if (a.sinif_kmz !== "KABUL") { atlanan.push({ fiziksel_id: id, neden: `KMZ konumu belirsiz: ${a.neden || ""}` }); continue; }
+      if (!sistem.has(id)) { atlanan.push({ fiziksel_id: id, neden: "Sistemde bu fiziksel saha yok" }); continue; }
+      // Sınıf güncel kayıtla YENİDEN hesaplanır (önizlemeden sonra konum değiştiyse eski karar uygulanmaz)
+      const m = mevcutlar.get(id);
+      const tek = kmzKonum.eslestir({ gruplar: [{ fiziksel_id: id, lat: Number(a.lat), lng: Number(a.lng), sinif: "KABUL", nedenler: [] }], kodsuz: [], gecersiz: [], ozet: {} },
+        { sistemIdler: new Set([id]), mevcut: new Map(m ? [[id, m]] : []) }).satirlar[0];
+      if (tek.sinif === "UYUMLU") { atlanan.push({ fiziksel_id: id, neden: `Mevcut konumla uyumlu (${tek.neden}) — değiştirilmedi` }); continue; }
+      if (!["YENI", "CELISKI"].includes(tek.sinif)) { atlanan.push({ fiziksel_id: id, neden: tek.neden || tek.sinif }); continue; }
+      if (m && m.kaynak === "MANUEL" && tek.sinif === "CELISKI" && req.body?.manuel_ez !== true) { atlanan.push({ fiziksel_id: id, neden: "Elle girilmiş konum — ayrıca onay gerekir" }); continue; }
+      const kml = `${a.kml_dosya}#${a.placemark_id || "?"} (${a.ad})`;
+      const uyarilar = tek.sinif === "CELISKI" ? [`Önceki ${m.kaynak} konumu (${Number(m.lat).toFixed(6)}, ${Number(m.lng).toFixed(6)}) KMZ ile değiştirildi: ${tek.neden}`] : [];
+      await client.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, belge_url, sayfa, ham, adres, saha_adi, il, ilce, kaynak_site_code,
+          kaynak_dosya, kml_kaydi, ice_alma_id, ice_alma_zamani, kaynak_tarih, updated_at)
+        VALUES ($1,$2,$3,'KMZ','KESIN',$4,NULL,NULL,$5,$6,$7,$8,$9,NULL,$10,$11,$12,$13,$14,NOW())
+        ON CONFLICT (fiziksel_id) DO UPDATE SET lat=EXCLUDED.lat, lng=EXCLUDED.lng, kaynak='KMZ', dogruluk='KESIN', uyarilar=EXCLUDED.uyarilar, belge_url=NULL, sayfa=NULL,
+          ham=EXCLUDED.ham, adres=EXCLUDED.adres, saha_adi=EXCLUDED.saha_adi, il=EXCLUDED.il, ilce=EXCLUDED.ilce, kaynak_site_code=NULL, kaynak_dosya=EXCLUDED.kaynak_dosya,
+          kml_kaydi=EXCLUDED.kml_kaydi, ice_alma_id=EXCLUDED.ice_alma_id, ice_alma_zamani=EXCLUDED.ice_alma_zamani, kaynak_tarih=EXCLUDED.kaynak_tarih, updated_at=NOW()`,
+        [id, a.lat, a.lng, JSON.stringify(uyarilar), a.ham, a.adres, a.saha_adi, a.il, a.ilce, `${ia.dosya_adi} (SHA-256 ${String(ia.sha256).slice(0, 12)}…)`, kml, iaId, ia.created_at, a.kml_tarih]);
+      await client.query(`INSERT INTO saha_konum_gecmis (fiziksel_id, onceki, yeni, ice_alma_id, degistiren) VALUES ($1,$2,$3,$4,$5)`,
+        [id, m ? JSON.stringify(m) : null, JSON.stringify({ lat: Number(a.lat), lng: Number(a.lng), kaynak: "KMZ", kml_kaydi: kml }), iaId, req.user.email || null]);
+      yazilan.push({ fiziksel_id: id, sinif: tek.sinif });
+    }
+    await client.query(`UPDATE saha_konum_ice_alma SET durum = $2, uygulayan = $3, uygulandi_at = NOW(),
+        uygulama = COALESCE(uygulama, '{}'::jsonb) || $4::jsonb WHERE id = $1`,
+      [iaId, yazilan.length ? "UYGULANDI" : ia.durum, req.user.email || null, JSON.stringify({ yazilan: yazilan.length, atlanan: atlanan.length, son: new Date().toISOString() })]);
+    await client.query("COMMIT");
+    res.json({ ok: true, yazilan, atlanan, not: "Yalnız konum yazıldı; PR, QC, iş yılı, taşeron ve hakediş kayıtları değişmedi." });
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); console.error("KMZ UYGULA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
+});
+
+// Önizleme raporu (Excel): özet + eşleşen / çelişen / belirsiz / geçersiz / eşleşmeyen + Teknocenter'da olup KMZ'de olmayan
+app.get("/saha-konum/kmz/:id/rapor", authMiddleware, async (req, res) => {
+  try {
+    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    await kmzTablolar();
+    const iaId = Number(req.params.id);
+    const ia = (await pool.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
+    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    const aday = (await pool.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 ORDER BY fiziksel_id`, [iaId])).rows;
+    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    const mevcut = new Map((await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [aday.map((a) => a.fiziksel_id)])).rows.map((k) => [k.fiziksel_id, k]));
+    const wb = new ExcelJS.Workbook();
+    const sayfa = (ad, kolonlar, satirlar) => {
+      const ws = wb.addWorksheet(ad, { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
+      ws.columns = kolonlar.map(([b, w]) => ({ header: b, width: w }));
+      ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      ws.getRow(1).eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } }; });
+      for (const s of satirlar) ws.addRow(s).alignment = { vertical: "top", wrapText: true };
+      if (satirlar.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: kolonlar.length } };
+      return ws;
+    };
+    const o = ia.ozet || {};
+    const SINIF_AD = { YENI: "Yeni konum adayı", UYUMLU: "Mevcut konumla uyumlu", CELISKI: "Mevcut konumla çelişiyor", BELIRSIZ: "Belirsiz (otomatik kabul edilmez)", ESLESMEYEN: "Sistemde yok" };
+    sayfa("Özet", [["Gösterge", 44], ["Değer", 18], ["Açıklama", 70]], [
+      ["Dosya", ia.dosya_adi, `SHA-256 ${ia.sha256}`], ["İçe alma (önizleme) zamanı", new Date(ia.created_at).toISOString(), ia.durum],
+      ["Dosya içi kayıt tarihi", (ia.kayit_tarihleri || []).join(", "), "Konum tarihidir; iş yılı filtresini etkilemez"],
+      ["KML dosyası", ia.kml_sayisi, ""], ["Okunan nokta (Point)", o.okunan_nokta, "doc.kml aynı noktaların açıklamasız özet kopyasını içerir"],
+      ["Benzersiz Site ID", o.benzersiz_site, ""], ["Eşleşen fiziksel saha", o.eslesen_fiziksel_saha, "Sistemdeki doğrulanmış fiziksel Site ID ile TAM eşleşme"],
+      ["Teknocenter kapsamında olan", o.teknocenter_kapsaminda, "Mevcut Teknocenter kapsam kuralı (KMZ sahipliği belirlemez)"],
+      ["Yeni konum adayı", o.yeni_konum_adayi, `Teknocenter: ${o.teknocenter_yeni ?? "—"}`], ["Mevcut konumla uyumlu (≤100 m)", o.uyumlu, ""],
+      ["Mevcut konumla çelişen (>100 m)", o.mevcut_ile_celisen, `Teknocenter: ${o.teknocenter_celisen ?? "—"} — kaynak seçimi gerekir`],
+      ["Belirsiz", o.belirsiz, "Mükerrer / plan noktası / taşınabilir saha / durum yazmıyor"],
+      ["Eşleşmeyen", o.eslesmeyen, `Sistemde olmayan Site ID ${o.eslesmeyen_site} + Site ID çıkarılamayan ${o.kodsuz}`],
+      ["Geçersiz koordinat", o.gecersiz, ""], ["Tekrarlayıcı (saha sayılmadı)", o.tekrarlayici, ""],
+      ["Teknocenter sahası, KMZ'de yok", o.teknocenter_kmz_disi, "Koordinat üretilmez"],
+    ]);
+    const KOL = [["Site ID", 11], ["Sınıf", 26], ["Neden", 48], ["Teknocenter", 11], ["İş kodları", 34], ["KMZ enlem", 12], ["KMZ boylam", 12], ["KML kaydı", 36],
+      ["Saha adı (KMZ)", 26], ["İl / ilçe", 20], ["Saha durumu", 11], ["Saha tipi", 16], ["Mevcut kaynak", 14], ["Mevcut enlem", 12], ["Mevcut boylam", 12], ["Fark (m)", 9]];
+    const satir = (a) => { const m = mevcut.get(a.fiziksel_id); const f = m && m.lat != null ? Math.round(sahaKonum.kusUcusuKm({ lat: Number(m.lat), lng: Number(m.lng) }, { lat: Number(a.lat), lng: Number(a.lng) }) * 1000) : null;
+      return [a.fiziksel_id, SINIF_AD[a.sinif] || a.sinif, a.neden || "", tekno.has(a.fiziksel_id) ? "Evet" : "", (sistem.get(a.fiziksel_id) || []).join(", "), Number(a.lat), Number(a.lng),
+        `${a.kml_dosya}#${a.placemark_id || "?"} (${a.ad})`, a.saha_adi || "", [a.il, a.ilce].filter(Boolean).join(" / "), a.saha_durum || "", a.saha_tipi || "",
+        m?.kaynak || "", m?.lat != null ? Number(m.lat) : "", m?.lng != null ? Number(m.lng) : "", f ?? ""]; };
+    sayfa("Eşleşen sahalar", KOL, aday.filter((a) => a.sinif !== "ESLESMEYEN").map(satir));
+    sayfa("Çelişen + belirsiz", KOL, aday.filter((a) => ["CELISKI", "BELIRSIZ"].includes(a.sinif)).map(satir));
+    sayfa("Geçersiz koordinat", [["Ad", 16], ["Site ID", 11], ["KML", 34], ["Placemark", 12], ["Ham", 40], ["Neden", 40]], (o.gecersiz || []).map((g) => [g.ad, g.fiziksel_id || "", g.dosya, g.placemark_id || "", g.ham, g.neden]));
+    sayfa("Teknocenter · KMZ'de yok", [["Site ID", 11], ["İş kodları", 50], ["Mevcut konum", 30]],
+      [...tekno.entries()].filter(([id]) => !aday.some((a) => a.fiziksel_id === id)).sort().map(([id, k]) => { const m = mevcut.get(id); return [id, k.join(", "), m ? `${m.kaynak} · ${m.dogruluk}` : "Konum yok"]; }));
+    sayfa("Eşleşmeyen (sistemde yok)", [["Site ID", 11], ["KML kaydı", 40], ["Saha adı (KMZ)", 28], ["İl / ilçe", 22], ["Saha durumu", 12]],
+      aday.filter((a) => a.sinif === "ESLESMEYEN").map((a) => [a.fiziksel_id, `${a.kml_dosya}#${a.placemark_id || "?"}`, a.saha_adi || "", [a.il, a.ilce].filter(Boolean).join(" / "), a.saha_durum || ""]));
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="kmz_konum_onizleme_${iaId}.xlsx"`);
+    await wb.xlsx.write(res); res.end();
+  } catch (e) { console.error("KMZ RAPOR ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 /* ═══ PLAN YAP · EKİP PLANLAMA (29.10.2026, Orhan) ══════════════════════════════════════════════════════════════════
    Mevcut İş Ata sistemine yazar (paralel atama sistemi yok): her saha işi / faaliyet bir is_atama kaydıdır; gün içi zaman
@@ -14010,16 +14268,16 @@ app.post("/rollout/harita/excel", authMiddleware, async (req, res) => {
     const b = req.body || {};
     const Kx = await rolloutKapsam(req);
     if (Kx && (!Kx.goruntule || !Kx.excel)) return res.status(403).json({ ok: false, error: "Rollout Excel yetkiniz yok" });
-    req.query = { ...req.query, firma: b.firma || "" };
-    const V = await haritaVerisi(req);
+    const V = await haritaVerisi(req, { firma: b.firma || "" });
     const ids = new Set((Array.isArray(b.fiziksel_idler) ? b.fiziksel_idler : []).map((x) => String(x).toUpperCase()));
     const FILTRE_AD = { MONTAJ_BEKLIYOR: "Malzeme OK · Montaj bekliyor", QC_OK: "Montaj tamamlanan · QC OK", QC_NOK: "Montaj eksik / kontrol bekleyen · QC NOK", CLEANUP: "Clean Up bekleyen" };
     const filtre = FILTRE_AD[b.filtre] ? b.filtre : null;
     const sahalar = V.sahalar.filter((s) => ids.has(s.fiziksel_id));
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Filtrelenen sahalar", { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
-    const KOL = [["Site ID", 12], ["İş kodu", 26], ["Bölge", 10], ["İl / ilçe", 18], ["Saha adı", 20], ["Montaj / QC durumu", 30], ["Clean Up", 11], ["Kapsam", 30], ["İş süresi (ekip-gün)", 14],
-      ["Ekip / taşeron", 22], ["Konum", 22], ["Konum notu", 34], ["Durum uyarısı", 34]];
+    const KOL = [["Site ID", 12], ["İş kodu", 26], ["Bölge", 10], ["İl / ilçe", 18], ["Saha adı", 20], ["Pin durumu (saha)", 20], ["İş durumu", 32], ["Açık issue / eksik", 36],
+      ["Montaj / QC durumu", 30], ["Clean Up", 11], ["Bant / teknoloji", 14], ["Anten revizyonu", 16], ["Anten dayanağı", 40], ["Ana paket", 40], ["İş süresi (ekip-gün)", 14],
+      ["Ekip / taşeron", 22], ["Konum", 22], ["Konum kaynağı", 40], ["Konum notu", 34], ["Durum uyarısı", 34]];
     ws.columns = KOL.map(([, w]) => ({ width: w }));
     ws.mergeCells(1, 1, 1, KOL.length);
     ws.getCell(1, 1).value = `Rollout sahaları${filtre ? ` · ${FILTRE_AD[filtre]}` : ""}${V.firma ? ` · ${V.firma.ad}` : ""} · ${new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10)}`;
@@ -14029,9 +14287,14 @@ app.post("/rollout/harita/excel", authMiddleware, async (req, res) => {
     let n = 3;
     for (const s of sahalar) for (const i of s.isler.filter((x) => !filtre || (x.filtreler || []).includes(filtre))) {
       const r = ws.getRow(n++);
-      [s.fiziksel_id, i.site_code, s.bolge, [s.il, s.ilce].filter(Boolean).join(" / "), s.saha_adi, i.montaj?.ad || "", (i.filtreler || []).includes("CLEANUP") ? "Bekliyor" : "—",
-        i.kapsam?.ad || "", i.sure?.gun ?? `— (${i.sure?.gerekce || ""})`, (i.taseronlar || []).join(", "),
-        s.konum ? `${s.konum.lat.toFixed(6)}, ${s.konum.lng.toFixed(6)}` : "Konum eksik", s.konum ? `${s.konum.kaynak} · ${s.konum.dogruluk}` : (s.konum_eksik_nedeni || ""), (i.belirsiz || []).join("; ")]
+      [s.fiziksel_id, i.site_code, s.bolge, [s.il, s.ilce].filter(Boolean).join(" / "), s.saha_adi, s.pin?.ad || "", `${i.pin?.renk_ad || ""} — ${i.pin?.ad || ""}`,
+        [...(i.pin?.detay || []), ...(i.pin?.eksik || [])].join("; "), i.montaj?.ad || "", (i.filtreler || []).includes("CLEANUP") ? "Bekliyor" : "—",
+        i.anten?.bant_metni || "Kodda yok", i.anten?.anten_ad || "", i.anten?.dayanak || "",
+        i.anten?.ana_paket ? `${i.anten.ana_paket.kod}${i.anten.ana_paket.surum ? ` (${i.anten.ana_paket.surum})` : ""} · ${i.anten.ana_paket.baslik || ""}` : "PR ana paketi yok",
+        i.sure?.gun ?? `— (${i.sure?.gerekce || ""})`, (i.taseronlar || []).join(", "),
+        s.konum ? `${s.konum.lat.toFixed(6)}, ${s.konum.lng.toFixed(6)}` : "Konum eksik",
+        s.konum ? [s.konum.kaynak_ad || s.konum.kaynak, s.konum.kml_kaydi, s.konum.kaynak_tarih ? `dosya içi tarih ${s.konum.kaynak_tarih}` : null].filter(Boolean).join(" · ") : "",
+        s.konum ? [s.konum.dogruluk, ...(s.konum.uyarilar || [])].join(" · ") : (s.konum_eksik_nedeni || ""), (i.belirsiz || []).join("; ")]
         .forEach((v, k) => { r.getCell(k + 1).value = v; });
       r.alignment = { vertical: "top", wrapText: true };
     }

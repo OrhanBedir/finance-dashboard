@@ -41,6 +41,9 @@ async function tabloHazirla(pool) {
     anahtar TEXT PRIMARY KEY, mesafe_m NUMERIC, sure_s NUMERIC, servis TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`);
   // 28.10.2026: güzergâh çizgisi (haritada yolu çizmek için; [[lng,lat],…], 5 ondalık)
   await pool.query(`ALTER TABLE saha_rota_onbellek ADD COLUMN IF NOT EXISTS geometri JSONB`);
+  // 29.10.2026: KMZ konum kaynağı izi — kaynak dosya, KML kaydı, içe alma, dosya içi kayıt tarihi (konum tarihi; iş yılı değildir)
+  await pool.query(`ALTER TABLE saha_konum ADD COLUMN IF NOT EXISTS kaynak_dosya TEXT, ADD COLUMN IF NOT EXISTS kml_kaydi TEXT,
+    ADD COLUMN IF NOT EXISTS ice_alma_id INTEGER, ADD COLUMN IF NOT EXISTS ice_alma_zamani TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS kaynak_tarih DATE`);
   _tablo = true;
 }
 
@@ -51,8 +54,20 @@ async function tssrdenKonumYaz(pool, siteCode, sonuc, belgeUrl) {
   const k = tssrKonumu(sonuc?.konum);
   if (!k) return null;
   await tabloHazirla(pool);
-  const mevcut = (await pool.query(`SELECT kaynak, lat, lng FROM saha_konum WHERE fiziksel_id = $1`, [f.fiziksel_id])).rows[0];
+  const mevcut = (await pool.query(`SELECT kaynak, lat, lng, uyarilar FROM saha_konum WHERE fiziksel_id = $1`, [f.fiziksel_id])).rows[0];
   if (mevcut && mevcut.kaynak === "MANUEL") return { atlandi: "MANUEL konum korunuyor" };
+  // 29.10.2026: onaylı KMZ konumu TSSR okumasıyla sessizce ezilmez; fark varsa uyarı olarak yazılır
+  if (mevcut && mevcut.kaynak === "KMZ") {
+    if (k.lat != null && k.dogruluk === "KESIN" && mevcut.lat != null) {
+      const fark = Math.round(kusUcusuKm({ lat: Number(mevcut.lat), lng: Number(mevcut.lng) }, k) * 1000);
+      if (fark > 100) {
+        const not = `${siteCode} TSSR koordinatı (${k.lat.toFixed(6)}, ${k.lng.toFixed(6)}) KMZ konumundan ${fark} m farklı — KMZ korunuyor, kontrol edin`;
+        const u = (Array.isArray(mevcut.uyarilar) ? mevcut.uyarilar : []).filter((x) => !String(x).startsWith(`${siteCode} TSSR koordinatı`));
+        await pool.query(`UPDATE saha_konum SET uyarilar = $2 WHERE fiziksel_id = $1`, [f.fiziksel_id, JSON.stringify([...u, not])]);
+      }
+    }
+    return { atlandi: "KMZ konumu korunuyor" };
+  }
   await pool.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, belge_url, sayfa, ham, adres, saha_adi, il, ilce, kaynak_site_code, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
       ON CONFLICT (fiziksel_id) DO UPDATE SET lat=EXCLUDED.lat, lng=EXCLUDED.lng, kaynak=EXCLUDED.kaynak, dogruluk=EXCLUDED.dogruluk, uyarilar=EXCLUDED.uyarilar,
