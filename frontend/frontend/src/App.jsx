@@ -7207,6 +7207,20 @@ function RolloutHaritaPin({ x, y, k, secili, uyari, onClick }) {
     </g>
   );
 }
+// İş durumu rozet renkleri (haritaIsDurumu ile aynı kodlar)
+const RH_DURUM_RENK = {
+  TAMAMLANDI: ["#dcfce7", "#166534"], DEVAM_EDIYOR: ["#dbeafe", "#1d4ed8"], ATANDI: ["#fef3c7", "#92400e"], KAYITLI: ["#ede9fe", "#5b21b6"],
+  DIGER_YIL: ["#f1f5f9", "#475569"], YIL_DOGRULANAMADI: ["#fee2e2", "#991b1b"],
+};
+function RhDurum({ d, ad }) {
+  const [bg, fg] = RH_DURUM_RENK[d] || ["#f1f5f9", "#475569"];
+  return <span style={{ background: bg, color: fg, borderRadius: 999, padding: "3px 10px", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" }}>{ad || d}</span>;
+}
+const rhKusUcusu = (a, b) => {
+  const R = 6371.0088, rad = (x) => (x * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
 function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const feats = Array.isArray(TR_ILLER?.features) ? TR_ILLER.features : [];
   const proj = (lng, lat) => [(lng - 25.5) * 100 * Math.cos(39 * Math.PI / 180), (42.4 - lat) * 100];
@@ -7215,53 +7229,79 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     const d = polys.map((poly) => poly.map((ring) => ring.map(([lng, lat], i) => { const [x, y] = proj(lng, lat); return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`; }).join("") + "Z").join("")).join("");
     return { ad: f.properties?.name || "", d };
   }), [feats]); // eslint-disable-line
-  const [veri, setVeri] = useState(null);
-  const [hata, setHata] = useState("");
+  // 28.10.2026 (Orhan): "Teknocenter · 2026" hızlı görünümü — firma süzgeci SUNUCUDA (?firma=TEKNO); düğme yetkiyi genişletmez
+  const [firma, setFirma] = useState(null);
+  const [veriler, setVeriler] = useState({}); // firma ("" = genel) → yanıt
+  const [hatalar, setHatalar] = useState({});
+  const [yenile, setYenile] = useState(0);
+  const anahtar = firma || "";
+  const veri = veriler[anahtar] || null;
+  const hata = hatalar[anahtar] || "";
   const [bolge, setBolge] = useState(bolgeVarsayilan || "ALL");
+  const [ekranSuz, setEkranSuz] = useState(true); // açılışta Rollout ekranının filtreleriyle kesişir; "Tümünü göster" / hızlı görünüm kaldırır
   const [yalniz2026, setYalniz2026] = useState(true);
   const [arama, setArama] = useState("");
   const [aramaAcik, setAramaAcik] = useState(false);
   const [secili, setSecili] = useState(null); // fiziksel_id
   const [tekSaha, setTekSaha] = useState(false);
-  const [rota, setRota] = useState(null);
+  const [gorunum, setGorunum] = useState("KART"); // KART | ROTA | BILGI
+  const [rota, setRota] = useState(null);          // depodan rota yanıtı
+  const [konumum, setKonumum] = useState(null);    // { durum: ISTENIYOR|OK|RED|HATA, lat, lng, mesaj }
+  const [sahaBilgi, setSahaBilgi] = useState(null); // { yukleniyor } | yanıt | { hata }
+  const [cerceveSayac, setCerceveSayac] = useState(0); // hızlı düğmeye tekrar basınca yeniden çerçevele
   const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
   const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null);
+  const [svgW, setSvgW] = useState(800);
   useEffect(() => {
+    const el = svgRef.current; if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { const r = el.getBoundingClientRect(); const olcek = Math.min(r.width / view.w, r.height / view.h); if (olcek > 0) setSvgW(view.w * olcek); });
+    ro.observe(el); return () => ro.disconnect();
+  }, [veri, view.w, view.h]);
+  useEffect(() => {
+    if (veriler[anahtar] || hatalar[anahtar]) return;
+    let iptal = false;
     (async () => {
-      try { const d = await fetchJson(`${API_BASE}/rollout/harita`, { withAuth: true }); if (!d?.ok) throw new Error(d?.error || "Harita verisi alınamadı"); setVeri(d); }
-      catch (e) { setHata(e.message || "Harita verisi alınamadı"); }
+      try {
+        const d = await fetchJson(`${API_BASE}/rollout/harita${firma ? `?firma=${encodeURIComponent(firma)}` : ""}`, { withAuth: true });
+        if (!d?.ok) throw new Error(d?.error || "Harita verisi alınamadı");
+        if (!iptal) setVeriler((v) => ({ ...v, [anahtar]: d }));
+      } catch (e) { if (!iptal) setHatalar((h) => ({ ...h, [anahtar]: e.message || "Harita verisi alınamadı" })); }
     })();
-  }, []);
+    return () => { iptal = true; };
+  }, [anahtar, yenile]); // eslint-disable-line
   useEffect(() => { const f = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
-  // Rollout ekranının filtrelenmiş iş kayıtları — haritadaki kapsam bununla kesişir (aynı bölge/firma/tip filtreleri)
   const ekranKodlari = useMemo(() => new Set((satirlar || []).map((r) => String(r.site_code || "").toUpperCase().trim())), [satirlar]);
   const bolgeler = useMemo(() => [...new Set((veri?.sahalar || []).map((s) => s.bolge).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr")), [veri]);
+  const konumVar = (s) => !!s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
+  // Kapsam: (ekran filtreleri) ∩ bölge. Yıl süzgeci ayrı: 2026 işleri (atanan · devam eden · tamamlanan)
   const kapsamdaki = useMemo(() => (veri?.sahalar || [])
-    .map((s) => ({ ...s, isler: s.isler.filter((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) }))
+    .map((s) => (ekranSuz && !firma ? { ...s, isler: s.isler.filter((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) } : s))
     .filter((s) => s.isler.length)
-    .filter((s) => bolge === "ALL" || String(s.bolge).toLocaleLowerCase("tr-TR") === String(bolge).toLocaleLowerCase("tr-TR"))
-    .filter((s) => !yalniz2026 || s.isler.some((i) => i.gerceklesen_2026)), [veri, ekranKodlari, bolge, yalniz2026]);
-  const tarihEksik = useMemo(() => (veri?.sahalar || []).filter((s) => s.isler.some((i) => ekranKodlari.has(String(i.site_code).toUpperCase().trim())) && s.tarih_eksik), [veri, ekranKodlari]);
-  const gorunen = tekSaha && secili ? kapsamdaki.filter((s) => s.fiziksel_id === secili) : kapsamdaki;
-  const pinli = gorunen.filter((s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk));
-  const konumsuz = gorunen.filter((s) => !(s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk)));
-  // Yakınlaştırma sınırı (28.10.2026): fare tekerleğiyle harita kaybolacak kadar uzaklaşmasın / pikselleşecek kadar yaklaşmasın
-  const sinirliOran = (w, k) => Math.min(Math.max(w * k, 12), 2400) / w;
-  const noktalaraSigdir = (pts) => {
+    .filter((s) => bolge === "ALL" || String(s.bolge).toLocaleLowerCase("tr-TR") === String(bolge).toLocaleLowerCase("tr-TR")), [veri, ekranSuz, firma, ekranKodlari, bolge]);
+  const yilaGore = useMemo(() => kapsamdaki.filter((s) => !yalniz2026 || s.is_2026), [kapsamdaki, yalniz2026]);
+  const yilsiz = useMemo(() => kapsamdaki.filter((s) => s.yil_dogrulanamadi), [kapsamdaki]);
+  const gorunen = tekSaha && secili ? yilaGore.filter((s) => s.fiziksel_id === secili) : yilaGore;
+  const pinli = gorunen.filter(konumVar);
+  const konumsuz = yilaGore.filter((s) => !konumVar(s));
+  const sinirliOran = (w, k) => Math.min(Math.max(w * k, 3), 2400) / w;
+  // Noktaları ortalayarak sığdır (enKucuk: tek nokta / sıkışık kümede en yakın görünüm genişliği)
+  const noktalaraSigdir = (pts, enKucuk = 60) => {
     if (!pts.length) { setView({ x: 0, y: 0, w: 1800, h: 900 }); return; }
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-    const w = Math.max(maxX - minX, 60), h = Math.max(maxY - minY, 40), pad = Math.max(w, h) * 0.25;
-    setView({ x: minX - pad, y: minY - pad, w: w + 2 * pad, h: h + 2 * pad });
+    const w = Math.max(maxX - minX, enKucuk), h = Math.max(maxY - minY, enKucuk * 0.66), pad = Math.max(w, h) * 0.2;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, W = w + 2 * pad, H = h + 2 * pad;
+    setView({ x: cx - W / 2, y: cy - H / 2, w: W, h: H });
   };
-  const kutuyaSigdir = (liste) => {
+  const kutuyaSigdir = (liste, enKucuk = 60) => {
     const pts = liste.map((s) => proj(s.konum.lng, s.konum.lat));
     if (veri?.depo?.dogrulandi && !liste.length) pts.push(proj(veri.depo.lng, veri.depo.lat));
-    noktalaraSigdir(pts);
+    noktalaraSigdir(pts, enKucuk);
   };
-  useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, secili]); // eslint-disable-line
-  // 28.10.2026 (Orhan): seçili sahanın Bursa deposundan karayolu güzergâhı — gelince harita depo + yol + sahaya sığdırılır
-  const rotaCizgi = secili && rota?.ok !== false && rota?.karayolu?.durum === "OK" && Array.isArray(rota.karayolu.cizgi) && rota.karayolu.cizgi.length > 1 ? rota.karayolu.cizgi : null;
+  // Seçim haritayı yeniden çerçevelemez (pin ile kart aynı kaydı gösterir); arama ile tek saha seçilince o sahaya yaklaşılır
+  useEffect(() => { if (veri) kutuyaSigdir(pinli); }, [veri, bolge, yalniz2026, tekSaha, ekranSuz, cerceveSayac]); // eslint-disable-line
+  // Depodan güzergâh (yalnız kullanıcı "Kayıtlı Bursa deposundan"ı seçince istenir) — gelince harita depo + yol + sahaya sığar
+  const rotaCizgi = secili && gorunum === "ROTA" && rota?.ok !== false && rota?.karayolu?.durum === "OK" && Array.isArray(rota.karayolu.cizgi) && rota.karayolu.cizgi.length > 1 ? rota.karayolu.cizgi : null;
   const rotaYolu = useMemo(() => rotaCizgi ? rotaCizgi.map(([lng, lat], i) => { const [x, y] = proj(lng, lat); return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`; }).join("") : "", [rotaCizgi]); // eslint-disable-line
   useEffect(() => { if (rotaCizgi) noktalaraSigdir(rotaCizgi.map(([lng, lat]) => proj(lng, lat))); }, [rotaCizgi]); // eslint-disable-line
   useEffect(() => {
@@ -7280,67 +7320,138 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     const r = svgRef.current.getBoundingClientRect();
     setView({ x: d.v.x - (cx - d.cx) / r.width * d.v.w, y: d.v.y - (cy - d.cy) / r.height * d.v.h, w: d.v.w, h: d.v.h });
   };
-  // Kümelendirme: ekran ızgarası (görünüm genişliğinin 1/14'ü); yakınlaşınca kümeler açılır
+  // Kümelendirme: ekran ızgarası (görünüm genişliğinin 1/14'ü); kümeye tıklayınca yakınlaşır
   const hucre = view.w / 14;
   const kumeler = useMemo(() => {
     const m = {};
-    for (const s of pinli) { const [x, y] = proj(s.konum.lng, s.konum.lat); const key = `${Math.floor(x / hucre)}|${Math.floor(y / hucre)}`; (m[key] = m[key] || []).push({ s, x, y }); }
+    const kumele = view.w > 40; // çok yakın görünümde her saha ayrı pin
+    pinli.forEach((s, n) => { const [x, y] = proj(s.konum.lng, s.konum.lat); const key = kumele && s.fiziksel_id !== secili ? `${Math.floor(x / hucre)}|${Math.floor(y / hucre)}` : `t${n}`; (m[key] = m[key] || []).push({ s, x, y }); });
     return Object.values(m);
-  }, [pinli, hucre]); // eslint-disable-line
-  const sec = async (id) => {
-    setSecili(id); setRota(null); setAramaAcik(false);
-    try { const d = await fetchJson(`${API_BASE}/rollout/harita/rota?fiziksel_id=${encodeURIComponent(id)}`, { withAuth: true }); setRota(d); } catch (e) { setRota({ ok: false, hata: e.message }); }
-  };
+  }, [pinli, hucre, secili]); // eslint-disable-line
+  // Pin / etiket ekranda sabit boyutta (≈30 px pin, 13 px etiket): görünüm genişliği ÷ çizim alanının piksel genişliği
+  const pinK = view.w / Math.max(svgW, 200), etiketGoster = view.w < 260;
+  // Etiket çakışma önleme: seçili saha önce, sonra soldan sağa; kutusu öncekilerle çakışan etiket çizilmez
+  const etiketler = useMemo(() => {
+    const tek = kumeler.filter((g) => g.length === 1 || tekSaha).flat();
+    const fs = 13 * pinK, kutular = [], out = [];
+    const sirali = [...tek].sort((a, b) => (b.s.fiziksel_id === secili) - (a.s.fiziksel_id === secili) || a.x - b.x);
+    for (const p of sirali) {
+      if (!etiketGoster && p.s.fiziksel_id !== secili) continue;
+      const w = p.s.fiziksel_id.length * fs * 0.66 + 4 * pinK, h = fs * 1.25;
+      const k = { x: p.x + 9 * pinK, y: p.y - 16 * pinK - fs, w, h };
+      if (p.s.fiziksel_id !== secili && kutular.some((b) => k.x < b.x + b.w && b.x < k.x + k.w && k.y < b.y + b.h && b.y < k.y + k.h)) continue;
+      kutular.push(k); out.push({ ...p, fs });
+    }
+    return out;
+  }, [kumeler, pinK, etiketGoster, secili, tekSaha]);
+  const sec = (id) => { setSecili(id); setGorunum("KART"); setRota(null); setKonumum(null); setSahaBilgi(null); setAramaAcik(false); };
   const aramaSonuclari = useMemo(() => {
     const q = arama.trim().toLocaleUpperCase("tr-TR"); if (!q) return [];
     return kapsamdaki.filter((s) => s.fiziksel_id.includes(q) || s.isler.some((i) => String(i.site_code).toUpperCase().includes(q)) || String(s.saha_adi || "").toLocaleUpperCase("tr-TR").includes(q)).slice(0, 12);
   }, [arama, kapsamdaki]);
-  const temizle = () => { setArama(""); setSecili(null); setTekSaha(false); setBolge("ALL"); setRota(null); };
+  const seciminiTemizle = () => { setArama(""); setAramaAcik(false); setSecili(null); setTekSaha(false); setGorunum("KART"); setRota(null); setKonumum(null); setSahaBilgi(null); };
+  // "Tümünü göster": hızlı firma görünümü + tek saha seçimi + ekran filtreleri kalkar → yetki kapsamındaki genel görünüm
+  const tumunuGoster = () => { seciminiTemizle(); setFirma(null); setEkranSuz(false); setBolge("ALL"); setCerceveSayac((n) => n + 1); };
+  // "Teknocenter · 2026": önceki arama / seçim temizlenir, 2026 açılır, tüm bölgeler; tekrar basınca bütün pinler yeniden çerçevelenir
+  const hizliFirma = (kod) => { seciminiTemizle(); setFirma(kod); setEkranSuz(false); setBolge("ALL"); setYalniz2026(true); setCerceveSayac((n) => n + 1); };
+  const hizliIzinli = (veri?.hizli_firmalar || veriler[""]?.hizli_firmalar || []).includes("TEKNO");
   const seciliSaha = (veri?.sahalar || []).find((s) => s.fiziksel_id === secili) || null;
-  const pinK = Math.max(0.35, view.w / 1400), etiketGoster = view.w < 260;
   const depo = veri?.depo;
+  const rotaDepodan = async () => {
+    setGorunum("ROTA"); setKonumum(null); setRota({ yukleniyor: true });
+    try { const d = await fetchJson(`${API_BASE}/rollout/harita/rota?fiziksel_id=${encodeURIComponent(secili)}${firma ? `&firma=${firma}` : ""}`, { withAuth: true }); setRota(d); }
+    catch (e) { setRota({ ok: false, hata: e.message }); }
+  };
+  const rotaKonumumdan = () => {
+    setGorunum("ROTA"); setRota(null);
+    if (!navigator.geolocation) { setKonumum({ durum: "HATA", mesaj: "Bu tarayıcı konum bilgisini desteklemiyor." }); return; }
+    setKonumum({ durum: "ISTENIYOR" });
+    navigator.geolocation.getCurrentPosition(
+      (p) => setKonumum({ durum: "OK", lat: p.coords.latitude, lng: p.coords.longitude, dogruluk: p.coords.accuracy }),
+      (e) => setKonumum({ durum: e.code === 1 ? "RED" : "HATA", mesaj: e.code === 1 ? "Konum izni verilmedi." : e.code === 3 ? "Konum zamanında alınamadı." : "Konum alınamadı." }),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  };
+  const sahaBilgileriAc = async () => {
+    setGorunum("BILGI"); setSahaBilgi({ yukleniyor: true });
+    try { const d = await fetchJson(`${API_BASE}/rollout/harita/saha?fiziksel_id=${encodeURIComponent(secili)}${firma ? `&firma=${firma}` : ""}`, { withAuth: true });
+      setSahaBilgi(d?.ok ? d : { hata: d?.error || "Saha bilgileri alınamadı" }); }
+    catch (e) { setSahaBilgi({ hata: e.message || "Saha bilgileri alınamadı" }); }
+  };
+  const dis = (o, h) => ({ google: `https://www.google.com/maps/dir/?api=1${o ? `&origin=${o}` : ""}&destination=${h}&travelmode=driving`,
+    yandex: `https://yandex.com.tr/harita/?rtext=${o || ""}~${h}&rtt=auto` });
+  const DisBaglantilar = ({ o }) => {
+    if (!seciliSaha?.konum) return null;
+    const u = dis(o, `${seciliSaha.konum.lat},${seciliSaha.konum.lng}`);
+    return <div className="rhmap-dugmeler2">
+      <a className="rhmap-btn rhmap-btn-l" target="_blank" rel="noreferrer" href={u.google}>Google Haritalar'da aç ↗</a>
+      <a className="rhmap-btn rhmap-btn-l" target="_blank" rel="noreferrer" href={u.yandex}>Yandex'te aç ↗</a>
+    </div>;
+  };
+  const durumYukleniyor = !veri && !hata;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
       <style>{`
-        .rhmap { background:#fff; border-radius:14px; width:min(1280px, 100%); height:min(860px, 100%); display:flex; flex-direction:column; overflow:hidden; }
+        .rhmap { background:#fff; border-radius:14px; width:min(1400px, 100%); height:min(900px, 100%); display:flex; flex-direction:column; overflow:hidden; text-align:left; }
         .rhmap-ust { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid #e2e8f0; }
         .rhmap-govde { flex:1; display:flex; min-height:0; }
         .rhmap-harita { flex:1; position:relative; background:#f8fafc; min-width:0; }
-        .rhmap-panel { width:340px; border-left:1px solid #e2e8f0; overflow-y:auto; padding:12px 14px; font-size:12.5px; }
-        @media (max-width: 820px) { .rhmap-govde { flex-direction:column; } .rhmap-panel { width:auto; max-height:42%; border-left:none; border-top:1px solid #e2e8f0; } }
-        .rhmap-btn { border:1.5px solid #cbd5e1; background:#fff; color:#1e293b; border-radius:8px; padding:6px 11px; font-size:12.5px; font-weight:700; cursor:pointer; }
+        .rhmap-panel { width:440px; border-left:1px solid #e2e8f0; overflow-y:auto; padding:14px 16px; font-size:15px; color:#0f172a; }
+        @media (max-width: 820px) { .rhmap-govde { flex-direction:column; } .rhmap-panel { width:auto; max-height:45%; border-left:none; border-top:1px solid #e2e8f0; }
+          .rhmap-panel.secili { max-height:72%; } .rhmap { height:100%; border-radius:0; } }
+        .rhmap-btn { border:1.5px solid #cbd5e1; background:#fff; color:#1e293b; border-radius:8px; padding:6px 11px; font-size:13px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+        .rhmap-btn-l { padding:10px 14px; font-size:15px; }
+        .rhmap-hizli { border:2px solid #0f766e; color:#0f766e; background:#f0fdfa; font-size:14px; padding:7px 14px; }
+        .rhmap-hizli[aria-pressed="true"] { background:#0f766e; color:#fff; box-shadow:0 0 0 3px #99f6e4; }
+        .rhmap-buyuk { flex:1; min-height:56px; border-radius:12px; font-size:17px; font-weight:800; cursor:pointer; border:2px solid #1e3a5f; }
+        .rhmap-dugmeler { display:flex; gap:10px; margin-top:16px; }
+        .rhmap-dugmeler2 { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
         .rhmap-zoom { position:absolute; right:12px; top:12px; display:flex; flex-direction:column; gap:4px; }
-        .rhmap-zoom button { width:34px; height:34px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:18px; font-weight:800; cursor:pointer; }
+        .rhmap-zoom button { width:38px; height:38px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:20px; font-weight:800; cursor:pointer; }
         .rhmap-sonuc { position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; box-shadow:0 8px 20px rgba(15,23,42,.15); z-index:5; max-height:260px; overflow-y:auto; }
-        .rhmap-sonuc button { display:block; width:100%; text-align:left; border:none; background:none; padding:7px 10px; font-size:12.5px; cursor:pointer; }
+        .rhmap-sonuc button { display:block; width:100%; text-align:left; border:none; background:none; padding:8px 10px; font-size:14px; cursor:pointer; }
         .rhmap-sonuc button:hover, .rhmap-sonuc button:focus { background:#eff6ff; }
-        .rhmap-k { color:#64748b; font-size:11px; }
+        .rhmap-k { color:#64748b; font-size:13px; }
+        .rhmap-sayac { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; margin-bottom:10px; }
+        .rhmap-sayac div { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:7px 10px; }
+        .rhmap-sayac b { display:block; font-size:20px; }
+        .rhmap-siteid { font-size:30px; font-weight:900; letter-spacing:.01em; color:#0b1220; line-height:1.15; word-break:break-all; }
+        .rhmap-is { padding:8px 0; border-top:1px solid #f1f5f9; }
+        .rhmap-is code { font-size:15px; font-weight:800; color:#0f172a; word-break:break-all; }
+        .rhmap-kutu { margin-top:12px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; }
+        .rhmap-geri { background:none; border:none; color:#1d4ed8; font-weight:700; font-size:15px; cursor:pointer; padding:0; margin-bottom:8px; }
+        .rhmap-liste summary { cursor:pointer; font-weight:800; padding:6px 0; }
+        .rhmap-liste .sat { padding:6px 0; border-top:1px solid #f1f5f9; font-size:14px; }
       `}</style>
       <div className="rhmap" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Rollout saha haritası">
         <div className="rhmap-ust">
-          <b style={{ fontSize: 15 }}>🗺 Rollout Saha Haritası</b>
+          <b style={{ fontSize: 16 }}>🗺 Rollout Saha Haritası</b>
           {veri?.kapsam && <span className="rhmap-k">🏢 {veri.kapsam} kapsamı</span>}
           <select className="rhmap-btn" value={bolge} onChange={(e) => { setBolge(e.target.value); setTekSaha(false); }} aria-label="Bölge filtresi">
             <option value="ALL">Tüm bölgeler</option>
             {bolgeler.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5 }}><input type="checkbox" checked={yalniz2026} onChange={(e) => setYalniz2026(e.target.checked)} /> Yalnız 2026'da iş gerçekleşenler</label>
-          <div style={{ position: "relative", minWidth: 240 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13.5 }} title="Atanan, devam eden ve tamamlanan 2026 işleri">
+            <input type="checkbox" checked={yalniz2026} onChange={(e) => setYalniz2026(e.target.checked)} /> Yalnız 2026 işleri (atanan · devam eden · tamamlanan)</label>
+          <div style={{ position: "relative", minWidth: 230 }}>
             <input ref={aramaRef} value={arama} onChange={(e) => { setArama(e.target.value); setAramaAcik(true); }} onFocus={() => setAramaAcik(true)} placeholder="Site ID / iş kodu ara (ör. KA3737)" aria-label="Site ID ya da iş kodu ara"
-              style={{ width: "100%", padding: "7px 10px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 12.5, boxSizing: "border-box" }} />
+              style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
             {aramaAcik && aramaSonuclari.length > 0 && (
               <div className="rhmap-sonuc" role="listbox">
                 {aramaSonuclari.map((s) => <button key={s.fiziksel_id} type="button" role="option" onClick={() => { setArama(s.fiziksel_id); setTekSaha(true); sec(s.fiziksel_id); }}>
-                  <b>{s.fiziksel_id}</b> <span className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}{s.konum ? "" : " · konum yok"}</span></button>)}
+                  <b>{s.fiziksel_id}</b> <span className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}{konumVar(s) ? "" : " · konum yok"}</span></button>)}
               </div>
             )}
           </div>
-          <button type="button" className="rhmap-btn" onClick={temizle}>Tümünü göster</button>
+          <button type="button" className="rhmap-btn" onClick={tumunuGoster}>Tümünü göster</button>
+          {hizliIzinli && <button type="button" className="rhmap-btn rhmap-hizli" aria-pressed={firma === "TEKNO"} onClick={() => hizliFirma("TEKNO")}
+            title="Teknocenter'a atanmış ya da Teknocenter kalemi bulunan 2026 işleri (tüm bölgeler)">{firma === "TEKNO" ? "✓ " : ""}Teknocenter · 2026</button>}
           <button type="button" className="rhmap-btn" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="Haritayı kapat (Esc)">✕</button>
         </div>
         <div className="rhmap-govde">
           <div className="rhmap-harita">
-            {hata ? <div style={{ padding: 24, color: "#b91c1c", fontWeight: 700 }}>Harita verisi alınamadı: {hata}</div> : !veri ? <div style={{ padding: 24, color: "#64748b" }}>Harita yükleniyor…</div> : (
+            {hata ? <div style={{ padding: 24, color: "#b91c1c", fontWeight: 700, fontSize: 15 }}>Servis hatası — harita verisi alınamadı: {hata}
+              <div><button type="button" className="rhmap-btn" style={{ marginTop: 10 }} onClick={() => { setHatalar((h) => { const c = { ...h }; delete c[anahtar]; return c; }); setYenile((n) => n + 1); }}>Yeniden dene</button></div></div>
+              : durumYukleniyor ? <div style={{ padding: 24, color: "#64748b", fontSize: 15 }}>Harita yükleniyor…</div> : (
               <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} style={{ width: "100%", height: "100%", display: "block", cursor: drag.current ? "grabbing" : "grab" }}
                 onMouseDown={(e) => { drag.current = { cx: e.clientX, cy: e.clientY, v: view }; }} onMouseMove={(e) => surukle(e.clientX, e.clientY)} onMouseUp={() => { drag.current = null; }} onMouseLeave={() => { drag.current = null; }}>
                 {iller.map((il) => <path key={il.ad} d={il.d} fill="#eef2f7" stroke="#b8c4d4" strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
@@ -7356,69 +7467,136 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                     const cx = grup.reduce((a, b) => a + b.x, 0) / grup.length, cy = grup.reduce((a, b) => a + b.y, 0) / grup.length;
                     return (
                       <g key={grup[0].s.fiziksel_id} transform={`translate(${cx},${cy}) scale(${pinK})`} style={{ cursor: "pointer" }}
-                        onClick={(e) => { e.stopPropagation(); kutuyaSigdir(grup.map((g) => g.s)); }} role="button" aria-label={`${grup.length} sahalık küme — yakınlaştır`}>
-                        <circle r="15" fill="#1e3a5f" stroke="#fff" strokeWidth="2.5" opacity=".92" /><text y="5" textAnchor="middle" fontSize="13" fill="#fff" fontWeight="800">{grup.length}</text>
+                        onClick={(e) => { e.stopPropagation(); kutuyaSigdir(grup.map((g) => g.s), 3); }} role="button" aria-label={`${grup.length} sahalık küme — yakınlaştır`}>
+                        <circle r="16" fill="#1e3a5f" stroke="#fff" strokeWidth="2.5" opacity=".92" /><text y="5" textAnchor="middle" fontSize="14" fill="#fff" fontWeight="800">{grup.length}</text>
                       </g>);
                   }
-                  return grup.map(({ s, x, y }) => (
-                    <g key={s.fiziksel_id}>
-                      <RolloutHaritaPin x={x} y={y} k={pinK} secili={s.fiziksel_id === secili} uyari={s.konum.dogruluk !== "KESIN"} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }} />
-                      {(etiketGoster || s.fiziksel_id === secili) && <text x={x + 9 * pinK} y={y - 16 * pinK} fontSize={11 * pinK} fontWeight="800" fill="#0f172a" stroke="#fff" strokeWidth={3 * pinK} paintOrder="stroke">{s.fiziksel_id}</text>}
-                    </g>));
+                  return grup.map(({ s, x, y }) => <RolloutHaritaPin key={s.fiziksel_id} x={x} y={y} k={pinK} secili={s.fiziksel_id === secili} uyari={s.konum.dogruluk !== "KESIN"} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }} />);
                 })}
+                {etiketler.map(({ s, x, y }) => (
+                  <g key={`e-${s.fiziksel_id}`} transform={`translate(${x},${y}) scale(${pinK})`} style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); sec(s.fiziksel_id); }}>
+                    <text x={9} y={-16} fontSize={s.fiziksel_id === secili ? 16 : 13} fontWeight="800" fill={s.fiziksel_id === secili ? "#b91c1c" : "#0f172a"} stroke="#fff" strokeWidth={3.5} paintOrder="stroke">{s.fiziksel_id}</text>
+                  </g>))}
               </svg>
             )}
             {veri && <div className="rhmap-zoom"><button type="button" onClick={() => zoom(1 / 1.4)} aria-label="Yakınlaştır">+</button><button type="button" onClick={() => zoom(1.4)} aria-label="Uzaklaştır">−</button></div>}
+            {veri && !pinli.length && <div style={{ position: "absolute", left: 16, top: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 12px", fontSize: 14, color: "#475569" }}>
+              {!kapsamdaki.length ? "Bu görünümde saha yok." : !yilaGore.length ? "Bu görünümde 2026 işi olan saha yok." : "Bu görünümdeki sahaların konumu eksik — sağdaki listeye bakın."}</div>}
             <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0){rotaYolu ? <> · Güzergâh: OSRM, harita verisi © OpenStreetMap katkıcıları (ODbL)</> : null}</div>
           </div>
-          <div className="rhmap-panel">
-            {veri && <div style={{ marginBottom: 10 }}>
-              <b>{pinli.length}</b> saha haritada · <b>{konumsuz.length}</b> sahanın konumu yok{tarihEksik.length ? <> · <b>{tarihEksik.length}</b> sahada gerçekleşen iş tarihi eksik (2026 sayılmadı)</> : null}
-              <div className="rhmap-k">Konum kaynağı TSSR koordinatıdır; adresten konum üretme (coğrafi kodlama) kapalı.</div>
+          <div className={`rhmap-panel${seciliSaha ? " secili" : ""}`}>
+            {veri && !seciliSaha && <>
+              {firma === "TEKNO" && <div style={{ fontWeight: 800, color: "#0f766e", marginBottom: 6 }}>Teknocenter · 2026 görünümü</div>}
+              <div className="rhmap-sayac">
+                <div><b>{kapsamdaki.length}</b><span className="rhmap-k">Toplam kapsamda</span></div>
+                <div><b>{pinli.length}</b><span className="rhmap-k">Haritada gösterilen</span></div>
+                <div><b>{konumsuz.length}</b><span className="rhmap-k">Konumu eksik</span></div>
+                <div><b>{yilsiz.length}</b><span className="rhmap-k">İş yılı doğrulanamayan</span></div>
+              </div>
+              {yalniz2026 && kapsamdaki.length - yilaGore.length - yilsiz.length > 0 && <div className="rhmap-k">{kapsamdaki.length - yilaGore.length - yilsiz.length} saha yalnız 2026 dışı tarihli (gösterilmiyor).</div>}
+              {ekranSuz && !firma && <div className="rhmap-k" style={{ marginTop: 4 }}>Rollout ekranındaki filtreler uygulanıyor. "Tümünü göster" ile kaldırın.</div>}
+              <div className="rhmap-k" style={{ margin: "6px 0 10px" }}>Konum kaynağı kayıtlı / TSSR koordinatıdır; adresten konum üretme kapalı. Bir pine ya da Site ID'ye tıklayın.</div>
+              <details className="rhmap-liste" open={konumsuz.length > 0 && konumsuz.length <= 30}>
+                <summary>Konumu eksik sahalar ({konumsuz.length})</summary>
+                {konumsuz.slice(0, 300).map((s) => <div key={s.fiziksel_id} className="sat">
+                  <button type="button" onClick={() => sec(s.fiziksel_id)} style={{ background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", padding: 0, fontWeight: 800, fontSize: 15 }}>{s.fiziksel_id}</button>
+                  <div className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}</div>
+                  <div style={{ color: "#b45309", fontSize: 13.5 }}>{s.konum_eksik_nedeni || "Konum yok"}</div></div>)}
+              </details>
+              <details className="rhmap-liste">
+                <summary>İş yılı doğrulanamadı ({yilsiz.length})</summary>
+                <div className="rhmap-k">Atama, başlama, bitiş tarihi ya da BoQ 2026 kalemi olmayan kayıtlar. Oluşturma / yükleme tarihinden yıl tahmin edilmez.</div>
+                {yilsiz.slice(0, 300).map((s) => <div key={s.fiziksel_id} className="sat">
+                  <button type="button" onClick={() => sec(s.fiziksel_id)} style={{ background: "none", border: "none", color: "#1d4ed8", cursor: "pointer", padding: 0, fontWeight: 800, fontSize: 15 }}>{s.fiziksel_id}</button>
+                  <div className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}{konumVar(s) ? "" : " · konum yok"}</div></div>)}
+              </details>
+            </>}
+            {seciliSaha && gorunum === "KART" && <div>
+              <div className="rhmap-siteid">{seciliSaha.fiziksel_id}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{seciliSaha.saha_adi || "Saha adı kayıtlı değil"}</div>
+              <div style={{ fontSize: 15, color: "#475569" }}>{[seciliSaha.il, seciliSaha.ilce].filter(Boolean).join(" / ") || "İl / ilçe kayıtlı değil"}{seciliSaha.bolge ? ` · ${seciliSaha.bolge} bölgesi` : ""}</div>
+              {seciliSaha.taseronlar?.length > 0 && <div style={{ marginTop: 8, fontSize: 15 }}><span className="rhmap-k">{firma === "TEKNO" ? "Teknocenter ekip / taşeron: " : "Ekip / taşeron: "}</span><b>{seciliSaha.taseronlar.join(", ")}</b></div>}
+              <div style={{ marginTop: 10 }}>
+                {seciliSaha.isler.map((i) => <div key={i.site_code} className="rhmap-is">
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><code>{i.site_code}</code><RhDurum d={i.durum} ad={i.durum_ad} /></div>
+                  <div className="rhmap-k" style={{ fontSize: 14 }}>{i.dayanak ? `${i.dayanak.kaynak}${i.dayanak.tarih ? ` · ${i.dayanak.tarih}` : ""}` : "Tarih / atama kaydı yok"}{i.kaynak === "GUNLUK" ? " · yalnız Günlük İş Girişi kaydı" : ""}</div>
+                </div>)}
+              </div>
+              {!konumVar(seciliSaha) && <div style={{ marginTop: 8, color: "#b45309", fontSize: 14.5 }}>⚠ {seciliSaha.konum_eksik_nedeni || "Konum yok"} — yol tarifi için doğrulanmış koordinat gerekir.</div>}
+              <div className="rhmap-dugmeler">
+                <button type="button" className="rhmap-buyuk" style={{ background: "#1e3a5f", color: "#fff" }} onClick={() => setGorunum("ROTA")} disabled={!konumVar(seciliSaha)}
+                  title={konumVar(seciliSaha) ? "" : "Sahanın doğrulanmış koordinatı yok"}>🧭 Yol Tarifi</button>
+                <button type="button" className="rhmap-buyuk" style={{ background: "#fff", color: "#1e3a5f" }} onClick={sahaBilgileriAc}>📋 Saha Bilgileri</button>
+              </div>
+              <button type="button" className="rhmap-btn" style={{ marginTop: 14 }} onClick={seciminiTemizle}>Seçimi kaldır</button>
             </div>}
-            {seciliSaha ? (
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>{seciliSaha.fiziksel_id}</div>
-                <div>{seciliSaha.saha_adi || "Saha adı yok"}</div>
-                <div className="rhmap-k">{[seciliSaha.bolge, seciliSaha.il, seciliSaha.ilce].filter(Boolean).join(" · ")}</div>
-                {seciliSaha.adres && <div style={{ marginTop: 4 }}>{seciliSaha.adres}</div>}
-                <div style={{ marginTop: 8, fontWeight: 700 }}>İş kayıtları</div>
-                {seciliSaha.isler.map((i) => <div key={i.site_code} style={{ padding: "4px 0", borderTop: "1px solid #f1f5f9" }}>
-                  <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{i.site_code}</span> <span className="rhmap-k">{i.site_type}{i.rf_subcon ? ` · ${i.rf_subcon}` : ""}</span>
-                  <div className="rhmap-k">{i.tarih_yok ? "Gerçekleşen iş tarihi yok" : `Son gerçekleşen: ${i.son_gerceklesen}${i.gerceklesen_2026 ? " (2026)" : ""}`}</div></div>)}
-                <div style={{ marginTop: 8, fontWeight: 700 }}>Konum</div>
-                {seciliSaha.konum ? <div>
-                  {seciliSaha.konum.lat.toFixed(6)}, {seciliSaha.konum.lng.toFixed(6)}
-                  <div className="rhmap-k">Kaynak: {seciliSaha.konum.kaynak === "TSSR_KOORDINAT" ? "TSSR'da yazan koordinat" : seciliSaha.konum.kaynak} · doğruluk: {seciliSaha.konum.dogruluk}{seciliSaha.konum.belge_url ? <> · <a href={`${seciliSaha.konum.belge_url}${seciliSaha.konum.sayfa ? `#page=${seciliSaha.konum.sayfa}` : ""}`} target="_blank" rel="noreferrer">belge s. {seciliSaha.konum.sayfa || "?"}</a></> : null}</div>
-                  {(seciliSaha.konum.uyarilar || []).map((u, i) => <div key={i} style={{ color: "#b45309" }}>⚠ {u}</div>)}
-                </div> : <div className="rhmap-k">{seciliSaha.konum_durumu === "YALNIZ_ADRES" ? "Yalnız adres var; koordinat yok (coğrafi kodlama kapalı)." : "Konum yok — sahanın TSSR'ı okunmamış ya da koordinat yazmıyor."}</div>}
-                <div style={{ marginTop: 10, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10 }}>
-                  <div style={{ fontWeight: 700 }}>Bursa deposuna uzaklık</div>
-                  {!depo?.dogrulandi ? <div style={{ color: "#b45309" }}>{depo?.mesaj || "Depo konumu doğrulanamadı."}</div> : <>
-                    <div className="rhmap-k">{depo.ad} — {depo.adres}</div>
-                    <div>Kuş uçuşu: <b>{rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km ?? "—"}{(rota?.kus_ucusu_km ?? seciliSaha.kus_ucusu_km) != null ? " km" : ""}</b></div>
-                    <div>Karayolu: {!rota ? "hesaplanıyor…" : rota.karayolu?.durum === "OK" ? <b>{rota.karayolu.km.toFixed(1)} km · ~{Math.round(rota.karayolu.dakika)} dk</b> : <span className="rhmap-k">{rota.karayolu?.mesaj || rota.hata || "hesaplanmadı"}</span>}</div>
-                    {rotaYolu && <div className="rhmap-k"><span style={{ display: "inline-block", width: 18, height: 4, background: "#2563eb", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />Haritadaki mavi çizgi: depodan sahaya karayolu güzergâhı</div>}
-                    {seciliSaha.konum && ["KESIN", "CELISKILI"].includes(seciliSaha.konum.dogruluk) && (() => {
-                      // Yol tarifi dış haritada: yalnız kullanıcı tıklarsa açılır (depo → saha koordinatı Google / Yandex'e gider)
-                      const o = `${depo.lat},${depo.lng}`, h = `${seciliSaha.konum.lat},${seciliSaha.konum.lng}`;
-                      return <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-                        <a className="rhmap-btn" style={{ textDecoration: "none" }} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${h}&travelmode=driving`}>Google Haritalar'da yol tarifi ↗</a>
-                        <a className="rhmap-btn" style={{ textDecoration: "none" }} target="_blank" rel="noreferrer" href={`https://yandex.com.tr/harita/?rtext=${o}~${h}&rtt=auto`}>Yandex'te yol tarifi ↗</a>
-                      </div>;
-                    })()}
-                  </>}
+            {seciliSaha && gorunum === "ROTA" && <div>
+              <button type="button" className="rhmap-geri" onClick={() => { setGorunum("KART"); setRota(null); setKonumum(null); }}>← Saha kartı</button>
+              <div className="rhmap-siteid" style={{ fontSize: 26 }}>{seciliSaha.fiziksel_id}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, marginTop: 10 }}>Nereden başlayalım?</div>
+              <div className="rhmap-dugmeler">
+                <button type="button" className="rhmap-buyuk" style={{ background: konumum ? "#1e3a5f" : "#fff", color: konumum ? "#fff" : "#1e3a5f" }} onClick={rotaKonumumdan}>📍 Konumumdan</button>
+                <button type="button" className="rhmap-buyuk" style={{ background: rota ? "#1e3a5f" : "#fff", color: rota ? "#fff" : "#1e3a5f", opacity: depo?.dogrulandi ? 1 : 0.5 }}
+                  disabled={!depo?.dogrulandi} onClick={rotaDepodan} title={depo?.dogrulandi ? "" : (depo?.mesaj || "Depo konumu doğrulanmadı")}>🏭 Bursa deposundan</button>
+              </div>
+              {!depo?.dogrulandi && <div style={{ color: "#b45309", fontSize: 14, marginTop: 6 }}>Bursa deposu: {depo?.mesaj || "konum doğrulanmadı"} (depo konumu tahmin edilmez)</div>}
+              {konumum && <div className="rhmap-kutu">
+                {konumum.durum === "ISTENIYOR" && <div>Tarayıcıdan konum izni isteniyor…</div>}
+                {(konumum.durum === "RED" || konumum.durum === "HATA") && <div>
+                  <div style={{ color: "#b91c1c", fontWeight: 700 }}>{konumum.mesaj}</div>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>Seçenekler: tarayıcı ayarlarından bu siteye konum izni verip yeniden deneyin, Bursa deposundan başlayın ya da yol tarifini harita uygulamasında açın (başlangıcı uygulama kendisi belirler).</div>
+                  <DisBaglantilar o={null} />
+                </div>}
+                {konumum.durum === "OK" && <div>
+                  <div>Kuş uçuşu: <b>{rhKusUcusu(konumum, seciliSaha.konum).toFixed(1)} km</b> <span className="rhmap-k">(yol mesafesi değil)</span></div>
+                  <div className="rhmap-k" style={{ marginTop: 4 }}>Konumunuz yalnız bu tarayıcıda kullanılır; sunucuya ya da rota servisine gönderilmez. Karayolu mesafesi ve süre harita uygulamasında görünür.</div>
+                  <DisBaglantilar o={`${konumum.lat},${konumum.lng}`} />
+                </div>}
+              </div>}
+              {rota && <div className="rhmap-kutu">
+                {rota.yukleniyor ? <div>Rota hesaplanıyor…</div> : rota.ok === false ? <div style={{ color: "#b91c1c" }}>Servis hatası: {rota.error || rota.hata}</div> : <>
+                  <div style={{ fontWeight: 700 }}>{rota.depo?.ad} → {seciliSaha.fiziksel_id}</div>
+                  <div>Kuş uçuşu: <b>{rota.kus_ucusu_km != null ? `${rota.kus_ucusu_km} km` : "—"}</b> <span className="rhmap-k">(yol mesafesi değil)</span></div>
+                  <div>Karayolu: {rota.karayolu?.durum === "OK" ? <b>{rota.karayolu.km.toFixed(1)} km · ~{Math.round(rota.karayolu.dakika)} dk</b> : <span className="rhmap-k">{rota.karayolu?.mesaj || "hesaplanmadı"}</span>}</div>
+                  {rotaYolu && <div className="rhmap-k"><span style={{ display: "inline-block", width: 18, height: 4, background: "#2563eb", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />Haritadaki mavi çizgi: depodan sahaya karayolu güzergâhı</div>}
+                  {depo?.dogrulandi && <DisBaglantilar o={`${depo.lat},${depo.lng}`} />}
+                </>}
+              </div>}
+            </div>}
+            {seciliSaha && gorunum === "BILGI" && <div>
+              <button type="button" className="rhmap-geri" onClick={() => setGorunum("KART")}>← Saha kartı</button>
+              <div className="rhmap-siteid">{seciliSaha.fiziksel_id}</div>
+              {sahaBilgi?.yukleniyor && <div style={{ marginTop: 10 }}>Saha bilgileri yükleniyor…</div>}
+              {sahaBilgi?.hata && <div style={{ marginTop: 10, color: "#b91c1c", fontWeight: 700 }}>{sahaBilgi.hata}</div>}
+              {sahaBilgi?.ok && <>
+                <div className="rhmap-k" style={{ marginTop: 2 }}>Salt okunur görünüm{sahaBilgi.firma ? ` · ${sahaBilgi.firma.ad} kalemleri` : ""}</div>
+                <div className="rhmap-kutu">
+                  <div style={{ fontWeight: 800 }}>Konum</div>
+                  {sahaBilgi.konum ? <>
+                    {sahaBilgi.konum.adres && <div style={{ fontSize: 15 }}>{sahaBilgi.konum.adres}</div>}
+                    <div style={{ fontSize: 15 }}>{sahaBilgi.konum.lat != null ? `${sahaBilgi.konum.lat.toFixed(6)}, ${sahaBilgi.konum.lng.toFixed(6)}` : "Koordinat yok"}</div>
+                    <div className="rhmap-k">Kaynak: {sahaBilgi.konum.kaynak === "TSSR_KOORDINAT" ? "TSSR'da yazan koordinat" : sahaBilgi.konum.kaynak === "MANUEL" ? "Elle girilen" : sahaBilgi.konum.kaynak} · doğruluk: {sahaBilgi.konum.dogruluk}
+                      {sahaBilgi.konum.belge_url ? <> · <a href={`${sahaBilgi.konum.belge_url}${sahaBilgi.konum.sayfa ? `#page=${sahaBilgi.konum.sayfa}` : ""}`} target="_blank" rel="noreferrer">belge s. {sahaBilgi.konum.sayfa || "?"}</a></> : null}</div>
+                  </> : <div className="rhmap-k">Konum kaydı yok.</div>}
                 </div>
-                <button type="button" className="rhmap-btn" style={{ marginTop: 10 }} onClick={() => { setSecili(null); setTekSaha(false); setArama(""); }}>Seçimi kaldır</button>
-              </div>
-            ) : (
-              <div>
-                <div className="rhmap-k" style={{ marginBottom: 6 }}>Bir pine tıklayın ya da Site ID arayın.</div>
-                {konumsuz.length > 0 && <details><summary style={{ cursor: "pointer", fontWeight: 700 }}>Konumu olmayan sahalar ({konumsuz.length})</summary>
-                  {konumsuz.slice(0, 200).map((s) => <div key={s.fiziksel_id} style={{ padding: "3px 0" }}><button type="button" className="tbk-link" style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", padding: 0 }} onClick={() => sec(s.fiziksel_id)}>{s.fiziksel_id}</button> <span className="rhmap-k">{s.konum_durumu === "YALNIZ_ADRES" ? "yalnız adres" : s.konum_durumu === "YOK" ? "TSSR koordinatı yok" : `koordinat ${s.konum_durumu}`}</span></div>)}
-                </details>}
-              </div>
-            )}
+                {sahaBilgi.isler.map((i) => <div key={i.site_code} className="rhmap-kutu">
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><code style={{ fontSize: 16, fontWeight: 900 }}>{i.site_code}</code><RhDurum d={i.durum} ad={i.durum_ad} /></div>
+                  <div className="rhmap-k">{[i.site_type, i.project_code, i.bolge].filter(Boolean).join(" · ")}</div>
+                  {i.ilerleme.length > 0 && <div style={{ marginTop: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14.5 }}>İş kolu ve ilerleme</div>
+                    {i.ilerleme.map((l) => <div key={l.kolu} style={{ fontSize: 14.5, padding: "3px 0" }}><b>{l.ad}</b> · {l.taseron} · {l.durum}{l.qc ? ` · QC ${l.qc}` : ""}
+                      {l.tarihler.length > 0 && <div className="rhmap-k">{l.tarihler.map((t) => `${t.alan}: ${t.tarih}`).join(" · ")}</div>}</div>)}
+                  </div>}
+                  {i.kalemler.length > 0 && <div style={{ marginTop: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14.5 }}>Kalemler ({i.kalemler.length})</div>
+                    {i.kalemler.map((k, n) => <div key={n} style={{ fontSize: 14, padding: "3px 0", borderTop: "1px dashed #e2e8f0" }}>
+                      <b style={{ fontFamily: "monospace" }}>{k.item_code}</b> {k.aciklama}
+                      <div className="rhmap-k">{k.taseron}{k.miktar != null ? ` · miktar ${k.miktar}` : ""}{k.qc ? ` · QC ${k.qc}` : ""}{k.onair ? ` · on-air ${k.onair}` : ""}{k.boq_surum ? ` · ${k.boq_surum}` : ""}</div></div>)}
+                  </div>}
+                  {i.belgeler.length > 0 && <div style={{ marginTop: 6, fontSize: 14.5 }}><b>Belgeler: </b>{i.belgeler.map((b, n) => <a key={n} href={b.url} target="_blank" rel="noreferrer" style={{ marginRight: 10 }}>{b.ad}</a>)}</div>}
+                </div>)}
+              </>}
+            </div>}
           </div>
         </div>
       </div>
