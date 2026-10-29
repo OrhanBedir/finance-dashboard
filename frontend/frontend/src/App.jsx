@@ -12,6 +12,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
 import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
+import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -35146,6 +35147,7 @@ function PersonelMalzemePanel({ currentUser }) {
   // ── TALEP STATE ──
   const [mainTab, setMainTab] = React.useState("malzemelerim");
   const [defterAcik2, setDefterAcik2] = React.useState(null); // 29.10.2026: stok defteri açıksa eski zimmet listesi gösterilmez
+  const [talepSaha2, setTalepSaha2] = React.useState(null); // 29.10.2026: Teknocenter işi seçimi
   const [talepler, setTalepler] = React.useState([]);
   const [talepLoading, setTalepLoading] = React.useState(false);
   const [showTalepForm, setShowTalepForm] = React.useState(false);
@@ -35224,15 +35226,18 @@ function PersonelMalzemePanel({ currentUser }) {
     setEditingTalepId(null); setShowTalepForm(false);
   };
   const saveTalepFn = async (durum) => {
-    const kalemlerDolu = talepKalemler.filter(k => k.malzeme_adi.trim());
-    if (!kalemlerDolu.length) { alert("En az bir malzeme kalemi girin"); return; }
+    // 29.10.2026: Teknocenter talebi — kalemler katalogdan; sunucu reddederse form ve girilenler kaybolmaz
+    const kk = kalemKontrol(talepKalemler);
+    if (kk) { alert(kk); return; }
+    if (savingTalep) return;
     setSavingTalep(true);
     try {
-      const body = { ...talepForm, durum, kalemler: kalemlerDolu.map(k => ({...k, birim_fiyat:k.birim_fiyat||0, toplam_tutar:(Number(k.miktar)||0)*(Number(k.birim_fiyat)||0)})) };
-      if (editingTalepId) { await fetch(`${API_BASE2}/malzeme/talepler/${editingTalepId}`, { method:"PUT", headers, body:JSON.stringify(body) }); }
-      else { await fetch(`${API_BASE2}/malzeme/talepler`, { method:"POST", headers, body:JSON.stringify(body) }); }
-      resetTalepForm(); loadTalepler();
-    } catch (e) { alert(e.message); }
+      const body = { ...talepForm, durum, kalemler: kalemGovde(talepKalemler) };
+      const r = await fetch(editingTalepId ? `${API_BASE2}/malzeme/talepler/${editingTalepId}` : `${API_BASE2}/malzeme/talepler`, { method: editingTalepId ? "PUT" : "POST", headers, body:JSON.stringify(body) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || (j && j.ok === false)) throw new Error((j && j.error) || `Kaydedilemedi (${r.status})`);
+      resetTalepForm(); setTalepSaha2(null); loadTalepler();
+    } catch (e) { alert(e.message === "Failed to fetch" ? "Bağlantı kurulamadı; bilgiler duruyor, tekrar deneyin." : e.message); }
     setSavingTalep(false);
   };
   const deleteTalepM = async (id) => {
@@ -35243,7 +35248,8 @@ function PersonelMalzemePanel({ currentUser }) {
     try {
       const r = await fetch(`${API_BASE2}/malzeme/talepler/${t.id}`, { headers }); const d = await r.json();
       setTalepForm({ bolge:d.bolge||"", proje:d.proje||"", site_type:d.site_type||"", site_id:d.site_id||"", talep_eden_ad:d.talep_eden_ad||"", talep_eden_email:d.talep_eden_email||"", talep_tarihi:d.talep_tarihi?d.talep_tarihi.split("T")[0]:new Date().toISOString().split("T")[0], notlar:d.notlar||"" });
-      setTalepKalemler(d.kalemler?.length ? d.kalemler : [{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}]);
+      setTalepKalemler(d.kalemler?.length ? d.kalemler.map(kalemdenEditore) : [{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}]);
+      setTalepSaha2(d.site_id ? { site_code: d.site_id, bolge: d.bolge } : null);
       setEditingTalepId(t.id); setShowTalepForm(true);
     } catch { alert("Yüklenemedi"); }
   };
@@ -35485,69 +35491,16 @@ function PersonelMalzemePanel({ currentUser }) {
               </div>
             </div>
 
-            {/* Site ID */}
-            <div style={{ marginBottom:12, position:"relative" }}>
-              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>Site ID</label>
-              <input value={talepForm.site_id}
-                onChange={e=>{ setTalepForm(p=>({...p,site_id:e.target.value})); searchTalepSite(e.target.value); setShowTalepSiteDrop(true); }}
-                onBlur={()=>setTimeout(()=>setShowTalepSiteDrop(false),180)}
-                placeholder="Site kodu yazın…"
-                style={{ width:"100%", padding:"10px 12px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }} />
-              {showTalepSiteDrop && talepSiteSugg.length > 0 && (
-                <div style={{ position:"absolute", top:"100%", left:0, right:0, background:"#fff", border:"1px solid #d1d5db", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,0.12)", zIndex:9999, maxHeight:180, overflowY:"auto" }}>
-                  {talepSiteSugg.map(s=>(
-                    <div key={s.site_code} onMouseDown={()=>{ setTalepForm(p=>({...p,site_id:s.site_code})); setShowTalepSiteDrop(false); setTalepSiteSugg([]); }}
-                      style={{ padding:"9px 12px", cursor:"pointer", fontSize:13, borderBottom:"1px solid #f3f4f6" }}>
-                      <span style={{ fontWeight:600, color:"#1e3a5f" }}>{s.site_code}</span>
-                      {s.bolge && <span style={{ marginLeft:8, color:"#6b7280", fontSize:11 }}>{s.bolge}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Teknocenter işi (Site ID) — yalnız Teknocenter kapsamındaki işler; 29.10.2026 */}
+            <div style={{ marginBottom:12 }}>
+              <label style={{ fontSize:12, fontWeight:600, display:"block", marginBottom:4, color:"#374151" }}>Teknocenter işi (Site ID)</label>
+              <TeknoSahaSecici deger={talepSaha2} onSec={(s)=>{ setTalepSaha2(s); setTalepForm(p=>({...p, site_id:s?.site_code||"", bolge:s?.bolge||p.bolge})); }} />
             </div>
 
-            {/* Malzeme Kalemleri */}
+            {/* Malzeme Kalemleri — katalogdan */}
             <div style={{ marginBottom:12 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                <label style={{ fontSize:13, fontWeight:700, color:"#1e3a5f" }}>📦 Malzeme Kalemleri</label>
-                <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",notlar:""}])}
-                  style={{ padding:"5px 12px", background:"#f0fdf4", color:"#15803d", border:"1px solid #bbf7d0", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:700 }}>
-                  + Kalem Ekle
-                </button>
-              </div>
-              {talepKalemler.map((k,i) => (
-                <div key={i} style={{ background:"#f8fafc", borderRadius:10, padding:"12px", marginBottom:8, border:"1px solid #e5e7eb" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                    <span style={{ fontSize:12, fontWeight:600, color:"#6b7280" }}>Kalem {i+1}</span>
-                    {talepKalemler.length > 1 && (
-                      <button onClick={()=>setTalepKalemler(prev=>prev.filter((_,idx)=>idx!==i))}
-                        style={{ background:"none", border:"none", color:"#dc2626", fontSize:18, cursor:"pointer", padding:0 }}>✕</button>
-                    )}
-                  </div>
-                  <input placeholder="Malzeme adı *" value={k.malzeme_adi}
-                    onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,malzeme_adi:e.target.value}:x))}
-                    style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, marginBottom:8, boxSizing:"border-box" }} />
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
-                    <div>
-                      <label style={{ fontSize:11, fontWeight:600, color:"#6b7280", display:"block", marginBottom:3 }}>Miktar</label>
-                      <input type="number" min="1" value={k.miktar}
-                        onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,miktar:Number(e.target.value)||1}:x))}
-                        style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }} />
-                    </div>
-                    <div>
-                      <label style={{ fontSize:11, fontWeight:600, color:"#6b7280", display:"block", marginBottom:3 }}>Birim</label>
-                      <select value={k.birim}
-                        onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,birim:e.target.value}:x))}
-                        style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, boxSizing:"border-box" }}>
-                        {BIRIMLER_M.map(b=><option key={b}>{b}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <input placeholder="Not (isteğe bağlı)" value={k.notlar||""}
-                    onChange={e=>setTalepKalemler(prev=>prev.map((x,idx)=>idx===i?{...x,notlar:e.target.value}:x))}
-                    style={{ width:"100%", padding:"9px 10px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:13, boxSizing:"border-box" }} />
-                </div>
-              ))}
+              <label style={{ fontSize:13, fontWeight:700, color:"#1e3a5f", display:"block", marginBottom:8 }}>📦 Malzeme Kalemleri</label>
+              <TalepKalemEditoru kalemler={talepKalemler} setKalemler={setTalepKalemler} tanimlayabilir={false} dar />
             </div>
 
             {/* Genel Not */}
@@ -35652,16 +35605,25 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   const isBolgeMudur = !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat &&
     (["rollout_mudur","bolge_mudur"].includes((currentUser?.role||"").toLowerCase()) ||
      ["serdar.altinova@simsektel.com"].includes(_email));
-  const canSeeDepo   = isAdmin || isPM || isDirektor || isNurcan || isMurat;
+  // 29.10.2026: Teknocenter yönetimi (alt marka) e-posta listelerinde yok — yetki sunucudan (/malzeme/stok/ayar) okunur
+  const [stokYetki, setStokYetki] = useState({});
+  useEffect(() => { katalogApi("/malzeme/stok/ayar").then((j) => setStokYetki(j.yetki || {})).catch(() => {}); }, []);
+  const teknoYonetim = !!stokYetki.firma_kapsami && !!stokYetki.depo;
+  const canSeeDepo   = isAdmin || isPM || isDirektor || isNurcan || isMurat || teknoYonetim;
   const canEditFiyat = isAdmin || isPM;
 
   // saltOkunur (21.10.2026): talep ve dağıtım listelerini görür; yeni talep / çıkış / düzenleme düğmeleri yok (sunucu da reddeder)
-  const _isPersonelOnly = !saltOkunur && !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
+  const _isPersonelOnly = !saltOkunur && !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur && !stokYetki.rapor;
   const [tab, setTab] = useState(_isPersonelOnly ? "dagitim" : "talepler");
+  const _sekmeDuzeltildi = useRef(false);
+  useEffect(() => { if (!_sekmeDuzeltildi.current && stokYetki.rapor && tab === "dagitim") { _sekmeDuzeltildi.current = true; setTab("talepler"); } }, [stokYetki.rapor]); // eslint-disable-line react-hooks/exhaustive-deps
   // 29.10.2026: Stok Defteri — talep detayından teslim / mal kabul formuna geçiş; personelin defter durumu (eski listeyi gizlemek için)
   const [stokBaslangic, setStokBaslangic] = useState(null);
   const [defterAcikBenim, setDefterAcikBenim] = useState(null);
-  const canSeeStok = canSeeDepo || isBolgeMudur || saltOkunur;
+  const canSeeStok = canSeeDepo || isBolgeMudur || saltOkunur || !!stokYetki.rapor;
+  // 29.10.2026: panel Teknocenter işleri için — saha seçimi Teknocenter kapsamından, kalemler katalogdan; arşiv yalnız yöneticiye
+  const [talepSaha, setTalepSaha] = useState(null);
+  const [arsivGoster, setArsivGoster] = useState(false);
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
   const [talepArama, setTalepArama] = useState("");
@@ -36060,9 +36022,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   // ── LOAD ──
   const loadTalepler = async () => {
     setTalepLoading(true);
-    try { const r = await fetch(`${API_BASE}/malzeme/talepler`, { headers }); const d = await r.json(); setTalepler(Array.isArray(d) ? d : []); }
+    try { const r = await fetch(`${API_BASE}/malzeme/talepler${arsivGoster ? "?arsiv=1" : ""}`, { headers }); const d = await r.json(); setTalepler(Array.isArray(d) ? d : []); }
     catch {} finally { setTalepLoading(false); }
   };
+  useEffect(() => { loadTalepler(); }, [arsivGoster]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadDepoStok = async () => {
     try { const r = await fetch(`${API_BASE}/malzeme/depo-stok`, { headers }); const d = await r.json(); setDepoStok(Array.isArray(d) ? d : []); } catch {}
   };
@@ -36204,32 +36167,24 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
 
   // ── TALEP KAYDET ──
   const saveTalep = async (durum) => {
-    const kalemlerDolu = talepKalemler.filter(k => k.malzeme_adi.trim());
-    if (!kalemlerDolu.length) { alert("En az bir malzeme kalemi girin"); return; }
+    const kk = kalemKontrol(talepKalemler);
+    if (kk) { alert(kk); return; }
     if (durum !== "TASLAK" && !talepForm.site_id?.trim()) {
-      alert("⚠️ Onaya göndermeden önce Site ID giriniz.\nHuawei sisteminde PO olmadan malzeme çıkışı yapılamaz.");
+      alert("⚠️ Onaya göndermeden önce Teknocenter işini (Site ID) seçin.\nHuawei sisteminde PO olmadan malzeme çıkışı yapılamaz.");
       return;
     }
+    if (saving) return;
     setSaving(true);
     try {
-      const body = {
-        ...talepForm,
-        durum,
-        kalemler: kalemlerDolu.map(k => ({
-          ...k,
-          birim_fiyat: k.birim_fiyat || 0,
-          toplam_tutar: (Number(k.miktar)||0) * (Number(k.birim_fiyat)||0),
-        })),
-      };
-      if (editingId) {
-        await fetch(`${API_BASE}/malzeme/talepler/${editingId}`, { method: "PUT", headers, body: JSON.stringify(body) });
-      } else {
-        await fetch(`${API_BASE}/malzeme/talepler`, { method: "POST", headers, body: JSON.stringify(body) });
-      }
-      setFormView(null); setEditingId(null); setTalepForm(emptyForm());
+      // 29.10.2026: kalemler katalogdan (ad + birim sunucuda katalogdan); sunucu reddederse form kapanmaz, bilgiler kaybolmaz
+      const body = { ...talepForm, durum, kalemler: kalemGovde(talepKalemler) };
+      const r = await fetch(editingId ? `${API_BASE}/malzeme/talepler/${editingId}` : `${API_BASE}/malzeme/talepler`, { method: editingId ? "PUT" : "POST", headers, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || (j && j.ok === false)) throw new Error((j && j.error) || `Kaydedilemedi (${r.status})`);
+      setFormView(null); setEditingId(null); setTalepForm(emptyForm()); setTalepSaha(null);
       setTalepKalemler([{ malzeme_adi: "", miktar: 1, birim: "Adet", birim_fiyat: "", notlar: "" }]);
       loadTalepler();
-    } catch (e) { alert(e.message); }
+    } catch (e) { alert(e.message === "Failed to fetch" ? "Bağlantı kurulamadı; bilgiler duruyor, tekrar deneyin." : e.message); }
     setSaving(false);
   };
 
@@ -36246,7 +36201,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
         talep_tarihi: d.talep_tarihi ? d.talep_tarihi.split("T")[0] : new Date().toISOString().split("T")[0],
         notlar: d.notlar||"",
       });
-      setTalepKalemler(d.kalemler?.length ? d.kalemler : [{ malzeme_adi:"", miktar:1, birim:"Adet", birim_fiyat:"", notlar:"" }]);
+      setTalepKalemler(d.kalemler?.length ? d.kalemler.map(kalemdenEditore) : [{ malzeme_adi:"", miktar:1, birim:"Adet", birim_fiyat:"", notlar:"" }]);
+      setTalepSaha(d.site_id ? { site_code: d.site_id, bolge: d.bolge } : null);
       setEditingId(t.id);
       setFormView("form");
     } catch (e) { alert("Yüklenemedi"); }
@@ -37281,30 +37237,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
             {/* Satır 2: Site ID (autocomplete) | Talep Eden | Talep Tarihi */}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12 }}>
               <div style={{ position:"relative" }}>
-                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Site ID <span style={{color:"#dc2626"}}>*</span></label>
-                <input placeholder="Site kodu yazın..." value={talepForm.site_id||""}
-                  onChange={e=>{
-                    setTalepForm(p=>({...p,site_id:e.target.value}));
-                    searchSiteCode(e.target.value);
-                    setShowSiteDropdown(true);
-                  }}
-                  onBlur={()=>setTimeout(()=>setShowSiteDropdown(false),200)}
-                  onFocus={()=>{ if(talepForm.site_id?.length>=2) setShowSiteDropdown(true); }}
-                  style={{ width:"100%",padding:"10px 10px",border:`1px solid ${talepForm.site_id?"#16a34a":"#d1d5db"}`,borderRadius:7,fontSize:13,boxSizing:"border-box",height:40 }} />
-                {showSiteDropdown && siteCodeSuggestions.length>0 && (
-                  <div style={{ position:"absolute",top:"100%",left:0,right:0,zIndex:300,background:"#fff",border:"1px solid #d1d5db",borderRadius:7,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",maxHeight:200,overflowY:"auto" }}>
-                    {siteCodeSuggestions.map(s=>(
-                      <div key={s.site_code} onMouseDown={e=>{
-                        e.preventDefault();
-                        setTalepForm(p=>({...p, site_id:s.site_code, site_type:s.site_type||p.site_type, bolge:s.bolge||p.bolge}));
-                        setShowSiteDropdown(false);
-                      }} style={{ padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between" }}>
-                        <span style={{fontWeight:700}}>{s.site_code}</span>
-                        <span style={{color:"#9ca3af"}}>{[s.bolge,s.site_type,s.project_code].filter(Boolean).join(" · ")}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Teknocenter işi (Site ID) <span style={{color:"#dc2626"}}>*</span></label>
+                <TeknoSahaSecici zorunlu deger={talepSaha} onSec={(s)=>{ setTalepSaha(s); setTalepForm(p=>({...p, site_id:s?.site_code||"", bolge:s?.bolge||p.bolge, site_type:s?.site_type||p.site_type})); }} />
               </div>
               <div>
                 <label style={{ fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5 }}>Talep Eden</label>
@@ -37353,25 +37287,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
           {/* Malzeme Kalemleri */}
           <div style={{ background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize:15,fontWeight:700,color:"#1e3a5f",marginBottom:14 }}>📦 Malzeme Kalemleri</div>
-            {/* Başlıklar */}
-            <div style={{ display:"grid",gridTemplateColumns:"3fr 80px 110px 130px 110px 110px 38px",gap:8,marginBottom:6 }}>
-              {["Malzeme Adı","Miktar","Birim","Birim Fiyat ₺","Toplam","Not / Açıklama",""].map(h=>(
-                <div key={h} style={{ fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.3px",padding:"0 2px" }}>{h}</div>
-              ))}
-            </div>
-            {talepKalemler.map((k,i)=>renderKalemRow(k,i))}
-            {/* Alt: Kalem Ekle + Genel Toplam */}
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:12,borderTop:"2px solid #e5e7eb" }}>
-              <button onClick={()=>setTalepKalemler(prev=>[...prev,{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}])}
-                style={{ padding:"8px 18px",background:"#f0fdf4",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:7,cursor:"pointer",fontSize:13,fontWeight:700 }}>
-                + Kalem Ekle
-              </button>
-              {toplamGenel > 0 && (
-                <div style={{ fontSize:16,fontWeight:800,color:"#15803d" }}>
-                  Genel Toplam: ₺{toplamGenel.toLocaleString("tr-TR")}
-                </div>
-              )}
-            </div>
+            {/* 29.10.2026: kalemler katalogdan (aramalı çoklu seçim); birim katalogdan, aynı malzeme iki kez eklenmez; fiyat bu formda yok */}
+            <TalepKalemEditoru kalemler={talepKalemler} setKalemler={setTalepKalemler} tanimlayabilir={!!stokYetki.depo} />
           </div>
 
           {/* Açıklama */}
@@ -37421,8 +37338,8 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       <div style={{ background:"#1e3a5f",color:"#fff",padding:"16px 20px",display:"flex",alignItems:"center",gap:12 }}>
         <button onClick={onBack} style={{ background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer",padding:0 }}>←</button>
         <div>
-          <h1 style={{ margin:0,fontSize:20,fontWeight:800 }}>📦 Malzeme Yönetimi</h1>
-          <div style={{ fontSize:12,opacity:0.75 }}>Talep · Stok · Fiyat Listesi</div>
+          <h1 style={{ margin:0,fontSize:20,fontWeight:800 }}>📦 Malzeme Yönetimi · Teknocenter</h1>
+          <div style={{ fontSize:12,opacity:0.75 }}>Talep · Stok Defteri · Malzeme Kataloğu{arsivGoster ? " · arşiv görünümü" : ""}</div>
         </div>
       </div>
 
@@ -37430,8 +37347,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
         {[...(!_isPersonelOnly?[["talepler","📋 Talepler"]]:[]),
           ...(canSeeStok?[["stok","📦 Stok Defteri"]]:[]),
-          ...(canSeeDepo?[...(_fiyatGizliMi()?[]:[["fiyat","💰 Fiyat Listesi"]]),["depo","🗄️ Eski Depo (arşiv)"]]:[]),
-          ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"🗄️ Eski Dağıtım (arşiv)"]
+          ...(!_isPersonelOnly?[["katalog","📚 Malzeme Kataloğu"]]:[]),
+          ...(canSeeDepo && !teknoYonetim?[...(_fiyatGizliMi()?[]:[["fiyat","💰 Fiyat Listesi"]]),["depo","🗄️ Eski Depo (arşiv)"]]:[]),
+          ...(teknoYonetim?[]:[["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"🗄️ Eski Dağıtım (arşiv)"]])
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
             style={{ padding:"12px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:14,
@@ -37445,6 +37363,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
 
         {/* ── STOK DEFTERİ (29.10.2026) — tek stok kaynağı ── */}
         {tab==="stok" && canSeeStok && <StokDefteriPanel baslangic={stokBaslangic} key={stokBaslangic?.n || "stok"} />}
+        {tab==="katalog" && !_isPersonelOnly && <MalzemeKatalogPanel yetki={stokYetki} />}
         {tab==="dagitim" && _isPersonelOnly && <StokBenimPanel currentUser={currentUser} onDurum={setDefterAcikBenim} />}
         {(tab==="depo" || (tab==="dagitim" && !_isPersonelOnly)) && (
           <div style={{ background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e",borderRadius:8,padding:"9px 12px",fontSize:13,marginBottom:12 }}>
@@ -37472,6 +37391,11 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                   value={talepArama} onChange={e=>setTalepArama(e.target.value)}
                   style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,width:220,outline:"none" }}
                 />
+                {!_isPersonelOnly && !isBolgeMudur && (
+                  <label style={{ display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#475569",cursor:"pointer" }} title="Teknocenter öncesi arşivlenen talepler">
+                    <input type="checkbox" checked={arsivGoster} onChange={e=>setArsivGoster(e.target.checked)} /> Arşivi göster
+                  </label>
+                )}
                 <select value={talepDurumFilter} onChange={e=>setTalepDurumFilter(e.target.value)}
                   style={{ padding:"8px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:13,color:"#374151",cursor:"pointer" }}>
                   <option value="">Tüm Durumlar</option>
@@ -37494,13 +37418,13 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                 )}
               </div>
               <div style={{ display:"flex",gap:8 }}>
-                {canSeeDepo && (
+                {canSeeDepo && !teknoYonetim && (
                   <button onClick={depoStokExcelIndir}
                     style={{ padding:"10px 18px",background:"#16a34a",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6 }}>
                     📥 Depo Stok Excel
                   </button>
                 )}
-                {!saltOkunur && <button onClick={()=>{setTalepForm(emptyForm());setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
+                {!saltOkunur && !arsivGoster && <button onClick={()=>{setTalepForm(emptyForm());setTalepSaha(null);setTalepKalemler([{malzeme_adi:"",miktar:1,birim:"Adet",birim_fiyat:"",notlar:""}]);setEditingId(null);setFormView("form");}}
                   style={{ padding:"10px 22px",background:"#1e3a5f",color:"#fff",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:14,whiteSpace:"nowrap" }}>
                   + Yeni Talep
                 </button>}

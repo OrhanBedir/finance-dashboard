@@ -420,7 +420,7 @@ function kur(app, c) {
       return { atanan: r.rows };
     });
     sonuc.zimmet = await bolum(async () => (await pool.query(`SELECT d.id, d.malzeme_adi, d.miktar, d.birim, d.durum, d.verilme_tarihi, d.site_id
-      FROM malzeme_dagitim d WHERE d.alici_personel_id = $1 OR ($2 <> '' AND LOWER(TRIM(COALESCE(d.alici_personel_email,''))) = $2)
+      FROM malzeme_dagitim d WHERE d.arsiv_tarihi IS NULL AND (d.alici_personel_id = $1 OR ($2 <> '' AND LOWER(TRIM(COALESCE(d.alici_personel_email,''))) = $2))
       ORDER BY d.verilme_tarihi DESC NULLS LAST, d.id DESC LIMIT 30`, [p.id, p.email])).rows);
     sonuc.isg = k.profil === "SAHIP" || req.izinler?.isg_goruntule === true ? await bolum(async () => (await pool.query(
       `SELECT egitim_turu, egitim_tarihi, bitis_tarihi FROM personel_isg WHERE personel_id = $1 ORDER BY egitim_tarihi DESC LIMIT 20`, [p.id])).rows) : { durum: "yetki_yok" };

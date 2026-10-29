@@ -164,7 +164,7 @@ function kur(app, c) {
     if (!c.malzemePmMi(req.user)) return { rows: [], yetkili: false };
     const r = await pool.query(`SELECT t.id, t.talep_no, t.talep_eden_ad, t.talep_eden_email, t.durum, t.bolge, t.proje, t.site_id, t.notlar, t.created_at,
         COALESCE((SELECT COUNT(*) FROM malzeme_talep_kalemleri k WHERE k.talep_id = t.id),0)::int AS kalem_sayisi
-      FROM malzeme_talepler t WHERE t.durum = 'PM_ONAY' ORDER BY t.created_at ASC LIMIT 50`).catch(() => ({ rows: [] }));
+      FROM malzeme_talepler t WHERE t.durum = 'PM_ONAY' AND t.arsiv_tarihi IS NULL ORDER BY t.created_at ASC LIMIT 50`).catch(() => ({ rows: [] }));
     return { rows: r.rows.map((x) => ({ ...x, adim: "PM" })), yetkili: true };
   }
   // Oturum özeti (/auth/me, giriş): sekme görünürlüğü ilk çizimde doğru olsun diye yetkiler burada da döner

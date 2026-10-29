@@ -577,11 +577,13 @@ const sahaKonum = require("./sahaKonum");
 const haritaIsDurumu = require("./haritaIsDurumu");
 const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
 const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
-const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı) // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
+const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
+const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
 app.use("/boq/katalog", express.json({ limit: "25mb" }));
+app.use("/malzeme/katalog/ice-al", express.json({ limit: "10mb" })); // 29.10.2026: BoQ malzeme adayları (~1 MB) — yalnız bu yol
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -1328,7 +1330,7 @@ const IZIN_OKUMA_YOLLARI = {
   arac_depo_goruntule: [/^\/hr\/arac-gecmis$/, /^\/hr\/arac-kira-odemeler$/, /^\/hr\/arac-fatura-kalemleri$/, /^\/hr\/arac-teslim-projeler$/,
     /^\/hr\/araclar\/\d+\/(teslim|lastik|islem-log)$/, /^\/hr\/arac-belge\/file\/[^/]+$/, /^\/hr\/ofis$/, /^\/hr\/ofis-kira-odemeler$/, /^\/hr\/ofis-belge\/file\/[^/]+$/],
   malzeme_goruntule: [/^\/malzeme\/(talepler|talepler\/\d+|dagitim|dagitim\/ozet|dagitim\/personel|fiyat-listesi|sarf|depo-stok|site-codes)$/,
-    /^\/malzeme\/stok\/(ayar|urunler|ozet|personel|personeller|saha|hareketler|iadeler|rezervasyonlar|excel)$/],
+    /^\/malzeme\/stok\/(ayar|urunler|ozet|personel|personeller|saha|hareketler|iadeler|rezervasyonlar|excel)$/, /^\/malzeme\/katalog(\/(kategoriler|benzer))?$/],
   // 27.10.2026: İSG belge yüklemesi için imzalı yükleme adresi (yalnız isg-belgeler klasörü)
   isg_duzenle: [/^\/hr\/isg\/signed-upload-url$/],
 };
@@ -24444,10 +24446,10 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
                 t.durum, t.bolge, t.proje, t.site_id, t.notlar, t.created_at,
                 COALESCE((SELECT COUNT(*) FROM malzeme_talep_kalemleri k WHERE k.talep_id=t.id),0)::int AS kalem_sayisi
          FROM malzeme_talepler t
-         WHERE t.durum = 'PM_ONAY'
+         WHERE t.durum = 'PM_ONAY' AND t.arsiv_tarihi IS NULL
          ORDER BY t.created_at ASC
          LIMIT 20`
-      );
+      ).catch(() => ({ rows: [] })); // arşiv kolonu açılış şemasında oluşur; oluşmadan gelen istek panoyu düşürmesin
       onayBekleyenMalzemeler = malzRes.rows;
     }
 
@@ -28454,10 +28456,18 @@ const MALZEME_YONETICI_EMAIL = [...MALZEME_DEPO_EMAIL, "serdar.altinova@simsekte
 const MALZEME_FIYAT_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com", "duzgun.simsek@simsektel.com"];
 const MALZEME_KISISEL_DURUM = ["TASLAK", "ROLLOUT_BEKLE"]; // personel → rollout müdürü (web saveTalep)
 const _malzemeIc = (u) => !taseronMu(u) && !altMarkaKullanicisi(u);
-const malzemeYonetici = (u) => _malzemeIc(u) && (MALZEME_YONETICI_ROLLER.includes(_rol(u)) || MALZEME_YONETICI_EMAIL.includes(_eposta(u)));
-const malzemeDepoYetkili = (u) => _malzemeIc(u) && (MALZEME_DEPO_ROLLER.includes(_rol(u)) || MALZEME_DEPO_EMAIL.includes(_eposta(u)));
+// 29.10.2026 (Orhan): Malzeme Yönetimi bundan sonra Teknocenter işleri için. Teknocenter yönetim hesabı (alt marka TEKNO; yönetim
+// rolü ya da şirket sahibi / yönetici profili) talep onayı ve depo işlemlerini YALNIZ firma TEKNO kayıtlarında yapar (firma kapsamı
+// sunucuda: malzemeFirmaKapsami). Fiyat düzenleme yetkisi değişmez (Şimşek mali yetki kuralı).
+const malzemeTeknoYonetim = (u) => !!u && !taseronMu(u) && altMarkaKullanicisi(u) && String(u.marka || "").trim().toUpperCase() === "TEKNO"
+  && (MALZEME_YONETICI_ROLLER.includes(_rol(u)) || ["SAHIP", "YONETICI"].includes(kayitliProfil(u)));
+const malzemeFirmaKapsami = (u) => (u && altMarkaKullanicisi(u) ? String(u.marka || "").trim().toUpperCase() || "YOK" : null);
+const malzemeYonetici = (u) => (_malzemeIc(u) && (MALZEME_YONETICI_ROLLER.includes(_rol(u)) || MALZEME_YONETICI_EMAIL.includes(_eposta(u)))) || malzemeTeknoYonetim(u);
+const malzemeDepoYetkili = (u) => (_malzemeIc(u) && (MALZEME_DEPO_ROLLER.includes(_rol(u)) || MALZEME_DEPO_EMAIL.includes(_eposta(u)))) || malzemeTeknoYonetim(u);
 const malzemeFiyatYetkili = (u) => _malzemeIc(u) && (["admin", "platform_admin", "direktor", "pm"].includes(_rol(u)) || MALZEME_FIYAT_EMAIL.includes(_eposta(u)));
 const malzemeTamOkuma = (u, req) => malzemeYonetici(u) || (!taseronMu(u) && req.izinler?.malzeme_goruntule === true);
+// Stok defteri onayı (ters kayıt, açılış, depo tanımı, sipariş aşımı): Şimşek fiyat yetkilisi ya da Teknocenter direktör/admin / mali yetkilisi
+const malzemeStokOnay = (u) => malzemeFiyatYetkili(u) || (malzemeTeknoYonetim(u) && (["admin", "direktor", "genel_mudur"].includes(_rol(u)) || maliYetkiKaydi(u)?.kapsam === "TEKNO"));
 async function malzemeTalepSahipligi(u, id) {
   const r = await pool.query(`SELECT id, durum, LOWER(TRIM(COALESCE(talep_eden_email,''))) AS eden,
     COALESCE(talep_edilen_personel,'') AS edilen FROM malzeme_talepler WHERE id=$1`, [Number(id)]);
@@ -28483,8 +28493,46 @@ async function personelSahaKapsami(firma) {
   if (!altMarkaMi(kod)) return null;
   return markaRolloutKapsami({ user: { hw_yukleme: false, marka: kod, role: "user" }, izinler: {} });
 }
-malzemeStok.kur(app, { pool, authMiddleware, optionalAuth, kendiPersonelKaydi, tenantContext: pool.tenantContext, malzemeDepoYetkili,
-  malzemeTamOkuma, malzemeFiyatYetkili, taseronMu, personelSahaKapsami });
+const _malzemeStokKurulum = malzemeStok.kur(app, { pool, authMiddleware, optionalAuth, kendiPersonelKaydi, tenantContext: pool.tenantContext, malzemeDepoYetkili,
+  malzemeTamOkuma, malzemeFiyatYetkili, taseronMu, personelSahaKapsami, firmaKapsami: malzemeFirmaKapsami, stokOnayYetkili: malzemeStokOnay });
+const teknoSahaKapsami = () => personelSahaKapsami("TEKNO");
+const _malzemeKatalog = malzemeKatalog.kur(app, { pool, authMiddleware, taseronMu, malzemeDepoYetkili, malzemeYonetici, stokOnayYetkili: malzemeStokOnay,
+  firmaKapsami: malzemeFirmaKapsami, teknoSahaKapsami, stokSema: _malzemeStokKurulum.sema });
+// Talep sahası: boş olabilir (depo ihtiyacı); doluysa Rollout'taki TAM iş kodu ve Teknocenter kapsamında olmalı (rastgele metin kabul edilmez)
+async function teknoTalepSahasi(site) {
+  const sc = String(site || "").replace(/\s+/g, "").toUpperCase();
+  if (!sc) return "";
+  const K = await teknoSahaKapsami();
+  const r = K ? await pool.query(`SELECT r.site_code FROM rollout_progress r WHERE UPPER(REPLACE(TRIM(r.site_code),' ','')) = $1 AND ${K.sql("r", 2)} LIMIT 1`, [sc, ...K.params]).catch(() => ({ rows: [] })) : { rows: [] };
+  if (!r.rows.length) { const e = new Error(`Site / iş kodu Teknocenter kapsamında değil ya da Rollout listesinde yok: ${sc}. Listeden seçin.`); e.http = 400; throw e; }
+  return r.rows[0].site_code;
+}
+// Talep kalemleri: katalog kalemi (urun_id) → ad ve birim katalogdan; katalogda olmayan → "yeni malzeme önerisi" (onaycı tanımlar)
+async function talepKalemHazirla(db, kalemler) {
+  const out = [], gorulen = new Set();
+  for (const [i, k] of (Array.isArray(kalemler) ? kalemler : []).entries()) {
+    const hata = (m) => { const e = new Error(`${i + 1}. kalem: ${m}`); e.http = 400; return e; };
+    let ad = String(k?.malzeme_adi || "").trim(), birim = String(k?.birim || "Adet").trim() || "Adet", urunId = Number(k?.urun_id) || null, tamSayi = false;
+    if (urunId) {
+      const u = (await db.query(`SELECT id, ad, temel_birim, tam_sayi, aktif FROM malzeme_urun WHERE id = $1`, [urunId])).rows[0];
+      if (!u) throw hata("katalog malzemesi bulunamadı");
+      if (!u.aktif) throw hata(`"${u.ad}" pasif; katalogdan başka malzeme seçin`);
+      ad = u.ad; birim = u.temel_birim; tamSayi = u.tam_sayi;
+    } else if (!ad) throw hata("malzeme seçin ya da adını yazın");
+    const ms = String(k?.miktar ?? "").trim().replace(/\s/g, "");
+    const mn = Number(ms.includes(",") ? ms.replace(/\./g, "").replace(",", ".") : ms);
+    if (!ms || !Number.isFinite(mn) || mn <= 0) throw hata(`miktar geçersiz (${k?.miktar ?? "boş"})`);
+    if (Math.round(mn * 1000) / 1000 !== mn) throw hata("miktar en fazla 3 ondalık olabilir");
+    if (tamSayi && !Number.isInteger(mn)) throw hata(`"${ad}" ${birim} ile tutulur; tam sayı girin`);
+    const anahtar = urunId ? `U${urunId}` : `A${ad.toLocaleUpperCase("tr")}`;
+    if (gorulen.has(anahtar)) throw hata(`"${ad}" talepte zaten var — miktarı tek satırda birleştirin`);
+    gorulen.add(anahtar);
+    out.push({ urun_id: urunId, malzeme_adi: ad, miktar: mn, birim, birim_fiyat: k?.birim_fiyat || 0, toplam_tutar: k?.toplam_tutar || mn * (k?.birim_fiyat || 0),
+      temin_turu: k?.temin_turu || "", notlar: String(k?.notlar || "").slice(0, 1000), yeni_malzeme_onerisi: !urunId });
+  }
+  return out;
+}
+const talepFirmaErisimi = (u, t) => { const fk = malzemeFirmaKapsami(u); return !fk || String(t?.firma || "").toUpperCase() === fk; };
 app.use(async (req, res, next) => {
   if (req.method === "OPTIONS" || !/^\/malzeme(\/|$)/.test(req.path)) return next();
   const u = optionalAuth(req);
@@ -28498,6 +28546,9 @@ app.use(async (req, res, next) => {
   let mm;
   try {
     if (m === "GET") {
+      // 29.10.2026: alt marka (Teknocenter) Şimşek'in eski depo / sarf / dağıtım özeti / fiyat listesi kayıtlarını görmez
+      if (malzemeFirmaKapsami(u) && /^\/malzeme\/(depo-stok|sarf|dagitim\/ozet|fiyat-listesi|fiyat-gecmisi)$/.test(yol))
+        return red("Bu eski Şimşek depo / fiyat kaydı firma kapsamınızda değil");
       // Talep formu yardımcıları: saha kodu önerisi, onay sayacı; malzeme adı / fiyat önerisi (yalnız Şimşek içi)
       if (/^\/malzeme\/(site-codes|bekleyen-count)$/.test(yol)) return next();
       if (/^\/malzeme\/(ara|fiyat-listesi)$/.test(yol)) return (_malzemeIc(u) || malzemeTamOkuma(u, req)) ? next() : red();
@@ -28637,12 +28688,19 @@ app.get("/malzeme/talepler", authMiddleware, async (req, res) => {
       }
     }
 
+    // 29.10.2026: arşivlenen (eski operasyon) talepler aktif listede yok — yönetici ?arsiv=1 ile görür; alt marka yalnız kendi firması
+    const ek = [];
+    const arsivGor = req.query.arsiv === "1" && !req.malzemeKisisel && malzemeYonetici(req.user);
+    ek.push(arsivGor ? "t.arsiv_tarihi IS NOT NULL" : "t.arsiv_tarihi IS NULL");
+    const fk = req.malzemeKisisel ? null : malzemeFirmaKapsami(req.user);
+    if (fk) { params.push(fk); ek.push(`UPPER(COALESCE(t.firma,'')) = $${params.length}`); }
+    const where2 = whereClause ? `${whereClause.replace(/^WHERE /, "WHERE (")}) AND ${ek.join(" AND ")}` : `WHERE ${ek.join(" AND ")}`;
     const r = await pool.query(
       `SELECT t.*,
         COALESCE((SELECT SUM(k.toplam_tutar) FROM malzeme_talep_kalemleri k WHERE k.talep_id = t.id),0) AS toplam_tutar,
         COALESCE((SELECT COUNT(*) FROM malzeme_talep_kalemleri k WHERE k.talep_id = t.id),0) AS kalem_sayisi
        FROM malzeme_talepler t
-       ${whereClause}
+       ${where2}
        ORDER BY t.created_at DESC`,
       params
     );
@@ -28654,44 +28712,47 @@ app.get("/malzeme/talepler", authMiddleware, async (req, res) => {
 app.get("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   try {
     const t = await pool.query("SELECT * FROM malzeme_talepler WHERE id=$1", [req.params.id]);
-    const k = await pool.query("SELECT * FROM malzeme_talep_kalemleri WHERE talep_id=$1 ORDER BY id", [req.params.id]);
+    if (!t.rows.length) return res.status(404).json({ ok: false, error: "Talep bulunamadı" });
+    // Alt marka yönetimi başka firmanın talebini göremez (kişisel sahiplik eski katmanda ayrıca kontrol edilir)
+    if (malzemeTamOkuma(req.user, req) && !talepFirmaErisimi(req.user, t.rows[0]) && String(t.rows[0].talep_eden_email || "").toLowerCase() !== String(req.user?.email || "").toLowerCase())
+      return res.status(403).json({ ok: false, error: "Bu talep firma kapsamınızda değil" });
+    const k = await pool.query(`SELECT k.*, u.kod AS urun_kod, u.teknik AS urun_teknik FROM malzeme_talep_kalemleri k LEFT JOIN malzeme_urun u ON u.id = k.urun_id WHERE k.talep_id=$1 ORDER BY k.id`, [req.params.id]).catch(() => pool.query("SELECT * FROM malzeme_talep_kalemleri WHERE talep_id=$1 ORDER BY id", [req.params.id]));
     res.json({ ...t.rows[0], kalemler: k.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /malzeme/talepler
+// POST /malzeme/talepler — 29.10.2026: Teknocenter talebi (firma TEKNO), saha sunucuda doğrulanır, kalemler katalogdan, tek transaction
 app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
+    await _malzemeKatalog.sema();
     const { talep_eden_email, talep_eden_ad, notlar, kalemler, durum: istenenDurum,
             bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
-    const yil = new Date().getFullYear();
-    const sayac = await pool.query(
-      "SELECT COUNT(*)+1 AS sira FROM malzeme_talepler WHERE EXTRACT(YEAR FROM created_at)=$1", [yil]
-    );
-    const talep_no = `MT-${yil}-${String(sayac.rows[0].sira).padStart(3,"0")}`;
+    const site = await teknoTalepSahasi(site_id);
+    const temiz = await talepKalemHazirla(client, kalemler);
     const durum = istenenDurum || "TASLAK";
-    const t = await pool.query(
+    await client.query("BEGIN");
+    const talep_no = await _malzemeKatalog.talepNoAl(client, new Date().getFullYear());
+    const t = await client.query(
       `INSERT INTO malzeme_talepler
          (talep_no, talep_eden_email, talep_eden_ad, durum, notlar,
-          bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+          bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi, firma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'TEKNO') RETURNING *`,
       [talep_no, talep_eden_email, talep_eden_ad, durum, notlar||"",
-       bolge||"", proje||"", site_type||"", site_id||"", talep_edilen_personel||"", talep_edilen_firma||"",
+       bolge||"", proje||"", site_type||"", site, talep_edilen_personel||"", talep_edilen_firma||"",
        talep_tarihi || new Date().toISOString().split("T")[0]]
     );
     const tId = t.rows[0].id;
-    if (Array.isArray(kalemler)) {
-      for (const k of kalemler) {
-        await pool.query(
-          `INSERT INTO malzeme_talep_kalemleri (talep_id, malzeme_adi, miktar, birim, birim_fiyat, toplam_tutar, temin_turu, notlar)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [tId, k.malzeme_adi, k.miktar, k.birim||"Adet", k.birim_fiyat||0,
-           k.toplam_tutar||(k.miktar*(k.birim_fiyat||0)), k.temin_turu||"", k.notlar||""]
-        );
-      }
+    for (const k of temiz) {
+      await client.query(
+        `INSERT INTO malzeme_talep_kalemleri (talep_id, malzeme_adi, miktar, birim, birim_fiyat, toplam_tutar, temin_turu, notlar, urun_id, yeni_malzeme_onerisi)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [tId, k.malzeme_adi, k.miktar, k.birim, k.birim_fiyat, k.toplam_tutar, k.temin_turu, k.notlar, k.urun_id, k.yeni_malzeme_onerisi]
+      );
     }
+    await client.query("COMMIT");
     // Fiyat listesine yeni fiyat varsa güncelle (kişisel talep ortak fiyat listesini değiştirmez)
-    for (const k of (req.malzemeKisisel ? [] : (kalemler||[]))) {
+    for (const k of (req.malzemeKisisel ? [] : temiz)) {
       if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
         await pool.query(
           `UPDATE malzeme_fiyat_listesi SET birim_fiyat=$1 WHERE LOWER(malzeme_adi)=LOWER($2)`,
@@ -28700,34 +28761,50 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
       }
     }
     res.json(t.rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); res.status(e.http || 500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
 });
 
 // PUT /malzeme/talepler/:id (talebi güncelle - taslak düzenleme)
 app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { notlar, kalemler, durum: istenenDurum,
+    await _malzemeKatalog.sema();
+    const { notlar, kalemler: kalemlerHam, durum: istenenDurum,
             bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
+    const mevcut = (await client.query("SELECT * FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0];
+    if (!mevcut) { const e = new Error("Talep bulunamadı"); e.http = 404; throw e; }
+    if (mevcut.arsiv_tarihi) { const e = new Error("Arşivlenmiş talep değiştirilemez"); e.http = 409; throw e; }
+    if (!talepFirmaErisimi(req.user, mevcut)) { const e = new Error("Bu talep firma kapsamınızda değil"); e.http = 403; throw e; }
+    const site = await teknoTalepSahasi(site_id);
+    const kalemler = Array.isArray(kalemlerHam) ? await talepKalemHazirla(client, kalemlerHam) : null;
+    if (kalemler) {
+      const bagli = await client.query(`SELECT 1 FROM malzeme_hareket h JOIN malzeme_talep_kalemleri k ON k.id = h.talep_kalem_id WHERE k.talep_id = $1 LIMIT 1`, [req.params.id]).catch(() => ({ rows: [] }));
+      if (bagli.rows.length) { const e = new Error("Bu talebin kalemlerine stok hareketi (mal kabul / teslim) bağlı; kalemler değiştirilemez"); e.http = 409; throw e; }
+    }
     const durum = istenenDurum || "TASLAK";
-    await pool.query(
+    await client.query("BEGIN");
+    await client.query(
       `UPDATE malzeme_talepler SET durum=$1, notlar=$2, bolge=$3, proje=$4, site_type=$5, site_id=$6,
-       talep_edilen_personel=$7, talep_edilen_firma=$8, talep_tarihi=$9
+       talep_edilen_personel=$7, talep_edilen_firma=$8, talep_tarihi=$9, firma=COALESCE(firma,'TEKNO')
        WHERE id=$10`,
-      [durum, notlar||"", bolge||"", proje||"", site_type||"", site_id||"",
+      [durum, notlar||"", bolge||"", proje||"", site_type||"", site,
        talep_edilen_personel||"", talep_edilen_firma||"",
        talep_tarihi||new Date().toISOString().split("T")[0], req.params.id]
     );
     // kalem güncelle
-    if (Array.isArray(kalemler)) {
-      await pool.query("DELETE FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]);
+    if (kalemler) {
+      await client.query("DELETE FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]);
       for (const k of kalemler) {
-        await pool.query(
-          `INSERT INTO malzeme_talep_kalemleri (talep_id, malzeme_adi, miktar, birim, birim_fiyat, toplam_tutar, temin_turu, notlar)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [req.params.id, k.malzeme_adi, k.miktar, k.birim||"Adet", k.birim_fiyat||0,
-           k.toplam_tutar||(k.miktar*(k.birim_fiyat||0)), k.temin_turu||"", k.notlar||""]
+        await client.query(
+          `INSERT INTO malzeme_talep_kalemleri (talep_id, malzeme_adi, miktar, birim, birim_fiyat, toplam_tutar, temin_turu, notlar, urun_id, yeni_malzeme_onerisi)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [req.params.id, k.malzeme_adi, k.miktar, k.birim, k.birim_fiyat, k.toplam_tutar, k.temin_turu, k.notlar, k.urun_id, k.yeni_malzeme_onerisi]
         );
       }
+    }
+    await client.query("COMMIT");
+    if (kalemler) {
       for (const k of (req.malzemeKisisel ? [] : kalemler)) {
         if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
           await pool.query(
@@ -28738,7 +28815,8 @@ app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
       }
     }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query("ROLLBACK").catch(() => {}); res.status(e.http || 500).json({ ok: false, error: e.message }); }
+  finally { client.release(); }
 });
 
 // GET /malzeme/ara?q=... — malzeme adı autocomplete (fiyat listesi + geçmiş taleplerden)
@@ -28787,6 +28865,8 @@ app.delete("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
   try {
     const t = await pool.query("SELECT * FROM malzeme_talepler WHERE id=$1", [req.params.id]);
     if (!t.rows.length) return res.status(404).json({ error: "Bulunamadı" });
+    if (t.rows[0].arsiv_tarihi) return res.status(409).json({ error: "Arşivlenmiş talep silinemez" });
+    if (!talepFirmaErisimi(req.user, t.rows[0])) return res.status(403).json({ error: "Bu talep firma kapsamınızda değil" });
     const durum = t.rows[0].durum;
     if (!["TASLAK","REDDEDILDI"].includes(durum)) {
       return res.status(400).json({ error: "Sadece Taslak veya Reddedildi talepler silinebilir" });
@@ -28808,8 +28888,9 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
     if (role === "rollout_mudur" || role === "bolge_mudur" || email === "nurcan.kus@simsektel.com") durum = "ROLLOUT_BEKLE";
     else if (email === "orhan.bedir@simsektel.com") durum = "PM_ONAY";
     else if (email === "duzgun.simsek@simsektel.com") durum = "DUZGUN_ONAY";
+    const fk = malzemeFirmaKapsami(req.user);
     const r = await pool.query(
-      "SELECT COUNT(*) FROM malzeme_talepler WHERE durum=$1", [durum]
+      "SELECT COUNT(*) FROM malzeme_talepler WHERE durum=$1 AND arsiv_tarihi IS NULL AND ($2::text IS NULL OR UPPER(COALESCE(firma,'')) = $2)", [durum, fk]
     );
     res.json({ count: Number(r.rows[0].count) });
   } catch (e) { res.json({ count: 0 }); }
@@ -28819,7 +28900,11 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
 app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
   try {
     const { durum, notlar, kalemler, onay_notu } = req.body;
-    const oncekiDurum = (await pool.query("SELECT durum FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0]?.durum || null;
+    const onceki = (await pool.query("SELECT durum, firma, arsiv_tarihi FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0];
+    if (!onceki) return res.status(404).json({ ok: false, error: "Talep bulunamadı" });
+    if (onceki.arsiv_tarihi) return res.status(409).json({ ok: false, error: "Arşivlenmiş talebin durumu değiştirilemez" });
+    if (!talepFirmaErisimi(req.user, onceki)) return res.status(403).json({ ok: false, error: "Bu talep firma kapsamınızda değil" });
+    const oncekiDurum = onceki.durum || null;
     const fields = ["durum=$1"];
     const vals = [durum];
     let idx = 2;
@@ -29210,6 +29295,10 @@ app.put("/malzeme/talepler/:id/kalem-dagitildi", authMiddleware, async (req, res
   try {
     const { kalem_id } = req.body;
     if (!kalem_id) return res.status(400).json({ error: "kalem_id gerekli" });
+    const tt = (await pool.query("SELECT firma, arsiv_tarihi FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0];
+    if (!tt) return res.status(404).json({ error: "Talep bulunamadı" });
+    if (tt.arsiv_tarihi) return res.status(409).json({ error: "Arşivlenmiş talep değiştirilemez" });
+    if (!talepFirmaErisimi(req.user, tt)) return res.status(403).json({ error: "Bu talep firma kapsamınızda değil" });
     await pool.query(
       "UPDATE malzeme_talep_kalemleri SET dagitim_yapildi = true WHERE id = $1",
       [kalem_id]

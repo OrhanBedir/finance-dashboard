@@ -153,7 +153,10 @@ function kur(app, c) {
   const { pool, authMiddleware, optionalAuth, kendiPersonelKaydi, tenantContext, malzemeDepoYetkili, malzemeTamOkuma,
     malzemeFiyatYetkili, taseronMu, personelSahaKapsami } = c;
   const ExcelJS = require("exceljs");
-  const stokOnayYetkili = (u) => malzemeFiyatYetkili(u); // ters kayıt, açılış onayı, depo tanımı, fazla kabul
+  const stokOnayYetkili = (u) => (c.stokOnayYetkili ? c.stokOnayYetkili(u) : malzemeFiyatYetkili(u)); // ters kayıt, açılış onayı, depo tanımı, fazla kabul
+  // Firma kapsamı (29.10.2026): alt marka yönetimi (Teknocenter) yalnız kendi firmasının deposu / personeli / hareketleriyle çalışır
+  const fkOf = (req) => (c.firmaKapsami ? c.firmaKapsami(req.user) : null);
+  const kapsamKontrol = (req, firma, ne) => { const fk = fkOf(req); if (fk && String(firma || "ERC").toUpperCase() !== fk) throw new StokHatasi(`${ne} firma kapsamınızda değil`, 403); };
   const kullaniciAnahtari = (u) => String(u?.user_id || u?.id || "") + ":" + String(u?.email || "").toLowerCase().trim();
   const testHataAcik = process.env.MALZEME_TEST_HATA === "1" && process.env.NODE_ENV !== "production";
 
@@ -352,9 +355,10 @@ function kur(app, c) {
   app.get("/malzeme/stok/ayar", kapi(null), yanit(async (req, res) => {
     const u = req.user;
     const p = await kendiPersonelKaydi(u);
-    const depolar = (await pool.query(`SELECT id, kod, ad, firma, aktif, acilis_id, acilis_tarihi FROM malzeme_depo ORDER BY aktif DESC, kod`)).rows;
+    const fk = fkOf(req);
+    const depolar = (await pool.query(`SELECT id, kod, ad, firma, aktif, acilis_id, acilis_tarihi FROM malzeme_depo WHERE ($1::text IS NULL OR UPPER(firma) = $1) ORDER BY aktif DESC, kod`, [fk])).rows;
     res.json({ ok: true, defter_acik: await defterAcik(), depolar, birimler: BIRIMLER, hareket_turleri: TUR_TR, lokasyonlar: LOK_TR,
-      yetki: { depo: malzemeDepoYetkili(u), onay: stokOnayYetkili(u), rapor: malzemeDepoYetkili(u) || malzemeTamOkuma(u, req), fiyat: malzemeFiyatYetkili(u), personel_id: p?.id || null },
+      yetki: { depo: malzemeDepoYetkili(u), onay: stokOnayYetkili(u), rapor: malzemeDepoYetkili(u) || malzemeTamOkuma(u, req), fiyat: malzemeFiyatYetkili(u), personel_id: p?.id || null, firma_kapsami: fk },
       maliyet_yontemi: "Bu sürümde stok değerlemesi yapılmaz; mal kabul satırında alış fiyatı anlık olarak saklanır. Geçmiş tüketimler güncel fiyatla yeniden hesaplanmaz." });
   }));
 
@@ -373,7 +377,7 @@ function kur(app, c) {
   // Teslim / filtre için personel listesi (yalnız ad, firma, bölge — maaş / iletişim / banka alanı yok)
   app.get("/malzeme/stok/personeller", kapi("rapor"), yanit(async (req, res) => {
     const r = await pool.query(`SELECT id, ad_soyad, UPPER(COALESCE(NULLIF(TRIM(marka),''),'ERC')) AS firma, bolge, unvan FROM personel
-      WHERE aktif = true ORDER BY ad_soyad LIMIT 2000`);
+      WHERE aktif = true AND ($1::text IS NULL OR UPPER(COALESCE(NULLIF(TRIM(marka),''),'ERC')) = $1) ORDER BY ad_soyad LIMIT 2000`, [fkOf(req)]);
     res.json({ ok: true, rows: r.rows });
   }));
 
@@ -386,6 +390,7 @@ function kur(app, c) {
     if (req.query.saha) f.saha = sahaNorm(req.query.saha);
     if (req.query.firma) f.firma = String(req.query.firma).trim().toUpperCase().slice(0, 20);
     if (req.query.tur && HAREKET_TURLERI.includes(String(req.query.tur))) f.tur = String(req.query.tur);
+    const fk = fkOf(req); if (fk) f.firma = fk; // istemci firma filtresi kapsamı genişletemez
     return f;
   }
 
@@ -396,7 +401,8 @@ function kur(app, c) {
     const depoFirma = f.firma ? `AND EXISTS (SELECT 1 FROM malzeme_depo d WHERE d.id::text = b.lok_id AND UPPER(d.firma) = ${ek(f.firma)})` : "";
     const perKos = f.personel_id ? `AND b.lok_id = ${ek(String(f.personel_id))}` : "";
     const perFirma = f.firma ? `AND EXISTS (SELECT 1 FROM personel pp WHERE pp.id::text = b.lok_id AND UPPER(COALESCE(NULLIF(TRIM(pp.marka),''),'ERC')) = ${ek(f.firma)})` : "";
-    const rezKos = f.depo_id ? `AND EXISTS (SELECT 1 FROM malzeme_rezervasyon rz WHERE rz.id::text = b.lok_id AND rz.depo_id = ${ek(f.depo_id)})` : "";
+    const rezKos = (f.depo_id ? `AND EXISTS (SELECT 1 FROM malzeme_rezervasyon rz WHERE rz.id::text = b.lok_id AND rz.depo_id = ${ek(f.depo_id)})` : "")
+      + (f.firma ? ` AND EXISTS (SELECT 1 FROM malzeme_rezervasyon rz JOIN malzeme_depo dz ON dz.id = rz.depo_id WHERE rz.id::text = b.lok_id AND UPPER(dz.firma) = ${ek(f.firma)})` : "");
     const tukKos = [f.bas ? `h.islem_tarihi >= ${ek(f.bas)}::date` : null, f.bit ? `h.islem_tarihi <= ${ek(f.bit)}::date` : null,
       f.personel_id ? `h.personel_id = ${ek(f.personel_id)}` : null, f.saha ? `h.saha_kodu = ${ek(f.saha)}` : null,
       f.firma ? `UPPER(COALESCE(h.firma,'')) = ${ek(f.firma)}` : null].filter(Boolean).join(" AND ");
@@ -495,7 +501,7 @@ function kur(app, c) {
     const durum = ["BEKLIYOR", "ONAYLANDI", "REDDEDILDI", "IPTAL"].includes(req.query.durum) ? req.query.durum : "BEKLIYOR";
     const r = await pool.query(`SELECT i.*, u.kod, u.ad AS urun_ad, u.temel_birim, pe.ad_soyad AS personel_ad, d.ad AS depo_ad
       FROM malzeme_iade i JOIN malzeme_urun u ON u.id = i.urun_id LEFT JOIN personel pe ON pe.id = i.personel_id LEFT JOIN malzeme_depo d ON d.id = i.depo_id
-      WHERE i.durum = $1 ORDER BY i.talep_tarihi ${durum === "BEKLIYOR" ? "ASC" : "DESC"} LIMIT 500`, [durum]);
+      WHERE i.durum = $1 AND ($2::text IS NULL OR UPPER(COALESCE(i.firma,'ERC')) = $2) ORDER BY i.talep_tarihi ${durum === "BEKLIYOR" ? "ASC" : "DESC"} LIMIT 500`, [durum, fkOf(req)]);
     res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, miktar: n3(x.miktar) })) });
   }));
 
@@ -503,7 +509,7 @@ function kur(app, c) {
     const r = await pool.query(`SELECT z.*, u.kod, u.ad AS urun_ad, u.temel_birim, pe.ad_soyad AS personel_ad, d.ad AS depo_ad,
         COALESCE((SELECT miktar FROM malzeme_bakiye b WHERE b.lok_tip = 'REZERV' AND b.lok_id = z.id::text AND b.urun_id = z.urun_id),0) AS kalan
       FROM malzeme_rezervasyon z JOIN malzeme_urun u ON u.id = z.urun_id LEFT JOIN personel pe ON pe.id = z.personel_id LEFT JOIN malzeme_depo d ON d.id = z.depo_id
-      WHERE ($1::text = 'hepsi' OR z.durum = 'ACIK') ORDER BY z.created_at DESC LIMIT 500`, [req.query.durum === "hepsi" ? "hepsi" : "ACIK"]);
+      WHERE ($1::text = 'hepsi' OR z.durum = 'ACIK') AND ($2::text IS NULL OR UPPER(d.firma) = $2) ORDER BY z.created_at DESC LIMIT 500`, [req.query.durum === "hepsi" ? "hepsi" : "ACIK", fkOf(req)]);
     res.json({ ok: true, rows: r.rows.map((x) => ({ ...x, miktar: n3(x.miktar), kalan: n3(x.kalan) })) });
   }));
 
@@ -528,8 +534,9 @@ function kur(app, c) {
     return out;
   }
   app.get("/malzeme/stok/kabul/:talepId", kapi("depo"), yanit(async (req, res) => {
-    const t = await pool.query(`SELECT id, talep_no, durum FROM malzeme_talepler WHERE id = $1`, [Number(req.params.talepId)]);
+    const t = await pool.query(`SELECT id, talep_no, durum, firma FROM malzeme_talepler WHERE id = $1`, [Number(req.params.talepId)]);
     if (!t.rows.length) throw new StokHatasi("Talep bulunamadı", 404);
+    kapsamKontrol(req, t.rows[0].firma, "Talep");
     res.json({ ok: true, talep: t.rows[0], kalemler: await kabulDurumu(pool, req.params.talepId) });
   }));
 
@@ -572,7 +579,7 @@ function kur(app, c) {
   // ═══ YAZMA — DEPO ═════════════════════════════════════════════════════════════════════════════════════════════
   app.post("/malzeme/stok/depo", kapi("onay"), (req, res) => tekilIslem(req, res, "depo", async (db) => {
     const kod = metin(req.body.kod, 20).toUpperCase(), ad = metin(req.body.ad, 100);
-    const firma = metin(req.body.firma || "ERC", 20).toUpperCase();
+    const firma = fkOf(req) || metin(req.body.firma || "ERC", 20).toUpperCase();
     if (!kod || !ad) throw new StokHatasi("Depo kodu ve adı zorunlu");
     const r = await db.query(`INSERT INTO malzeme_depo (kod, ad, firma, olusturan) VALUES ($1,$2,$3,$4) RETURNING *`, [kod, ad, firma, req.user.email]);
     return { depo: r.rows[0] };
@@ -664,7 +671,7 @@ function kur(app, c) {
 
   // Depoya giriş (satın alma talebi dışı: Huawei malzemesi, iade dışı bulunan vb.) — açıklama zorunlu
   app.post("/malzeme/stok/giris", kapi("depo"), (req, res) => tekilIslem(req, res, "giris", async (db) => {
-    const d = await depoGetir(db, req.body.depo_id); depoAcikZorunlu(d);
+    const d = await depoGetir(db, req.body.depo_id); kapsamKontrol(req, d.firma, "Depo"); depoAcikZorunlu(d);
     const kalemler = Array.isArray(req.body.kalemler) ? req.body.kalemler : [];
     if (!kalemler.length) throw new StokHatasi("En az bir kalem girin");
     const aciklama = metin(req.body.aciklama, 1000);
@@ -689,7 +696,9 @@ function kur(app, c) {
     if (!t.rows.length) throw new StokHatasi("Talep bulunamadı", 404);
     const talep = t.rows[0];
     if (!["SATINALINACAK", "DEPODA"].includes(talep.durum)) throw new StokHatasi(`Talep satın alma onayını tamamlamadı (${talep.durum}); mal kabul yapılamaz`, 409);
-    const d = await depoGetir(db, req.body.depo_id); depoAcikZorunlu(d);
+    if (talep.arsiv_tarihi) throw new StokHatasi("Arşivlenmiş talep için mal kabul yapılamaz", 409);
+    kapsamKontrol(req, talep.firma, "Talep");
+    const d = await depoGetir(db, req.body.depo_id); kapsamKontrol(req, d.firma, "Depo"); depoAcikZorunlu(d);
     const kalemler = Array.isArray(req.body.kalemler) ? req.body.kalemler : [];
     if (!kalemler.length) throw new StokHatasi("Teslim alınan kalem yok");
     const fazlaGerekce = metin(req.body.fazla_gerekce, 500);
@@ -731,8 +740,9 @@ function kur(app, c) {
 
   // Personele teslim (kısmi / tam). Rezervasyondan teslimde depodan ikinci kez düşülmez.
   app.post("/malzeme/stok/teslim", kapi("depo"), (req, res) => tekilIslem(req, res, "teslim", async (db) => {
-    const d = await depoGetir(db, req.body.depo_id); depoAcikZorunlu(d);
+    const d = await depoGetir(db, req.body.depo_id); kapsamKontrol(req, d.firma, "Depo"); depoAcikZorunlu(d);
     const per = await personelGetir(db, req.body.personel_id);
+    kapsamKontrol(req, per.firma, "Personel");
     if (!per.aktif) throw new StokHatasi("Personel pasif; teslim yapılamaz");
     const kalemler = Array.isArray(req.body.kalemler) ? req.body.kalemler : [];
     if (!kalemler.length) throw new StokHatasi("En az bir kalem girin");
@@ -779,7 +789,7 @@ function kur(app, c) {
   }));
 
   app.post("/malzeme/stok/rezervasyon", kapi("depo"), (req, res) => tekilIslem(req, res, "rezervasyon", async (db) => {
-    const d = await depoGetir(db, req.body.depo_id); depoAcikZorunlu(d);
+    const d = await depoGetir(db, req.body.depo_id); kapsamKontrol(req, d.firma, "Depo"); depoAcikZorunlu(d);
     const u = await urunGetir(db, req.body.urun_id, true);
     const m = await temeleCevir(db, u, req.body.miktar, req.body.birim);
     const per = req.body.personel_id ? await personelGetir(db, req.body.personel_id) : null;
@@ -798,6 +808,7 @@ function kur(app, c) {
     const rz = z.rows[0];
     if (!rz) throw new StokHatasi("Rezervasyon bulunamadı", 404);
     if (rz.durum !== "ACIK") throw new StokHatasi("Rezervasyon açık değil", 409);
+    kapsamKontrol(req, (await depoGetir(db, rz.depo_id)).firma, "Rezervasyon deposu");
     const b = await db.query(`SELECT miktar FROM malzeme_bakiye WHERE lok_tip = 'REZERV' AND lok_id = $1 AND urun_id = $2`, [String(rz.id), rz.urun_id]);
     const kalan = b.rows[0]?.miktar;
     if (Number(kalan) > 0) await hareketleriUygula(db, [{ tur: "REZERV_IPTAL", urun_id: rz.urun_id, miktar: kalan, kaynak_tip: "REZERV", kaynak_id: rz.id, hedef_tip: "DEPO", hedef_id: rz.depo_id,
@@ -812,10 +823,11 @@ function kur(app, c) {
     const i = z.rows[0];
     if (!i) throw new StokHatasi("İade talebi bulunamadı", 404);
     if (i.durum !== "BEKLIYOR") throw new StokHatasi(`İade talebi zaten sonuçlanmış (${i.durum})`, 409);
+    kapsamKontrol(req, i.firma, "İade talebi");
     const gerekce = metin(req.body.aciklama || req.body.gerekce, 1000);
     let depo = null;
     if (onay) {
-      depo = await depoGetir(db, req.body.depo_id || i.depo_id); depoAcikZorunlu(depo);
+      depo = await depoGetir(db, req.body.depo_id || i.depo_id); kapsamKontrol(req, depo.firma, "Depo"); depoAcikZorunlu(depo);
     } else if (!gerekce) throw new StokHatasi("Ret gerekçesi zorunlu");
     const per = await personelGetir(db, i.personel_id);
     const [h] = await hareketleriUygula(db, [{ tur: onay ? "IADE_ONAY" : "IADE_RED", urun_id: i.urun_id, miktar: i.miktar, kaynak_tip: "IADE", kaynak_id: i.personel_id,
@@ -836,8 +848,8 @@ function kur(app, c) {
     const u = await urunGetir(db, req.body.urun_id, true);
     const tip = String(req.body.lokasyon_tip || "").toUpperCase();
     let lokId, depo = null, per = null;
-    if (tip === "DEPO") { depo = await depoGetir(db, req.body.depo_id); depoAcikZorunlu(depo); lokId = String(depo.id); }
-    else if (tip === "PERSONEL") { per = await personelGetir(db, req.body.personel_id); lokId = String(per.id); }
+    if (tip === "DEPO") { depo = await depoGetir(db, req.body.depo_id); kapsamKontrol(req, depo.firma, "Depo"); depoAcikZorunlu(depo); lokId = String(depo.id); }
+    else if (tip === "PERSONEL") { per = await personelGetir(db, req.body.personel_id); kapsamKontrol(req, per.firma, "Personel"); lokId = String(per.id); }
     else throw new StokHatasi("Lokasyon DEPO ya da PERSONEL olmalı");
     const sayilanStr = String(req.body.sayilan_miktar ?? "").trim();
     if (!sayilanStr) throw new StokHatasi("Sayılan miktar zorunlu (hiç yoksa 0 yazın)");
@@ -866,6 +878,7 @@ function kur(app, c) {
     const h = r.rows[0];
     if (!h) throw new StokHatasi("Hareket bulunamadı", 404);
     if (h.ters_hareket_id) throw new StokHatasi("Bu hareket zaten ters kayıtla düzeltilmiş", 409);
+    kapsamKontrol(req, h.firma, "Hareket");
     if (!["GIRIS", "TESLIM", "TUKETIM", "SAYIM_DUZELTME", "ACILIS", "REZERV_TESLIM"].includes(h.tur))
       throw new StokHatasi(`${TUR_TR[h.tur] || h.tur} hareketi ters kayıtla düzeltilemez; kendi akışını kullanın`);
     // Rezervasyondan teslimin tersi depoya döner (rezervasyon kapanmış olabilir)
@@ -885,7 +898,9 @@ function kur(app, c) {
       if (!req.body.personel_id) throw new StokHatasi("Personel seçin");
       if (!malzemeDepoYetkili(req.user)) throw new StokHatasi("Yalnız kendi üzerinizdeki malzeme için işlem yapabilirsiniz", 403);
       if (!metin(req.body.aciklama)) throw new StokHatasi("Başkası adına kayıtta açıklama zorunlu");
-      return personelGetir(db, req.body.personel_id);
+      const p = await personelGetir(db, req.body.personel_id);
+      kapsamKontrol(req, p.firma, "Personel");
+      return p;
     }
     return req.benimPersonel;
   }
@@ -942,6 +957,7 @@ function kur(app, c) {
   // satirlar: [{ urun_kodu | urun_id, miktar, birim?, personel_id? | personel_email? }]  personel yoksa satır depoya aittir.
   app.post("/malzeme/stok/acilis/onizleme", kapi("depo"), (req, res) => tekilIslem(req, res, "acilis-onizleme", async (db) => {
     const d = await depoGetir(db, req.body.depo_id);
+    kapsamKontrol(req, d.firma, "Depo");
     if (depoAcikMi(d)) throw new StokHatasi(`"${d.ad}" deposunun açılışı ${gunStr(d.acilis_tarihi)} tarihinde yapıldı; ikinci açılış yapılamaz (sayım düzeltmesi kullanın)`, 409);
     const tarih = String(req.body.sayim_tarihi || "").slice(0, 10);
     if (!gunGecerli(tarih)) throw new StokHatasi("Sayım tarihi zorunlu (YYYY-AA-GG)");
@@ -974,6 +990,7 @@ function kur(app, c) {
         else {
           per = await personelGetir(db, pr.rows[0].id);
           if (!per.aktif) hatalar.push("personel pasif");
+          if (per.firma !== String(d.firma || "ERC").toUpperCase()) hatalar.push(`personel ${per.firma} firmasında; depo ${d.firma} — başka firmanın personeli bu açılışa yazılamaz`);
           const onceki = await db.query(`SELECT acilis_id FROM malzeme_hareket WHERE tur = 'ACILIS' AND hedef_tip = 'PERSONEL' AND hedef_id = $1 LIMIT 1`, [String(per.id)]);
           if (onceki.rows.length) hatalar.push(`personelin açılışı #${onceki.rows[0].acilis_id} ile zaten yapıldı`);
         }
@@ -997,12 +1014,13 @@ function kur(app, c) {
   }));
 
   app.get("/malzeme/stok/acilis", kapi("depo"), yanit(async (req, res) => {
-    const r = await pool.query(`SELECT a.*, d.ad AS depo_ad FROM malzeme_acilis a JOIN malzeme_depo d ON d.id = a.depo_id ORDER BY a.id DESC LIMIT 100`);
+    const r = await pool.query(`SELECT a.*, d.ad AS depo_ad FROM malzeme_acilis a JOIN malzeme_depo d ON d.id = a.depo_id WHERE ($1::text IS NULL OR UPPER(d.firma) = $1) ORDER BY a.id DESC LIMIT 100`, [fkOf(req)]);
     res.json({ ok: true, rows: r.rows });
   }));
   app.get("/malzeme/stok/acilis/:id", kapi("depo"), yanit(async (req, res) => {
     const a = await pool.query(`SELECT a.*, d.ad AS depo_ad FROM malzeme_acilis a JOIN malzeme_depo d ON d.id = a.depo_id WHERE a.id = $1`, [Number(req.params.id)]);
     if (!a.rows.length) throw new StokHatasi("Açılış bulunamadı", 404);
+    kapsamKontrol(req, (await depoGetir(pool, a.rows[0].depo_id)).firma, "Depo");
     const s = await pool.query(`SELECT s.*, u.kod, u.ad AS urun_ad, u.temel_birim, pe.ad_soyad AS personel_ad FROM malzeme_acilis_satir s
       LEFT JOIN malzeme_urun u ON u.id = s.urun_id LEFT JOIN personel pe ON pe.id = s.personel_id WHERE s.acilis_id = $1 ORDER BY s.satir_no`, [a.rows[0].id]);
     res.json({ ok: true, acilis: a.rows[0], satirlar: s.rows.map((x) => ({ ...x, miktar: x.miktar == null ? null : n3(x.miktar) })) });
@@ -1015,6 +1033,7 @@ function kur(app, c) {
     if (!ac) throw new StokHatasi("Açılış bulunamadı", 404);
     if (ac.durum !== "TASLAK") throw new StokHatasi(`Açılış zaten ${ac.durum === "UYGULANDI" ? "uygulandı" : "iptal edildi"}; tekrar uygulanamaz`, 409);
     const d = (await db.query(`SELECT * FROM malzeme_depo WHERE id = $1 FOR UPDATE`, [ac.depo_id])).rows[0];
+    kapsamKontrol(req, d.firma, "Depo");
     if (depoAcikMi(d)) throw new StokHatasi("Bu deponun açılışı zaten yapıldı", 409);
     const s = await db.query(`SELECT * FROM malzeme_acilis_satir WHERE acilis_id = $1 ORDER BY satir_no`, [ac.id]);
     if (s.rows.some((x) => x.hata)) throw new StokHatasi("Hatalı satır varken açılış uygulanamaz", 409);
@@ -1038,6 +1057,8 @@ function kur(app, c) {
   }));
 
   app.post("/malzeme/stok/acilis/:id/iptal", kapi("depo"), (req, res) => tekilIslem(req, res, "acilis-iptal:" + req.params.id, async (db) => {
+    const ac0 = (await db.query(`SELECT depo_id FROM malzeme_acilis WHERE id = $1`, [Number(req.params.id)])).rows[0];
+    if (ac0) kapsamKontrol(req, (await depoGetir(db, ac0.depo_id)).firma, "Depo");
     const r = await db.query(`UPDATE malzeme_acilis SET durum = 'IPTAL', iptal_aciklama = $2 WHERE id = $1 AND durum = 'TASLAK' RETURNING id`, [Number(req.params.id), metin(req.body.aciklama, 500) || null]);
     if (!r.rows.length) throw new StokHatasi("Yalnız taslak açılış iptal edilebilir", 409);
     return { iptal: r.rows[0].id };
@@ -1095,6 +1116,7 @@ function kur(app, c) {
   app.get("/malzeme/dagitim", authMiddleware, async (req, res, next) => {
     try {
       const u = req.user;
+      if (fkOf(req) && (malzemeDepoYetkili(u) || malzemeTamOkuma(u, req))) return res.json([]); // eski dağıtım geçmişi Şimşek'e ait — alt marka yönetimi görmez
       if (malzemeDepoYetkili(u) || malzemeTamOkuma(u, req) || taseronMu(u)) return next(); // yönetim görünümü / ret eski katmanda
       if (!(await defterAcik())) return next();
       const p = await kendiPersonelKaydi(u);
@@ -1111,6 +1133,7 @@ function kur(app, c) {
       res.json(rows);
     } catch (e) { hataDon(res, e); }
   });
+  c._sema = sema;
   app.put("/malzeme/dagitim/:id/iade", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     if (!(id > SENTETIK_ZIMMET)) return eskiRed(req, res);
@@ -1134,6 +1157,7 @@ function kur(app, c) {
       });
     } catch (e) { hataDon(res, e); }
   });
+  return { sema };
 }
 
 module.exports = { kur, semaKur, miktarAyristir, StokHatasi, TUR_TR, BIRIMLER };
