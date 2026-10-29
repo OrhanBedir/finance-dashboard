@@ -28626,24 +28626,13 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
       {!isRequester && <AvansOzetKartlari surum={list} onDegisti={load} firmaSabit={_altMarka ? _marka : null} />}
       {/* Filtre etkinken: filtreye uyan kayıtlardan fiilen ÖDENEN avanslar, ödeme gününe göre gruplanır. */}
       {!isRequester && (() => {
-        const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis);
-        // Ödenen kartları: tarih filtresi TALEP tarihine değil ÖDEME tarihine
-        // uygulanır — 28'de talep edilip 30'da ödenen avans 30'un kartına girer
-        // (Nakit Akışı ile birebir aynı mantık). Diğer filtreler aynen geçerli.
+        const filtreAktif = !!(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis || filterDonem || filterFirma);
+        // 29.10.2026 (Orhan: "Kartı Excel ile aynı yap, Excel doğru"): filtrede ödenen toplam, listede görünen ve Excel'e giden
+        // kayıtların AYNISINDAN hesaplanır — tarih filtresi TALEP tarihi (Excel ile aynı). Eskiden ödeme tarihine bakıyordu;
+        // 27'de talep edilip 28'de ödenen avans karttan düşüyor, kart Excel'den az gösteriyordu. Gün kutuları ödeme gününe
+        // göre dağılımı gösterir (aynı toplamın parçaları).
         const _odGun = (t) => String(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi || "").split("T")[0];
-        const odenmis = list.filter(t => {
-          if (t.durum !== "TAMAMLANDI") return false;
-          const g = _odGun(t);
-          if (!g) return false;
-          if (filterBaslangic && g < filterBaslangic) return false;
-          if (filterBitis && g > filterBitis) return false;
-          if (!aramaEslesir(t)) return false;
-          if (filterDurum && t.durum !== filterDurum) return false;
-          if (filterGider && t.gider_turu !== filterGider) return false;
-          if (filterBolge && t.bolge !== filterBolge) return false;
-          if (filterProje && t.proje !== filterProje) return false;
-          return true;
-        });
+        const odenmis = visibleList.filter(t => t.durum === "TAMAMLANDI" && !!_odGun(t));
         // Ödeme bekleyen = PD onaylı, muhasebe henüz ödemedi → bugün gereken nakit.
         // Filtreden bağımsız tüm listeden hesaplanır ki ihtiyaç hiç gizlenmesin.
         const bekleyenOdeme = list.filter(t => t.durum === "DIREKTOR_ONAY");
@@ -28669,7 +28658,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
               <div style={{ background: "linear-gradient(135deg, #1e3a5f, #2d5a8f)", borderRadius: "14px", padding: "12px 20px", color: "#fff", minWidth: "170px", boxShadow: "0 4px 14px rgba(30,58,95,0.25)" }}>
                 <div style={{ fontSize: "10.5px", fontWeight: 700, opacity: 0.75, letterSpacing: "0.05em" }}>💸 FİLTREDE ÖDENEN TOPLAM</div>
                 <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>₺{toplam.toLocaleString("tr-TR")}</div>
-                <div style={{ fontSize: "11px", opacity: 0.7 }}>{odenmis.length} kayıt · {sirali.length} gün</div>
+                <div style={{ fontSize: "11px", opacity: 0.7 }}>{odenmis.length} kayıt · talep tarihine göre · ödeme {sirali.length} gün</div>
               </div>
             )}
             {gosterilen.map(([g, v]) => (
