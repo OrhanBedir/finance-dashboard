@@ -2,7 +2,7 @@
    OTOMATİK SİSTEM YEDEĞİ (14.09.2026, Orhan kararı)
    public şemadaki TÜM tablolar tek Excel dosyasına yazılır (her tablo bir
    sayfa) ve e-posta ekinde gönderilir:
-     • 3 günde bir → Nurcan Kuş, Düzgün Şimşek, Eren Can Şimşek
+     • 3 günde bir → Düzgün Şimşek, Eren Can Şimşek (29.10.2026: Nurcan Kuş çıkarıldı — mali yetki matrisi)
      • 7 günde bir → Orhan Bedir
    Fotoğraf/belge dosyaları (Supabase deposu, ~2,7 GB) yedeğe GİRMEZ — e-posta
    boyutuna sığmaz; onlar depoda durur (14.09.2026 kararı).
@@ -13,7 +13,9 @@ const YEDEK_TIPLERI = {
   "3GUN": {
     gun: Number(process.env.YEDEK_GUN_3 || 3),
     alicilar: (process.env.YEDEK_ALICI_3GUN ||
-      "nurcan.kus@simsektel.com,duzgun.simsek@simsektel.com,eren.simsek@simsektel.com"),
+      // 29.10.2026 (MALİ YETKİ MATRİSİ): yedek tüm maaş ve fiyat tablolarını içerir → yalnız fiyat/maaş yetkilileri.
+      // Nurcan Kuş varsayılan listeden çıkarıldı. Render'da YEDEK_ALICI_3GUN tanımlıysa o liste de aynı kurala göre düzeltilmeli.
+      "duzgun.simsek@simsektel.com,eren.simsek@simsektel.com"),
     ad: "3 günlük yedek",
   },
   HAFTA: {

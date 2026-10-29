@@ -10,6 +10,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 // Türkiye il sınırları (81 il) — Org şeması "Haritadan Gör" için. Kaynak: github.com/alpers/Turkey-Maps-GeoJSON (Apache-2.0,
 // lisans: src/data/tr-iller.LICENSE.txt). Uygulamaya gömülüdür; çalışma anında dış harita servisi/tile kullanılmaz.
 import TR_ILLER from "./data/tr-iller.geo.json";
+import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -107,6 +108,10 @@ function Row({ label, value, isPercent, isNegativeHighlight, isPlainNumber, onCl
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5001";
+// 29.10.2026: fiyat görme yetkisi (sunucudaki MALİ YETKİ MATRİSİ → user.izinler.fiyat_goruntule). Sunucu yetkisize fiyat
+// alanını hiç göndermez; bu yardımcı yalnız ekranın "fiyat yok / ₺0" yerine "fiyat gizli" demesi ve fiyat sütununu
+// göstermemesi içindir — güvenlik kararı sunucudadır.
+const _fiyatGizliMi = () => { try { return JSON.parse(localStorage.getItem("user") || "null")?.izinler?.fiyat_goruntule === false; } catch { return false; } };
 
 // ── GLOBAL FETCH INTERCEPTOR (multi-tenant izolasyon güvenliği) ──────────────
 // Backend, isteğin hangi firmaya (tenant) ait olduğunu JWT'den çözer. Eğer bir
@@ -9099,7 +9104,7 @@ function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = fals
     } catch (e) { alert(`Karar kaydedilemedi: ${e.message}`); }
   };
   const prEkle = (kod, aciklama, adet) => { if (!onTalebeEkle) return; onTalebeEkle(kod, aciklama, adet); setEklenenler((p) => ({ ...p, [kod]: true })); };
-  const tl = (n, para) => (n === null || n === undefined ? "fiyat doğrulanamadı" : `${Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} ${para || ""}`);
+  const tl = (n, para) => (n === null || n === undefined ? (_fiyatGizliMi() ? "fiyat gizli" : "fiyat doğrulanamadı") : `${Number(n).toLocaleString("tr-TR", { maximumFractionDigits: 2 })} ${para || ""}`);
   const sayfaLink = (url, sayfa) => (url ? `${url}${sayfa ? `#page=${sayfa}` : ""}` : null);
   const tb = veri?.tssr_belge || null;
   const pk = veri?.paket || null;
@@ -9582,14 +9587,16 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
         r.fiyat_tahmini && fiyat ? "tahmini (son PO)" : "",
       ];
     });
+    // 29.10.2026: fiyat yetkisi yoksa Birim Fiyat / Para Birimi / PR Tutarı / Fiyat Notu sütunları dosyaya hiç yazılmaz
+    const _fg = _fiyatGizliMi();
     exportStandardExcel({
       title: `${kod} — Saha Kalemleri · PR / PO / Gerçekleşen`,
       sheetName: "Kalemler", fileBase: `${kod}_Kalemler`,
-      headers: ["Item Code", "Item Description", "PR (Talep)", "PO (Requested)", "Fark", "Done (Fiziki)", "Due (Fatura Edilecek)", "Billed (Fatura Edilen)", "QC", "Subcon", "PO No", "Birim Fiyat", "Para Birimi", "PR Tutarı", "Fiyat Notu"],
-      colWidths: [13, 58, 11, 14, 20, 13, 18, 18, 8, 22, 22, 13, 11, 14, 16],
+      headers: ["Item Code", "Item Description", "PR (Talep)", "PO (Requested)", "Fark", "Done (Fiziki)", "Due (Fatura Edilecek)", "Billed (Fatura Edilen)", "QC", "Subcon", "PO No", ...(_fg ? [] : ["Birim Fiyat", "Para Birimi", "PR Tutarı", "Fiyat Notu"])],
+      colWidths: [13, 58, 11, 14, 20, 13, 18, 18, 8, 22, 22, ...(_fg ? [] : [13, 11, 14, 16])],
       intCols: [2, 3, 5, 6, 7],   // adetler: ondalıksız (Due 0,2 gibi kesirli değerler kendiliğinden ondalıklı kalır)
-      numericCols: [11, 13],      // fiyat ve tutar: 2 ondalık
-      rows: satirlar,
+      numericCols: _fg ? [] : [11, 13],      // fiyat ve tutar: 2 ondalık
+      rows: _fg ? satirlar.map((x) => x.slice(0, 11)) : satirlar,
     });
   };
 
@@ -9705,7 +9712,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
                       <td style={{ ...S.td, textAlign:"left", fontFamily:"monospace", fontSize:12, color:"#0f172a" }}>
                         {r.item_code}
                         {r.yeni && <span style={{ marginLeft:6, background:"#f3e8ff", color:"#7c3aed", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700 }}>YENİ</span>}
-                        {r.boq_surum && <span title={`PR'a yazılan sürüm · ${r.boq_birim_fiyat != null ? Number(r.boq_birim_fiyat).toLocaleString("tr-TR") + " " + (r.boq_para_birimi || "") : "fiyat yok"}${r.boq_birim ? " / " + r.boq_birim : ""}${r.boq_secim_gerekce ? " · gerekçe: " + r.boq_secim_gerekce : ""}`}
+                        {r.boq_surum && <span title={`PR'a yazılan sürüm · ${r.boq_birim_fiyat != null ? Number(r.boq_birim_fiyat).toLocaleString("tr-TR") + " " + (r.boq_para_birimi || "") : (_fiyatGizliMi() ? "fiyat gizli" : "fiyat yok")}${r.boq_birim ? " / " + r.boq_birim : ""}${r.boq_secim_gerekce ? " · gerekçe: " + r.boq_secim_gerekce : ""}`}
                           style={{ marginLeft:6, background: r.boq_surum === "BOQ2026" ? "#dcfce7" : "#fef3c7", color: r.boq_surum === "BOQ2026" ? "#166534" : "#b45309", borderRadius:5, padding:"1px 6px", fontSize:9.5, fontWeight:700, fontFamily:"inherit" }}>
                           {r.boq_surum === "BOQ2026" ? "2026" : "2025"}{boqSecim?.surum && r.boq_surum !== boqSecim.surum ? " ≠" : ""}</span>}
                         {asistanUyari[r.item_code] && (
@@ -10996,7 +11003,7 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
           </div>
           <div style={{ display:"flex", gap:8 }}>
             {statBadge(poSummary.totalQty, "Toplam Adet", "#60a5fa")}
-            {statBadge(formatTRY(poSummary.totalAmount), "Toplam Tutar", "#34d399")}
+            {!_fiyatGizliMi() && statBadge(formatTRY(poSummary.totalAmount), "Toplam Tutar", "#34d399")}
           </div>
         </div>
         {/* Table */}
@@ -11004,7 +11011,7 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
               <tr>
-                {["PO No","Project Code","Site Code","Item Code","Item Description","Req. Qty","Due Qty","Currency","Unit Price"].map(h => (
+                {["PO No","Project Code","Site Code","Item Code","Item Description","Req. Qty","Due Qty",...(_fiyatGizliMi() ? [] : ["Currency","Unit Price"])].map(h => (
                   <th key={h} style={thStLight()}>{h}</th>
                 ))}
               </tr>
@@ -11035,8 +11042,10 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
                     <td style={{ padding:"9px 12px", fontSize:12, maxWidth:280 }} title={row.item_description||""}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:260 }}>{row.item_description || "-"}</div></td>
                     <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600 }}>{row.requested_qty ?? "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:13, textAlign:"center", fontWeight:600, color: Number(row.due_qty||0) > 0 ? "#dc2626" : "#16a34a" }}>{row.due_qty ?? "-"}</td>
+                    {!_fiyatGizliMi() && <>
                     <td style={{ padding:"9px 12px", fontSize:12 }}>{row.currency || "-"}</td>
                     <td style={{ padding:"9px 12px", fontSize:13, fontWeight:600 }}>{Number(row.unit_price||0)===0 ? "-" : formatMoneyByCurrency(row.unit_price, row.currency)}</td>
+                    </>}
                   </tr>
                 ))
               )}
@@ -11060,14 +11069,14 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
               <div style={{ fontWeight:800, fontSize:13, color:"#b45309", marginBottom:8 }}>
                 ⚠️ Bu sahada PO açılmış ama girilmemiş {sahaOneri.eksik.length} kalem
                 <span style={{ fontWeight:600, color:"#92400e", marginLeft:8, fontSize:12 }}>
-                  (toplam ₺{sahaOneri.eksik.reduce((s,x)=>s+Number(x.requested_qty||0)*Number(x.unit_price||0),0).toLocaleString("tr-TR",{maximumFractionDigits:0})})
+                  {!_fiyatGizliMi() && <>(toplam ₺{sahaOneri.eksik.reduce((s,x)=>s+Number(x.requested_qty||0)*Number(x.unit_price||0),0).toLocaleString("tr-TR",{maximumFractionDigits:0})})</>}
                 </span>
               </div>
               {sahaOneri.eksik.map((x,i)=>(
                 <div key={`${x.item_code}-${i}`} style={{ display:"flex", justifyContent:"space-between", gap:10, padding:"6px 10px", background: i%2?"#fffbeb":"#fefce8", borderRadius:8, marginBottom:4, fontSize:12.5, flexWrap:"wrap" }}>
                   <span><b style={{ fontFamily:"monospace" }}>{x.item_code}</b> · {x.item_description}</span>
                   <span style={{ whiteSpace:"nowrap", color:"#92400e", fontWeight:700 }}>
-                    {Number(x.requested_qty)} adet · PO {x.po_no || "-"} · ₺{(Number(x.requested_qty||0)*Number(x.unit_price||0)).toLocaleString("tr-TR",{maximumFractionDigits:0})}
+                    {Number(x.requested_qty)} adet · PO {x.po_no || "-"}{!_fiyatGizliMi() && <> · ₺{(Number(x.requested_qty||0)*Number(x.unit_price||0)).toLocaleString("tr-TR",{maximumFractionDigits:0})}</>}
                   </span>
                 </div>
               ))}
@@ -11211,7 +11220,7 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
                     {boqSecim.surum === "BOQ2026" ? "2026 BoQ — 12 Ekim 2026 ve sonrası" : boqSecim.surum === "BOQ2025" ? "2025 BoQ — Eski fiyat listesi" : "BoQ sürümü seçilmedi"}
                   </span>
                   {(() => { const k = itemOptions.find((x) => x.item_code === form.item_code); return k && k.surum ? (
-                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{k.unit || "?"} · {k.unit_price == null ? "fiyat yok" : `${Number(k.unit_price).toLocaleString("tr-TR")} ${k.currency || ""}`}{k.kaynak ? ` · ${k.kaynak}` : ""}</span>
+                    <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{k.unit || "?"} · {k.unit_price == null ? (_fiyatGizliMi() ? "fiyat gizli" : "fiyat yok") : `${Number(k.unit_price).toLocaleString("tr-TR")} ${k.currency || ""}`}{k.kaynak ? ` · ${k.kaynak}` : ""}</span>
                   ) : null; })()}
                 </div>
                 {/* Item Description – full width search bar */}
@@ -29459,7 +29468,153 @@ function TwoKXPanel({ twokxData, twokxPricing, isAdmin, API_BASE, onRefresh }) {
   );
 }
 
-function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
+// ═══ BÖLGE ANALİZİ — FİYAT YETKİSİNE GÖRE GÖRÜNÜM (29.10.2026, Orhan onayı) ═══════════════════════════
+// Fiyat görme yetkisi (sunucudaki MALİ YETKİ MATRİSİ; user.izinler.fiyat_goruntule) kapalı backofis kullanıcısı
+// tutarsız, kalem/miktar bazlı görünümü alır. Sunucu bu kullanıcıya birim fiyat / tutar alanı zaten göndermez;
+// eski izinle açık kalmış bir ekran sunucudan fiyat_gizli işareti gelince fiyatsız görünüme geçer.
+function RegionAnalysis(props) {
+  const [fiyatGizli, setFiyatGizli] = useState(_fiyatGizliMi);
+  if (fiyatGizli) return <RegionAnalysisFiyatsiz {...props} />;
+  return <RegionAnalysisFiyatli {...props} onFiyatGizli={() => setFiyatGizli(true)} />;
+}
+
+const _BOLGE_SIRA = ["Ankara", "İzmir", "Antalya"];
+function RegionAnalysisFiyatsiz({ isSubconUser, userSubconName }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hata, setHata] = useState("");
+  const [liste, setListe] = useState(null); // { tur, baslik, bolge }
+  const [arama, setArama] = useState("");
+  useEffect(() => {
+    let iptal = false;
+    (async () => {
+      try {
+        const d = await fetchJson(`${API_BASE}/dashboard/result`, { withAuth: true });
+        if (!iptal) setRows(Array.isArray(d.rows) ? d.rows : []);
+      } catch (e) { if (!iptal) setHata(e.message || "Bölge verisi alınamadı"); }
+      finally { if (!iptal) setLoading(false); }
+    })();
+    return () => { iptal = true; };
+  }, []);
+  const kalemler = useMemo(() => fiyatsizKalemler(rows, getRegion), [rows]);
+  const genel = useMemo(() => fiyatsizOzet(kalemler), [kalemler]);
+  const bolgeler = useMemo(() => {
+    const adlar = [..._BOLGE_SIRA.filter((b) => kalemler.some((k) => k.bolge === b))];
+    if (kalemler.some((k) => !_BOLGE_SIRA.includes(k.bolge))) adlar.push("Diğer");
+    return adlar.map((b) => {
+      const kl = kalemler.filter((k) => (b === "Diğer" ? !_BOLGE_SIRA.includes(k.bolge) : k.bolge === b));
+      return { bolge: b, kalemler: kl, ozet: fiyatsizOzet(kl) };
+    });
+  }, [kalemler]);
+  // PO iptal adayı: PR miktarı 0, PO açık (fiyatlı görünümdeki "PO İptal Edilmeli" ile aynı koşul, kalem anahtarında tekil)
+  const poIptal = useMemo(() => {
+    const m = new Map();
+    const goruldu = new Set();
+    for (const r of rows) {
+      if (r?.id != null) { if (goruldu.has(r.id)) continue; goruldu.add(r.id); }
+      const k = kalemAnahtari(r);
+      const x = m.get(k) || { pr: 0, po: Number(r.requested_qty || 0) };
+      x.pr += Number(r.done_qty || 0); m.set(k, x);
+    }
+    return [...m.values()].filter((x) => x.pr === 0 && x.po > 0).length;
+  }, [rows]);
+
+  const birimMetni = (l) => (l && l.length ? l.map((b) => `${formatNumber(b.miktar)} ${b.birim}`).join(" · ") : "");
+  const listeAc = (tur, baslik, bolge = null) => { setArama(""); setListe({ tur, baslik, bolge }); };
+  const listeKalemleri = liste ? (liste.bolge ? (bolgeler.find((b) => b.bolge === liste.bolge)?.kalemler || []) : kalemler) : [];
+  const listeSatirlari = liste ? fiyatsizListe(listeKalemleri, liste.tur).filter((k) => {
+    const q = arama.trim().toLocaleUpperCase("tr-TR");
+    return !q || `${k.site_code} ${k.item_code} ${k.item_description} ${k.po_no} ${k.project_code}`.toLocaleUpperCase("tr-TR").includes(q);
+  }) : [];
+  const excelIndir = () => {
+    if (!liste) return;
+    // Ekrandaki listeyle aynı ölçü ve aynı sütunlar (arama süzgeci dahil); fiyat / tutar sütunu yok
+    const sut = LISTE_SUTUNLARI[liste.tur];
+    const aoa = [sut.map(([b]) => b), ...listeSatirlari.map((k) => sut.map(([, a]) => k[a] ?? ""))];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Kalemler");
+    XLSX.writeFile(wb, `Bolge_Analizi_${liste.tur}${liste.bolge ? "_" + liste.bolge : ""}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const satir = (etiket, deger, alt, onClick, renk) => (
+    <div onClick={onClick} title={onClick ? "Kalem listesi için tıklayın" : undefined}
+      style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: onClick ? "pointer" : "default" }}>
+      <div style={{ color: "#374151", textAlign: "left" }}>
+        {etiket}{onClick && <span style={{ marginLeft: 6, fontSize: "11px" }}>🔍</span>}
+        {alt && <div style={{ fontSize: "11px", color: "#64748b", marginTop: 2 }}>{alt}</div>}
+      </div>
+      <div style={{ fontWeight: 600, color: renk || "#111827", whiteSpace: "nowrap", textAlign: "right" }}>{deger}</div>
+    </div>
+  );
+  const oranMetni = (o) => (o.yuzde === null ? "—" : `%${o.yuzde.toFixed(1)}`);
+  const ozetSatirlari = (o, bolge = null) => (
+    <>
+      {satir("Tamamlanan İş Miktarı", `${formatNumber(o.tamamlanan.kalem)} kalem`, `${formatNumber(o.tamamlanan.saha)} saha · ${formatNumber(o.tamamlanan.pr_satir)} PR satırı`, () => listeAc("tamamlanan", "Tamamlanan İş Kalemleri", bolge))}
+      {satir("Kesilen Fatura Miktarı", `${formatNumber(o.faturalanan.kalem)} kalem`, [`tam ${formatNumber(o.faturalanan.tam)} · kısmi ${formatNumber(o.faturalanan.kismi)}`, birimMetni(o.faturalanan.birimler)].filter(Boolean).join(" · "), () => listeAc("faturalanan", "Faturalanan Kalemler (HW PO faturalanan miktar)", bolge))}
+      {satir("Faturalandırma Oranı (kalem bazlı)", oranMetni(o.oran), o.oran.payda ? `tam faturalanan ${formatNumber(o.oran.pay)} / PR'lı kalem ${formatNumber(o.oran.payda)} · tutar ağırlıklı değil` : "PR'lı kalem yok — oran tanımsız")}
+      {satir("Faturalanmamış İş", `${formatNumber(o.faturalanmamis.kalem)} kalem`, `${formatNumber(o.faturalanmamis.saha)} saha`, () => listeAc("faturalanmamis", "Faturalanmamış Kalemler", bolge), "#dc2626")}
+      {satir("PO Açılmış Ama Faturalanmamış", `${formatNumber(o.poAcikFaturasiz.kalem)} kalem`, birimMetni(o.poAcikFaturasiz.birimler) ? `kalan: ${birimMetni(o.poAcikFaturasiz.birimler)}` : null, () => listeAc("poAcikFaturasiz", "PO Açılmış Ama Faturalanmamış Kalemler", bolge), "#b45309")}
+      {satir("PO Açılmamış İş", `${formatNumber(o.poAcilmamis.kalem)} kalem`, `${formatNumber(o.poAcilmamis.saha)} saha`, () => listeAc("poAcilmamis", "PO Açılmamış / Eksik PO Kalemleri", bolge), "#dc2626")}
+    </>
+  );
+
+  if (loading) return <div className="loading">Bölge verisi yükleniyor…</div>;
+  return (
+    <>
+      <h1 style={{ marginBottom: "10px", textAlign: "center" }}>🗺️ Bölge Analizi</h1>
+      {hata && <div style={{ textAlign: "center", color: "#b91c1c", marginBottom: 10 }}>{hata}</div>}
+      <div style={{ maxWidth: "520px", margin: "10px auto 30px auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 12px 30px rgba(0,0,0,0.08)", border: "1px solid #e5e7eb" }}>
+        <div style={{ background: "#1f2937", color: "#fff", padding: "10px 16px", fontWeight: 600, fontSize: "16px", textAlign: "center" }}>
+          {isSubconUser && userSubconName ? `${userSubconName} GENEL ÖZET` : "GENEL ÖZET"}
+          <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px" }}>
+            🔒 Fiyatsız görünüm · kalem = saha + proje + item code · miktarlar birim bazında
+          </div>
+        </div>
+        {ozetSatirlari(genel)}
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff7ed" }}>
+          <div style={{ color: "#b45309", fontWeight: 600 }}>⚠️ PO İptal Edilmeli</div>
+          <div style={{ fontWeight: 700, color: "#b45309" }}>{formatNumber(poIptal)} kalem</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "24px", maxWidth: "1200px", margin: "20px auto" }}>
+        {bolgeler.length === 0 ? <div className="loading">Bölge verisi bulunamadı</div> : bolgeler.map((b) => (
+          <div key={b.bolge} style={{ flex: "0 1 360px", maxWidth: "400px", width: "100%", borderRadius: "16px", overflow: "hidden", boxShadow: "0 10px 25px rgba(0,0,0,0.08)", border: "1px solid #e5e7eb", background: "#fff" }}>
+            <div style={{ background: "#1f2937", color: "#fff", padding: "12px 16px", fontWeight: 700, fontSize: "20px", textAlign: "center" }}>{b.bolge}</div>
+            {ozetSatirlari(b.ozet, b.bolge)}
+          </div>
+        ))}
+      </div>
+      {liste && createPortal(
+        <div onClick={() => setListe(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "min(1200px, 100%)", maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: 15 }}>{liste.baslik}{liste.bolge ? ` · ${liste.bolge}` : ""}</strong>
+              <span style={{ fontSize: 12, color: "#64748b" }}>{formatNumber(listeSatirlari.length)} kalem</span>
+              <input value={arama} onChange={(e) => setArama(e.target.value)} placeholder="Saha / item / PO ara" style={{ marginLeft: "auto", padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }} />
+              <button onClick={excelIndir} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #16a34a", background: "#f0fdf4", color: "#166534", fontWeight: 700, cursor: "pointer" }}>Excel İndir</button>
+              <button onClick={() => setListe(null)} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>Kapat</button>
+            </div>
+            <div style={{ overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead><tr>{LISTE_SUTUNLARI[liste.tur].map(([b]) => <th key={b} style={{ position: "sticky", top: 0, background: "#f1f5f9", textAlign: "left", padding: "7px 8px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{b}</th>)}</tr></thead>
+                <tbody>
+                  {listeSatirlari.map((k) => (
+                    <tr key={k.anahtar}>{LISTE_SUTUNLARI[liste.tur].map(([b, a]) => (
+                      <td key={b} style={{ padding: "6px 8px", borderBottom: "1px solid #f1f5f9", whiteSpace: a === "item_description" ? "normal" : "nowrap" }}>{typeof k[a] === "number" ? formatNumber(k[a]) : (k[a] || "—")}</td>
+                    ))}</tr>
+                  ))}
+                  {listeSatirlari.length === 0 && <tr><td colSpan={LISTE_SUTUNLARI[liste.tur].length} style={{ padding: 16, textAlign: "center", color: "#64748b" }}>Kalem yok</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>, document.body)}
+    </>
+  );
+}
+
+function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, onFiyatGizli }) {
   const [filterText, setFilterText] = useState("");
   const [regionSearch, setRegionSearch] = useState("");
   const [sortConfig, setSortConfig] = useState({
@@ -29724,6 +29879,8 @@ function RegionAnalysis({ isSubconUser, userSubconName, userPaymentRate }) {
       const data = await fetchJson(`${API_BASE}/dashboard/result`, {
         withAuth: true,
       });
+      // 29.10.2026: sunucu fiyat yetkisi kapalı diyor (izin sonradan değişmiş olabilir) → fiyatsız görünüm
+      if (data?.fiyat_gizli === true && typeof onFiyatGizli === "function") { onFiyatGizli(); return; }
       let resultRows = data.rows || [];
       setAllRows(resultRows);
       // 2KX: sadece 2026 sahaları + 5 özel item panelden hariç
@@ -35835,8 +35992,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
         cell(k.malzeme_adi||"",               {bg,wrap:true}),
         cell(Number(k.miktar||0),              {align:"center",bg}),
         cell(k.birim||"Adet",                  {align:"center",bg}),
-        cell(Number((k.birim_fiyat||0).toFixed?Number(k.birim_fiyat||0).toFixed(2):k.birim_fiyat||0), {align:"right",bg}),
-        cell(Number(Number(k.toplam_tutar||0).toFixed(2)), {align:"right",bg,bold:Number(k.toplam_tutar||0)>0,color:Number(k.toplam_tutar||0)>0?GRN:FBLK}),
+        // 29.10.2026: fiyat yetkisi yoksa sunucu fiyatı göndermez → dosyaya 0 değil "gizli" yazılır
+        _fiyatGizliMi() ? cell("gizli", {align:"right",bg,color:"9ca3af"}) : cell(Number((k.birim_fiyat||0).toFixed?Number(k.birim_fiyat||0).toFixed(2):k.birim_fiyat||0), {align:"right",bg}),
+        _fiyatGizliMi() ? cell("gizli", {align:"right",bg,color:"9ca3af"}) : cell(Number(Number(k.toplam_tutar||0).toFixed(2)), {align:"right",bg,bold:Number(k.toplam_tutar||0)>0,color:Number(k.toplam_tutar||0)>0?GRN:FBLK}),
         cell(k.notlar||"",                    {bg,wrap:true,italic:true,color:"6b7280"})
       );
     });
@@ -35845,7 +36003,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
     const rToplam = R(
       empty(), empty(), empty(), empty(),
       cell("GENEL TOPLAM (₺)", {bold:true,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
-      cell(Number(toplam.toFixed(2)),          {bold:true,sz:12,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
+      _fiyatGizliMi() ? cell("gizli", {bold:true,bg:GRLT,align:"right",color:"9ca3af",borderColor:"86efac"}) : cell(Number(toplam.toFixed(2)),          {bold:true,sz:12,bg:GRLT,align:"right",color:GRN,borderColor:"86efac"}),
       empty()
     );
 
@@ -36527,7 +36685,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                 <tr style={{ background:"#f0f9ff",fontWeight:700 }}>
                   <td colSpan={5} style={{ padding:"8px 10px",textAlign:"right" }}>Genel Toplam:</td>
                   <td style={{ padding:"8px 10px",color:"#15803d",fontSize:15 }}>
-                    ₺{detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}
+                    {_fiyatGizliMi() ? "fiyat gizli" : `₺${detayKalemler.reduce((s,k)=>s+Number(k.toplam_tutar||0),0).toLocaleString("tr-TR")}`}
                   </td>
                   <td colSpan={canMuratTedarik?4:canMurat?3:2}></td>
                 </tr>
@@ -36926,7 +37084,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       {/* Tabs */}
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
         {[...(!_isPersonelOnly?[["talepler","📋 Talepler"]]:[]),
-          ...(canSeeDepo?[["depo","🏭 Depo Stok"],["fiyat","💰 Fiyat Listesi"]]:[]),
+          ...(canSeeDepo?[["depo","🏭 Depo Stok"],...(_fiyatGizliMi()?[]:[["fiyat","💰 Fiyat Listesi"]])]:[]),
           ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"📤 Dağıtım"]
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
@@ -37877,7 +38035,9 @@ function App() {
   // ve şifre belirler; silme/rol/marka/pasife alma ve bekleyen onayı kapalıdır.
   const isUsersAdminOnly = !isAdmin && user?.users_admin === true;
   const canOpenAdminPanel = isAdmin || isUsersAdminOnly;
-  const isFinanceUser = isAdmin || ["finance","muhasebe"].includes(user?.role) || ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"].includes((user?.email || "").toLowerCase());
+  // 29.10.2026: Finans paneli bütünüyle tutar ekranıdır — fiyat yetkisi (MALİ YETKİ MATRİSİ) yoksa menüde yok (sunucu da 403)
+  const _fiyatGizli = _fiyatGizliMi();
+  const isFinanceUser = !_fiyatGizli && (isAdmin || ["finance","muhasebe"].includes(user?.role) || ["nurcan.kus@simsektel.com","serdar.altinova@simsektel.com"].includes((user?.email || "").toLowerCase()));
 
   // Ünvan görüntüleme fonksiyonu
   const getUserTitle = (u) => {
@@ -37982,6 +38142,8 @@ function App() {
     const is2KX = String(u?.subcon_name || "").toUpperCase().includes("2KX");
     if (u?.role === "platform_admin") return "platform";
     if (String(u?.role || "").toLowerCase() === "isg") return "isg_home"; // 21.10.2026: İSG Sorumlusu ana ekranı
+    // 29.10.2026: fiyat yetkisi olmayan backofis kullanıcısı finans / P&L yerine fiyatsız Bölge Analizi'ne iner
+    if (u?.izinler?.fiyat_goruntule === false && u?.role !== "user") return "region";
     // Alt marka (AHY) yöneticisi: subcon_name taşısa da kendi Kâr/Zarar'ına iner
     if (u?.hw_yukleme === false && ["admin","direktor","muhasebe","genel_mudur"].includes(String(u?.role||"").toLowerCase())) return "marka_pl";
     // 2KX kullanıcısı (serdaraltinova@gmail.com) doğrudan 2KX Paneli'ne iner
@@ -38485,6 +38647,8 @@ function App() {
       const _luIsFinance = ["finance","admin","genel_mudur","muhasebe"].includes(_luRole) || _lue === "orhan@simsektel.com" || _lue === "nurcan.kus@simsektel.com";
       if (_luRole === "platform_admin") setPage("platform");
       else if (_luRole === "isg") setPage("isg_home");
+      // 29.10.2026: fiyat yetkisi olmayan backofis → finans yerine fiyatsız Bölge Analizi
+      else if (_lu?.izinler?.fiyat_goruntule === false && _luRole !== "user") setPage("region");
       else if (_luIsFinance && !_luIsSubcon) setPage("finance");
       else if (_lu?.role === "user" && !_luIsBolge && !_luIsRolloutOverride) setPage("is_avans"); // 20.10.2026: Personel Harcamaları → "Benim İşlemlerim" açılır
       else if (_luIsBolge || _luIsSubcon) setPage("region");
@@ -39060,7 +39224,7 @@ function App() {
         {/* ── ÜST MENÜ (02.09.2026): sol menü yerine Huawei eSupplier tarzı üst çubuk + açılır kartlar ── */}
         <div className="topnav" onClick={(e)=>e.stopPropagation()}>
           <div className="topnav-brand" title="Ana sayfa"
-            onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>
+            onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka && !_fiyatGizli) setPage('marka_finans'); else if (isAltMarka) setPage('region'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>
             <div className="topnav-mark">🏗</div>
             <div>
               <div className="topnav-brand-name">{isPlatformAdmin ? 'Omnix' : (user?.marka_ad || user?.tenant_name || (user?.tenant === '2kx' ? '2KX Haberleşme' : 'ERC Mühendislik'))}</div>
@@ -39090,7 +39254,7 @@ function App() {
                 <TopNavMenu id="ana" label="Ana Menü" open={navOpen} onToggle={setNavOpen} wide items={[
                   ...(isPlatformAdmin ? [{ ikon:'←', label:'Platform Konsolu', onClick:()=>{ setFirmaMode(false); setPage('platform'); fetchPlatformOverview(); } }] : []),
                   ...(isFinanceUser && !isAltMarka ? [{ ikon:'📊', label:'Finans Paneli', sub:'Özet, PO / hakediş durumu', aktif: page==='finance', onClick:()=>setPage('finance') }] : []),
-                  ...(isAltMarka && isAdmin ? [{ ikon:'📈', label:'Kâr / Zarar (P&L)', sub:'Marka bazlı gelir tablosu', aktif: page==='marka_pl', onClick:()=>setPage('marka_pl') }] : []),
+                  ...(isAltMarka && isAdmin && !_fiyatGizli ? [{ ikon:'📈', label:'Kâr / Zarar (P&L)', sub:'Marka bazlı gelir tablosu', aktif: page==='marka_pl', onClick:()=>setPage('marka_pl') }] : []),
                   { ikon:'🗺', label:'Bölge Analizi', sub:'PO açılmamış / eksik işler', aktif: page==='region', onClick:()=>setPage('region') },
                   ...(!isAltMarka ? [{ ikon:'📡', label:'Rollout Data', sub:'Saha ilerleme, belgeler, Clean Up', aktif: page==='executive', onClick:()=>setPage('executive') }] : []),
                   // 26.10.2026: alt marka (Teknocenter) — aynı Rollout ekranı, firma kapsamı sunucuda (MARKA ROLLOUT KAPSAMI); izin sunucudan gelir
@@ -39123,7 +39287,7 @@ function App() {
                       { ikon:'📐', label:'Taşeron Hesabı', aktif: page==='erc_taseron', onClick:()=>setPage('erc_taseron') },
                       { ikon:'💳', label:'Taşeron Borçlar', aktif: page==='taseron_borc', onClick:()=>setPage('taseron_borc') },
                     ] : []),
-                    ...(isAltMarka && isAdmin ? [
+                    ...(isAltMarka && isAdmin && !_fiyatGizli ? [
                       { ikon:'💰', label:'Nakit Akışı (Günlük)', aktif: page==='marka_nakit', onClick:()=>setPage('marka_nakit') },
                       { ikon:'🧾', label:'Fatura Girişi', aktif: page==='marka_fatura_girisi', onClick:()=>setPage('marka_fatura_girisi') },
                       { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron', onClick:()=>setPage('marka_taseron') },
@@ -39167,7 +39331,7 @@ function App() {
 
           <div className="topnav-right">
             <div className="topnav-icon" title="Ana sayfa"
-              onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka) setPage('marka_finans'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>⌂</div>
+              onClick={()=>{ setNavOpen(null); if (isPlatformAdmin && !firmaMode) { setPage('platform'); fetchPlatformOverview(); } else if (isAltMarka && !_fiyatGizli) setPage('marka_finans'); else if (isAltMarka) setPage('region'); else if (isSubconUser) setPage('region'); else if (isFinanceUser) { setPage('finance'); setFinanceActionTrigger('home'); } else setPage('region'); }}>⌂</div>
             <div className={`topnav-user ${navOpen==='user' ? 'open' : ''}`} onClick={()=>setNavOpen(navOpen==='user' ? null : 'user')}>
               <div className="topnav-avatar">{String(user?.name || user?.email || '?').split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase()}</div>
               <div className="topnav-user-txt">
@@ -39204,11 +39368,11 @@ function App() {
 
           {/* Main content */}
           <div className="main-content" onClick={e=>e.stopPropagation()}>
-            {page === "marka_finans" && isAltMarka && <MarkaFinansPanel currentUser={user} />}
-            {page === "marka_pl" && isAltMarka && <MarkaPLPanel currentUser={user} />}
-            {page === "marka_nakit" && isAltMarka && <MarkaNakitPanel currentUser={user} />}
+            {page === "marka_finans" && isAltMarka && !_fiyatGizli && <MarkaFinansPanel currentUser={user} />}
+            {page === "marka_pl" && isAltMarka && !_fiyatGizli && <MarkaPLPanel currentUser={user} />}
+            {page === "marka_nakit" && isAltMarka && !_fiyatGizli && <MarkaNakitPanel currentUser={user} />}
             {page === "marka_taseron" && isAltMarka && <MarkaTaseronPanel currentUser={user} />}
-            {page === "marka_fatura_girisi" && isAltMarka && isAdmin && <FinanceDashboard key={`marka-fatura-${user?.email || ""}`} user={user} currentUser={user} sadeceFatura onBack={() => setPage("marka_finans")} />}
+            {page === "marka_fatura_girisi" && isAltMarka && isAdmin && !_fiyatGizli && <FinanceDashboard key={`marka-fatura-${user?.email || ""}`} user={user} currentUser={user} sadeceFatura onBack={() => setPage("marka_finans")} />}
             {page === "marka_fatura_takip" && isAltMarka && <SimsekFaturaTakipPanel currentUser={user} />}
             {page === "erc_taseron" && !isAltMarka && <ErcTaseronPanel />}
             {page === "taseron_borc" && !isAltMarka && <TaseronBorcPanel />}

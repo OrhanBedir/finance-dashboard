@@ -792,6 +792,8 @@ function ikHassasGorur(req, marka) {
   const u = optionalAuth(req);
   if (!u || !ikOkumaYetkili(u)) return false;
   const k = altMarkaKapsam(req);
+  // 29.10.2026: kapsamlı mali yetkili (Teknocenter) yalnız kendi markasının hassas alanını görür — devraldığı AHY kadrosu değil
+  if (k && req?.izinler?.mali_kapsam && req.izinler.mali_kapsam !== "ERC") return String(marka || "ERC").toUpperCase() === req.izinler.mali_kapsam;
   return !k || k.bordro.includes(String(marka || "ERC").toUpperCase());
 }
 // Para listeleri (avans, maaş ödemesi, maaş geçmişi): alt marka İK yetkilisi kapsam dışı kişinin satırını hiç almaz
@@ -800,7 +802,16 @@ function ikMaskele(req, rows, markaAl = (r) => r.marka) {
   for (const r of rows || []) {
     if (ikHassasGorur(req, markaAl(r))) continue;
     for (const a of IK_HASSAS_ALANLAR) if (a in r) r[a] = null;
-    if (r.ek_donem && typeof r.ek_donem === "object") r.ek_donem.hakedis = null;
+    if (r.ek_donem && typeof r.ek_donem === "object") {
+      r.ek_donem.hakedis = null;
+      for (const a of IK_HASSAS_ALANLAR) if (a in r.ek_donem) r.ek_donem[a] = null; // 29.10.2026
+    }
+    // 29.10.2026: arşivlenmiş çalışma dönemlerindeki maaşlar (donemler[]) da maskelenir — Teknocenter / AHY saha
+    // hesabı /hr/personel listesinden tüm kadronun eski dönem maaşlarını alabiliyordu
+    if (Array.isArray(r.donemler)) r.donemler = r.donemler.map((d) => {
+      if (!d || typeof d !== "object") return d;
+      const c = { ...d }; for (const a of IK_HASSAS_ALANLAR) if (a in c) c[a] = null; return c;
+    });
   }
   return rows;
 }
@@ -1014,6 +1025,12 @@ app.use(async (req, res, next) => {
     res.status(503).json({ ok: false, error: "Oturum doğrulanamadı — lütfen biraz sonra tekrar deneyin" });
   }
 });
+// 29.10.2026: kimlikli yanıtlar tarayıcı / ara katman önbelleğinde tutulmaz — hesap değiştirince önceki kullanıcının
+// fiyat / maaş yanıtı aynı adresten önbellekten gelmesin
+app.use((req, res, next) => {
+  if (req.user || kapiTokeni(req)) { res.set("Cache-Control", "no-store, private"); res.vary("Authorization"); }
+  next();
+});
 // ── TAŞERON HESABI İÇİN KAPALI UÇLAR (25.10.2026, Orhan — gizlilik) ─────────────────────────────────
 // Taşeron (role=subcon ya da kullanici_tipi=TASERON) kendi verisini /taseron-panel/* uçlarından, taseron_id kapsamıyla alır.
 // Aşağıdakiler eskiden yalnız "giriş yapmış olmak" ile açıktı: başka taşeronların faturası/ödemesi okunup SİLİNEBİLİYOR,
@@ -1133,6 +1150,8 @@ const IZIN_TANIMLARI = {
   malzeme_goruntule: "Malzeme Yönetimi (görüntüleme)", kendi_avans: "Kendi iş avansları", kendi_masraf: "Kendi masraf formları",
   maas_goruntule: "Personel maaşlarını görme", gizli_arac_kira_goruntule: "Kira bedeli gizli araçların kirasını görme",
   personel_yonetimi: "Personel Yönetimi (kendi firması; maaş ayrı izin)",
+  // 29.10.2026: ERC + Teknocenter backofisinde yalnız MALİ YETKİ MATRİSİ açar; yetki ayarı burada yalnız kapatabilir
+  fiyat_goruntule: "Fiyat ve mali tutarları görme",
   // 28.10.2026: Organizasyon şeması / saha ekipleri — firma ve ekip kartı, personel ekip üyeliği, ekip şefi, aktif/pasif.
   // Maaş, bordro, finans ya da kullanıcı yetkisi vermez. Silme ayrı izindir (yalnız hiç kullanılmamış kayıt).
   org_yonet: "Organizasyon şeması ve saha ekipleri yönetimi", org_sil: "Kullanılmamış ekip / firma kaydını silme",
@@ -1179,13 +1198,45 @@ const MAAS_YETKILI_EMAIL = ["info@ahyelektrik.com", "teknocenter"];
 // maas_goruntule=false bu kişileri de kapatabilir. Kapalı olanda GİZLİLİK KATMANI maaş uçlarını 403 yapar ve maaş alanlarını
 // her JSON yanıttan siler (web + mobil aynı sunucu kuralı). Alt marka (Teknocenter / AHY), taşeron ve başka kiracı (2kx,
 // omnixdemo) hesapları bu kuraldan etkilenmez — mevcut kapsamları aynen kalır.
-const MAAS_ERC_YETKILI = new Map([[5, "orhan.bedir@simsektel.com"], [121, "orhan.bedir@gmail.com"], [6, "duzgun.simsek@simsektel.com"]]);
+// 29.10.2026 (Orhan onayı): bu kural aşağıdaki MALİ YETKİ MATRİSİ'ne taşındı (Erencan Şimşek ERC, İlhami Şahin yalnız Teknocenter).
+// ═══ MALİ YETKİ MATRİSİ — FİYAT / MALİ TUTAR / PERSONEL MAAŞI (29.10.2026, Orhan onayı) ═══════════════════════════════
+// Ekrana erişim yetkisi ile fiyat/maaş görme yetkisi AYRI kararlardır; firma/veri kapsamı da ayrıdır (subconScope,
+// altMarkaKapsam). ERC kiracısında (Şimşek + alt marka Teknocenter) backofis kullanıcısına fiyat, mali tutar ve personel
+// maaşı YALNIZ bu tablodaki doğrulanmış hesaplara açılır. Eşleşme users.id + e-posta ÇİFTİYLE yapılır; görünen ad, ad
+// benzerliği, e-posta uzantısı, istemcinin gönderdiği rol, rol adı (admin, muhasebe, PM, direktör…), şirket sahibi profili
+// ya da kişiye özel yetki ayarı bu yetkiyi AÇMAZ (yetki ayarı yalnız kapatabilir). Yeni eklenen yönetici / proje müdürü
+// otomatik yetki kazanmaz. kapsam 'ERC' = ERC geneli (Teknocenter dahil); 'TEKNO' = yalnız Teknocenter kayıtları ve hesap
+// Teknocenter alt marka hesabı olmalı. dogrulandi:false satır hesap canlı kayıttan teyit edilene kadar YETKİ VERMEZ.
+const MALI_YETKI_MATRISI = [
+  // 27.10.2026 canlı kayıttan doğrulandı
+  { id: 5, email: "orhan.bedir@simsektel.com", ad: "Orhan Bedir", kapsam: "ERC", dogrulandi: true },
+  { id: 121, email: "orhan.bedir@gmail.com", ad: "Orhan Bedir", kapsam: "ERC", dogrulandi: true },
+  { id: 6, email: "duzgun.simsek@simsektel.com", ad: "Düzgün Şimşek", kapsam: "ERC", dogrulandi: true },
+  // 29.10.2026 canlı kayıttan salt-okunur doğrulandı (Orhan onayıyla): "EREN CAN ŞİMŞEK" admin, ERC; bu e-postada tek hesap.
+  // erencan.simsek@simsektel.com adında bir kullanıcı yok (kodda geçen eski liste girdisi).
+  { id: 200, email: "eren.simsek@simsektel.com", ad: "Erencan Şimşek", kapsam: "ERC", dogrulandi: true },
+  // 29.10.2026 canlı kayıttan doğrulandı: "İLHAMİ ŞAHİN" direktör, marka TEKNO (alt marka), firma TEKNOCENTER; tek hesap.
+  { id: 1694, email: "ilhami.sahin@simsektel.com", ad: "İlhami Şahin", kapsam: "TEKNO", dogrulandi: true },
+];
+// ERC kiracısı (marka ERC / TEKNO / AHY — AHY markasında kalan Şimşek ofis hesapları dahil), taşeron değil.
+// 2KX (ayrı kiracı) ve izole kiracılar etkilenmez.
+const maliKapsamKullanicisi = (u) => !!u && !taseronMu(u) && u.kullanici_tipi !== "TASERON"
+  && String(u.tenant || detectTenant(u.email, u.subcon_name)).toLowerCase() === "erc";
+// Backofis: saha personeli (rolü 'user', ofis/İK/finans listesinde ve yönetim profilinde olmayan) dışındaki herkes.
+// Saha personeli ve taşeronun mevcut fiyat davranışı bu çalışmada değişmez.
+const backofisMi = (u) => !sahaPersoneliMi(u) || ikOkumaYetkili(u) || ["YONETICI", "SAHIP"].includes(kayitliProfil(u));
+function maliYetkiKaydi(u) {
+  const id = Number(u?.user_id || u?.id || 0) || kayitliId(u);
+  const e = _eposta(u);
+  const k = MALI_YETKI_MATRISI.find((m) => m.dogrulandi === true && m.email && m.id === id && m.email === e);
+  if (!k) return null;
+  // Teknocenter yetkilisi yalnız Teknocenter alt marka hesabıyla (firma kapsamı TEKNO'ya kilitliyken) geçerli
+  if (k.kapsam !== "ERC" && !(altMarkaKullanicisi(u) && String(u.marka || "").trim().toUpperCase() === k.kapsam)) return null;
+  return k;
+}
 const ercMaasKapsami = (u) => !!u && !taseronMu(u) && !altMarkaMi(u.marka)
   && String(u.tenant || detectTenant(u.email, u.subcon_name)).toLowerCase() === "erc";
-function ercMaasYetkilisi(u) {
-  const id = Number(u?.user_id || u?.id || 0) || kayitliId(u);
-  return MAAS_ERC_YETKILI.has(id) && MAAS_ERC_YETKILI.get(id) === _eposta(u);
-}
+const ercMaasYetkilisi = (u) => maliYetkiKaydi(u)?.kapsam === "ERC";
 // 26.10.2026 (Orhan): alt marka (Teknocenter) YÖNETİM hesabı kendi firma kapsamında Rollout'u görüntüler ve Excel alır;
 // düzenleme AYRI izindir (rollout_duzenle, varsayılan kapalı). Kapsam "MARKA ROLLOUT KAPSAMI" katmanında zorlanır.
 const MARKA_ROLLOUT_ROLLER = ["admin", "direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur"];
@@ -1207,6 +1258,18 @@ function etkinIzinHesapla(u, ayar) {
   if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
   // ERC maaş kuralı en son uygulanır: yetki ayarı / rol / profil ERC'de maaşı açamaz (yalnız kapatabilir)
   if (ercMaasKapsami(u)) o.maas_goruntule = ercMaasYetkilisi(u) && !(ayar && ayar.maas_goruntule === false);
+  // 29.10.2026 MALİ YETKİ MATRİSİ: ERC + Teknocenter backofisinde fiyat ve maaş yalnız matristen (ayar yalnız kapatır)
+  if (maliKapsamKullanicisi(u)) {
+    const y = maliYetkiKaydi(u);
+    if (y) {
+      o.fiyat_goruntule = !(ayar && ayar.fiyat_goruntule === false);
+      o.maas_goruntule = !(ayar && ayar.maas_goruntule === false);
+      o.mali_kapsam = y.kapsam;
+    } else if (backofisMi(u)) {
+      o.fiyat_goruntule = false;
+      o.maas_goruntule = false;
+    }
+  }
   return o;
 }
 const maasGizliMi = (req) => req?.izinler?.maas_goruntule === false;
@@ -1387,8 +1450,11 @@ const MAAS_RED_YOLLARI = [/^\/finance\/salary(\/|$)/, /^\/finance\/personel-ayli
   /^\/islem-gecmisi\/maas_odeme\//];
 const MAAS_ANAHTARLARI = new Set(["net_maas", "banka_net_maas", "elden_net_maas", "bankadan_gosterilen", "elden_verilen",
   "hakedilen_maas", "hakedis_otomatik", "hakedis_manuel", "manuel_tutar", "extra_hakedis", "maas_gecerli_donem",
-  "aylik_isveren_maliyeti", "brut_maas", "maas_tutari", "kalan_net_odeme"]);
-const PUANTAJ_OZET_PARA = ["bankadan", "elden", "avans", "kalan", "odenen", "toplam_odenen", "brut", "maas", "pazar_bonus_tutar"];
+  "aylik_isveren_maliyeti", "brut_maas", "maas_tutari", "kalan_net_odeme",
+  // 29.10.2026: finance_salary / marka nakit özetlerindeki maaş anahtarları (bugün bu uçlar 403; başka yerde açılırsa da düşsün)
+  "bankaya_yatacak_net", "elden_odenecek_net", "banka_maliyeti", "toplam_isveren_maliyeti", "maas", "maas_avans", "bekleyen_maas", "maaslar"]);
+const PUANTAJ_OZET_PARA = ["bankadan", "elden", "avans", "kalan", "odenen", "toplam_odenen", "brut", "maas", "pazar_bonus_tutar",
+  "hakedis"]; // 29.10.2026: ek_donem.hakedis (aynı ay yeniden başlayanın kısmi maaşı) da maaştır
 const ARAC_KIRA_ALANLARI = ["aylik_kira", "kira_kdv_haric", "kira_kdv_orani", "kira_gecerli_donem", "depozito_tutar",
   "depozito_tarihi", "depozito_iade_tarihi", "depozito_not", "odeme_tipi", "donem_gunu", "sozlesme_no", "kiralama_firmasi", "kira_bedeli"];
 const FATURA_TUTAR_ALANLARI = ["tutar", "kdv", "toplam_tutar", "odenen_tutar", "kalan", "kalan_tutar", "odenen", "net_tutar"];
@@ -1399,6 +1465,71 @@ function _anahtarSil(x, anahtarlar, derinlik = 0) {
   for (const [k, v] of Object.entries(x)) {
     if (anahtarlar.has(k)) continue;
     c[k] = (v && typeof v === "object" && !(v instanceof Date)) ? _anahtarSil(v, anahtarlar, derinlik + 1) : v;
+  }
+  return c;
+}
+// Serbest metindeki maaş tutarı: "maaş ₺45000" / "maaş 45.000 TL" → "maaş (gizli)"
+const _MAAS_METIN_RX = /(maa[sş][^;,\n]{0,20}?)(₺\s*[\d.,]+|[\d.,]{3,}\s*(TL|₺))/gi;
+function _metinMaasGizle(x, d = 0) {
+  if (d > 6 || x == null) return x;
+  if (typeof x === "string") return x.replace(_MAAS_METIN_RX, "$1(gizli)");
+  if (Array.isArray(x)) return x.map((v) => _metinMaasGizle(v, d + 1));
+  if (typeof x === "object" && !(x instanceof Date)) { const c = {}; for (const [k, v] of Object.entries(x)) c[k] = _metinMaasGizle(v, d + 1); return c; }
+  return x;
+}
+// Kapsamlı maaş yetkilisi (ör. yalnız TEKNO): istenen dönem markanın devir ayından önceyse o istek maaş-gizli sayılır
+function teknoOncesiMaasDonemi(req) {
+  const k = req?.izinler?.mali_kapsam;
+  if (!k || k === "ERC" || req.izinler.maas_goruntule !== true) return false;
+  const donem = String(req.query?.donem || (req.query?.yil && req.query?.ay ? `${req.query.yil}-${String(req.query.ay).padStart(2, "0")}` : "") || "");
+  return /^\d{4}-\d{2}$/.test(donem) && donem < markaProfil(k).devirAy;
+}
+// Kapsamlı maaş yetkilisinin (ör. İlhami — TEKNO) maaşını görebildiği personel = bordro markası kapsam markası olan kadro
+// (29.10.2026, Orhan kararı: devirle TEKNO bordrosuna geçen kadro da dahil). HARİÇ: personel kartı yönetim / backofis rolündeki
+// bir kullanıcı hesabına (user_id ya da e-posta) bağlı olanlar ve ERC geneli mali yetkililer — canlı kayıtta Orhan Bedir,
+// Nurcan Kuş, Hatice Omuş, Serdar Altınova (Şimşek yönetimi) TEKNO bordrolu ama maaşları İlhami'ye AÇILMAZ. Ad ile değil,
+// bağlı hesabın rolüyle karar verilir; yeni atanan bir müdür de kendiliğinden hariç kalır. Kişinin kendi kartı her zaman açık.
+// Dönem kuralı ayrıca geçerli: devir ayından önceki (AHY / Şimşek dönemi) maaş satırı görünmez.
+const KAPSAM_MAAS_HARIC_ROLLER = ["admin", "platform_admin", "direktor", "genel_mudur", "muhasebe", "finance",
+  "rollout_mudur", "bolge_mudur", "pm", "isg", "rollout"];
+const _kapsamPersonelOnbellek = new Map(); // kapsam|kullanıcı → { t, ids }
+async function kapsamMaasPersonelleri(kapsam, u) {
+  const benId = Number(u?.user_id || u?.id || 0), benEposta = _eposta(u);
+  const anahtar = `${kapsam}|${benId}|${benEposta}`;
+  const c = _kapsamPersonelOnbellek.get(anahtar);
+  if (c && Date.now() - c.t < YETKI_TTL_MS) return c.ids;
+  let ids = new Set();
+  try {
+    const ercYetkililer = MALI_YETKI_MATRISI.filter((m) => m.kapsam === "ERC").map((m) => m.id);
+    const r = await pool.query(`SELECT p.id FROM personel p
+      WHERE UPPER(COALESCE(p.marka,'')) = $1
+        AND ( p.user_id = $4 OR (COALESCE($5,'') <> '' AND LOWER(TRIM(COALESCE(p.email,''))) = $5)
+           OR NOT EXISTS (SELECT 1 FROM users u
+                WHERE (u.id = p.user_id OR (COALESCE(TRIM(p.email),'') <> '' AND LOWER(TRIM(u.email)) = LOWER(TRIM(p.email))))
+                  AND (LOWER(COALESCE(u.role,'')) = ANY($2::text[]) OR u.id = ANY($3::int[]))) )`,
+      [kapsam, KAPSAM_MAAS_HARIC_ROLLER, ercYetkililer, benId, benEposta]);
+    ids = new Set(r.rows.map((x) => Number(x.id)));
+  } catch { ids = c?.ids || new Set(); }
+  _kapsamPersonelOnbellek.set(anahtar, { t: Date.now(), ids });
+  return ids;
+}
+// Maaş anahtarı taşıyan her nesnede: kişi kapsam kümesinde değilse (kişi tanınamıyorsa da) ya da satırın dönemi devirden
+// önceyse maaş anahtarları silinir. Kişi: personel_id; personel listesinde satırın kendi id'si.
+// Genel adlı para anahtarları (tutar, kalan, avans…) yalnız maaş uçlarında maaş sayılır; başka uçta (iş avansı, masraf)
+// kişinin iş akışı bozulmasın diye dokunulmaz.
+const _kapsamMaasAnahtarlari = (yol) => /^\/hr\/(maas-|avans(\/|$)|hakedis-override|puantaj)/.test(yol)
+  ? new Set([...MAAS_ANAHTARLARI, ...PUANTAJ_OZET_PARA, "tutar", "toplam"]) : MAAS_ANAHTARLARI;
+function _kapsamDisiMaasSil(x, kapsam, ids, personelListesi, anahtarlar = MAAS_ANAHTARLARI, d = 0) {
+  if (d > 6 || !x || typeof x !== "object") return x;
+  if (Array.isArray(x)) return x.map((v) => _kapsamDisiMaasSil(v, kapsam, ids, personelListesi, anahtarlar, d + 1));
+  const devirAy = markaProfil(kapsam).devirAy;
+  const pid = x.personel_id ?? (personelListesi && d <= 1 ? x.id : undefined);
+  const dn = typeof x.donem === "string" ? x.donem.slice(0, 7) : null;
+  const disarida = !(pid !== undefined && pid !== null && ids.has(Number(pid))) || (dn && /^\d{4}-\d{2}$/.test(dn) && dn < devirAy);
+  const c = {};
+  for (const [k, v] of Object.entries(x)) {
+    if (disarida && anahtarlar.has(k)) continue;
+    c[k] = (v && typeof v === "object" && !(v instanceof Date)) ? _kapsamDisiMaasSil(v, kapsam, ids, personelListesi, anahtarlar, d + 1) : v;
   }
   return c;
 }
@@ -1423,8 +1554,10 @@ const _plk = (p) => String(p || "").toUpperCase().replace(/\s+/g, "");
 app.use(async (req, res, next) => {
   try {
     if (req.method === "OPTIONS" || !req.izinler) return next();
-    const maasGizli = maasGizliMi(req), kiraGizli = aracKiraGizliMi(req);
-    if (!maasGizli && !kiraGizli) return next();
+    // 29.10.2026: Teknocenter kapsamlı maaş yetkilisi (İlhami) Teknocenter devrinden önceki dönemin (AHY/ERC) bordrosunu görmez
+    const maasGizli = maasGizliMi(req) || teknoOncesiMaasDonemi(req), kiraGizli = aracKiraGizliMi(req);
+    const maasKapsamli = !maasGizli && req.izinler?.mali_kapsam && req.izinler.mali_kapsam !== "ERC";
+    if (!maasGizli && !kiraGizli && !maasKapsamli) return next();
     const yol = req.path.replace(/\/+$/, "") || "/";
     const m = req.method === "HEAD" ? "GET" : req.method;
     // /hr/avans iki türü taşır: maaş avansı kapalı, iş avansı (turu=IS) listesi açık kalır
@@ -1440,6 +1573,11 @@ app.use(async (req, res, next) => {
     }
     if (maasGizli && m === "POST" && yol === "/hr/personel" && req.body && typeof req.body === "object") {
       for (const k of ["net_maas", "bankadan_gosterilen", "elden_verilen", "maas_donem"]) delete req.body[k];
+    }
+    // 29.10.2026: yeniden işe başlatmada yeni dönemin maaşı da istemciden alınmaz (kayıt "maaş bilgisi eksik" açılır,
+    // maaşı yetkili girer) — eskiden maaş yetkisi olmayan İK kullanıcısı bu uçtan maaş yazabiliyordu
+    if (maasGizli && m === "POST" && /^\/hr\/personel\/\d+\/yeniden-ise-baslat$/.test(yol) && req.body && typeof req.body === "object") {
+      for (const k of ["net_maas", "bankadan_gosterilen", "elden_verilen"]) delete req.body[k];
     }
     let gz = null;
     if (kiraGizli) {
@@ -1467,17 +1605,22 @@ app.use(async (req, res, next) => {
       }
     }
     // Marka özet / P&L / gelecek tahsilat / sabit giderler maaş ve araç kirası TOPLAMLARI içerir → toplamdan türetilmesin diye kapalı
-    if (m === "GET" && ((maasGizli && /^\/finance\/marka-(ozet|pl|gelecek-tahsilat|sabit-giderler)$/.test(yol))
+    if (m === "GET" && ((maasGizli && /^\/finance\/marka-(ozet|pl|gelecek-tahsilat|sabit-giderler|nakit|proje-kasa)$/.test(yol))
       || (gz && /^\/finance\/marka-(ozet|pl|gelecek-tahsilat)$/.test(yol))))
       return res.status(403).json({ ok: false, error: "Bu özet maaş / gizli araç kirası toplamı içeriyor — yetkiniz yok" });
+    const kapsamIds = maasKapsamli ? await kapsamMaasPersonelleri(req.izinler.mali_kapsam, req.user || optionalAuth(req)) : null;
     const orig = res.json.bind(res);
     res.json = (b) => {
       let c = b;
       if (maasGizli) {
         c = _anahtarSil(c, MAAS_ANAHTARLARI);
+        // İK işlem günlüğünün serbest metnindeki maaş tutarı ("maaş ₺45000") — anahtar silme metne ulaşamaz
+        if (/^\/islem-gecmisi\//.test(yol)) c = _metinMaasGizle(c);
+        if (/^\/hr\/personel\/\d+\/yeniden-ise-baslat$/.test(yol)) c = _metinMaasGizle(c);
         if (yol === "/hr/puantaj/ozet") c = _anahtarSil(c, new Set(PUANTAJ_OZET_PARA));
         if (yol === "/finance/cashflow-odeme" && c && typeof c === "object") { c = { ...c }; delete c.maaslar; }
       }
+      if (maasKapsamli) c = _kapsamDisiMaasSil(c, req.izinler.mali_kapsam, kapsamIds, /^\/hr\/personel$/.test(yol), _kapsamMaasAnahtarlari(yol));
       if (gz) {
         const gizliArac = (r) => r && (gz.ids.has(Number(r.arac_id ?? r.id)) || gz.plakalar.has(_plk(r.plaka)));
         const kiraBos = (r) => { const x = { ...r }; for (const k of ARAC_KIRA_ALANLARI) if (k in x) x[k] = null; x.kira_gizli = true; return x; };
@@ -1515,6 +1658,102 @@ app.use(async (req, res, next) => {
     return next();
   } catch (e) {
     console.error("[gizlilik-katmani]", e.message);
+    return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
+  }
+});
+// ═══ FİYAT GİZLİLİK KATMANI (29.10.2026, Orhan onayı) — etkin izinde fiyat_goruntule=false ════════════════════
+// Fiyat görme yetkisi MALİ YETKİ MATRİSİ'nden gelir (ERC + Teknocenter backofisinde yalnız Orhan, Düzgün, Erencan;
+// Teknocenter'da İlhami). Ekran erişimi DEĞİŞMEZ; kapalı olanda:
+//   1) Bütünüyle parasal uçlar (finans, taşeron fatura/ödeme, bölge faturası, manuel hakediş, 2KX fiyatlandırma,
+//      fatura okuma, fiyat listeleri, fiyatlı ikili dışa aktarımlar) 403 döner — ikili Excel/PDF içinden sütun
+//      silinemediği için fiyat taşıyan dışa aktarım reddedilir; fiyatsız dışa aktarımlar (Rollout Excel'i,
+//      saha giriş Excel'i…) açık kalır.
+//   2) Operasyon uçlarının JSON yanıtlarından fiyat / tutar / hakediş / oran anahtarları ANAHTARIYLA çıkarılır
+//      (0 yazılmaz → ekranda "fiyat sıfır" gibi görünmez); yanıta fiyat_gizli:true eklenir.
+//   3) Fiyat yazan istekler reddedilir ya da fiyat alanı istemciden alınmaz (mevcut değer korunur).
+// Personel kendi iş avansı / masraf akışları (tutar alanı kişinin kendi formu) bu katmanın dışındadır.
+const FIYAT_RED_YOLLARI = [
+  /^\/finance(\/|$)/, /^\/taseron\//, /^\/taseron-hakedis(\/|$)/, /^\/bolge-fatura(\/|$)/, /^\/2kx(\/|$)/,
+  /^\/invoice-parse$/, /^\/po\/saha-fatura-kontrol$/, /^\/test-boq$/, /^\/hw-acceptance\/summary$/,
+  /^\/export\/(qc-ready-excel|region-analysis)$/,                     // fiyat sütunlu ikili Excel
+  /^\/malzeme\/(fiyat-listesi|fiyat-gecmisi)(\/|$)/, /^\/is-atama\/fiyat-oneri$/, /^\/is-atama\/\d+\/fiyat$/,
+  /^\/boq\/katalog\/(onizle|ice-al)$/, /^\/boq\/upload$/, /^\/import\/archive-restore$/, /^\/rollout\/\d+\/enh-perakende$/,
+  /^\/rollout\/mismatch-check$/,                                       // ham rollout satırı (hakediş, perakende tutarı)
+];
+// Anlamı her yerde para olan anahtarlar (tüm JSON yanıtlarından çıkarılır)
+const FIYAT_ANAHTARLARI = new Set([
+  "unit_price", "po_unit_price", "boq_unit_price", "huawei_unit_price", "taseron_unit_price", "birim_fiyat", "boq_birim_fiyat",
+  "ilk_fiyat", "son_fiyat", "package_price", "total_done_amount", "total_done_amount_try", "total_done_amount_usd",
+  "total_ok_amount_try", "total_ok_amount_usd", "total_po_bekler_amount_try", "total_po_bekler_amount_usd",
+  "total_billed_amount_try", "total_billed_amount_usd", "not_invoiced_amount", "po_opened_not_invoiced_amount",
+  "raw_total", "shown_total", "line_total", "huawei_total", "taseron_total", "subcon_hakedis", "po_bekler_hakedis",
+  "not_invoiced_hakedis", "total_hakedis", "qc_ok_hakedis", "total_qc_ok", "total_invoiced", "hakedis_bedeli",
+  "enh_perakende_tutar", "fatura_tutar", "fatura_toplam", "fatura_odenen", "fatura_kalan", "fatura_miktari",
+  "invoiced_amount", "reference_rate", "payment_rate", "marka_pay", "kirilim_yuzde", "pay_yuzde", "fiyat_surumleri",
+]);
+// Yalnız belirli yollarda para anlamı taşıyan anahtarlar (başka yerde sayı / kişisel tutar olabilir)
+const FIYAT_YOL_ANAHTARLARI = [
+  [/^\/rollout(\/|$)/, ["hakedis", "enh_perakende_odeme_tarihi", "enh_perakende_dekont_url", "enh_perakende_sozlesme_url"]],
+  [/^\/po\/eksik-girisler$/, ["tutar", "toplam_tutar"]],
+  [/^\/hw-acceptance(\/|$)/, ["tutar", "total_usd", "total_try"]],
+  [/^\/malzeme(\/|$)/, ["toplam_tutar"]],
+  [/^\/is-atama(\/|$)/, ["fiyat"]],
+  [/^\/taseron-panel(\/|$)/, ["fiyat", "tutar", "hesap"]],
+  [/^\/master\/saha-kalemler\/kaydet$/, ["surum_catisma"]],
+  [/^\/dashboard\/summary$/, ["summary"]],
+];
+// Fiyat alanı taşıyan yazma gövdeleri: alan istemciden alınmaz
+async function fiyatYazmaTemizle(req, yol, m) {
+  const b = req.body;
+  if (!b || typeof b !== "object") return null;
+  if (m === "POST" && yol === "/is-atama" && b.fiyat) return "İşe fiyat girme yetkiniz yok — atamayı fiyatsız yapın, fiyatı yetkili girer";
+  if (/^\/master\/(add|\d+|saha-kalemler\/kaydet)$/.test(yol)) for (const k of ["unit_price", "boq_birim_fiyat"]) delete b[k];
+  const tm = yol.match(/^\/malzeme\/talepler(\/(\d+))?$/);
+  if (tm && Array.isArray(b.kalemler)) {
+    // Mevcut talep düzenlemesinde kalem fiyatları kayıttan korunur; yeni talepte fiyat alınmaz (yetkili girer)
+    const eski = tm[2] ? (await pool.query(`SELECT LOWER(TRIM(malzeme_adi)) AS ad, birim_fiyat FROM malzeme_talep_kalemleri WHERE talep_id=$1`, [Number(tm[2])]).catch(() => ({ rows: [] }))).rows : [];
+    const fiyatOf = new Map(eski.map((r) => [r.ad, Number(r.birim_fiyat || 0)]));
+    b.kalemler = b.kalemler.map((k) => {
+      const c = { ...(k || {}) };
+      const f = fiyatOf.get(String(c.malzeme_adi || "").toLowerCase().trim()) || 0;
+      c.birim_fiyat = f; c.toplam_tutar = f ? Number(c.miktar || 0) * f : 0;
+      c._fiyat_korundu = true;
+      return c;
+    });
+    for (const k of ["toplam_tutar", "birim_fiyat"]) delete b[k];
+  }
+  return null;
+}
+app.use(async (req, res, next) => {
+  try {
+    if (req.method === "OPTIONS") return next();
+    const yol = req.path.replace(/\/+$/, "") || "/";
+    // Giriş yanıtında izin henüz isteğe bağlı değil: yanıttaki etkin izinden karar verilir
+    if (yol === "/auth/login") {
+      const orig = res.json.bind(res);
+      res.json = (b) => (b?.user?.izinler?.fiyat_goruntule === false ? orig(_anahtarSil(b, FIYAT_ANAHTARLARI)) : orig(b));
+      return next();
+    }
+    if (!req.izinler || req.izinler.fiyat_goruntule !== false) return next();
+    const m = req.method === "HEAD" ? "GET" : req.method;
+    if (FIYAT_RED_YOLLARI.some((rx) => rx.test(yol)))
+      return res.status(403).json({ ok: false, fiyat_gizli: true, error: "Fiyat ve mali tutar bilgilerini görme / değiştirme yetkiniz yok" });
+    if (m !== "GET") {
+      const red = await fiyatYazmaTemizle(req, yol, m);
+      if (red) return res.status(403).json({ ok: false, fiyat_gizli: true, error: red });
+    }
+    const ekAnahtar = new Set(FIYAT_YOL_ANAHTARLARI.filter(([rx]) => rx.test(yol)).flatMap(([, l]) => l));
+    const orig = res.json.bind(res);
+    res.json = (b) => {
+      let c = _anahtarSil(b, FIYAT_ANAHTARLARI);
+      if (ekAnahtar.size) c = _anahtarSil(c, ekAnahtar);
+      // İşaret yalnız Bölge Analizi kaynağına eklenir (sözlük biçimli yanıtlara fazladan anahtar girmesin)
+      if (yol === "/dashboard/result" && c && typeof c === "object" && !Array.isArray(c)) c = { ...c, fiyat_gizli: true };
+      return orig(c);
+    };
+    return next();
+  } catch (e) {
+    console.error("[fiyat-katmani]", e.message);
     return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
   }
 });
@@ -5857,6 +6096,13 @@ const COMMON_MATCH_CTES = `
     ORDER BY
       s_bom_code,
       created_at DESC
+  ),
+  -- 29.10.2026: kalemin ölçü birimi (fiyatsız Bölge Analizi miktar dökümü) — sürümlü BoQ kataloğundan, en yeni sürüm
+  best_birim AS (
+    SELECT DISTINCT ON (TRIM(kod)) TRIM(kod) AS kod, birim
+    FROM boq_katalog
+    WHERE COALESCE(TRIM(birim), '') <> ''
+    ORDER BY TRIM(kod), surum DESC
   )
 `;
 
@@ -5921,9 +6167,11 @@ function buildMasterJoinedQuery(
       END AS total_done_amount,
 
       (rp.pac_actual_end_date IS NOT NULL) AS pac_from_rollout,
-      to_char(rp.qc_closed_date, 'YYYY-MM-DD') AS qc_closed_date
+      to_char(rp.qc_closed_date, 'YYYY-MM-DD') AS qc_closed_date,
+      COALESCE(NULLIF(TRIM(m.boq_birim), ''), best_birim.birim) AS birim
 
     FROM master_works m
+    LEFT JOIN best_birim ON best_birim.kod = TRIM(COALESCE(m.item_code, ''))
     LEFT JOIN best_site_po site_po
       ON TRIM(COALESCE(site_po.project_code, '')) = TRIM(COALESCE(m.project_code, ''))
      AND UPPER(TRIM(COALESCE(site_po.site_code, ''))) = UPPER(TRIM(COALESCE(m.site_code, '')))
