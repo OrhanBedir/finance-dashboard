@@ -364,11 +364,16 @@ const altMarkaAktifSql = (tarihCol) => "(" + ALT_MARKALAR.map((m) => `(${_pencer
 // Dönemin son günü hangi markanın penceresine düşüyorsa o marka. Hiçbir pencereye düşmüyorsa (ör. 2026-06,
 // devir öncesi dönem) ya da dönem boşsa eski kural: ödeme tarihi penceresi → geçmiş kayıtlar değişmez.
 const _donemSonSql = (donemCol) => `(to_date(${donemCol} || '-01','YYYY-MM-DD') + INTERVAL '1 month - 1 day')::date`;
+// 29.10.2026 (Orhan): dönemi bir alt markanın penceresinde olsa da ödemesi o markanın BİTİŞİNDEN sonra yapılan avans Şimşek'indir
+// (AHY 30.09'da bitti; Eylül dönemi avansı 17.10 / 27.10'da Şimşek ödedi). Tarih kuralına düşürülmez — o tarihte başka bir marka
+// (TEKNO, 14.10+) aktif olsa bile avans onun sayılmaz. Bitişi olmayan (aktif) markada kural aynı kalır.
 function avansOdeyenSql(a = "a", tarihExpr = null) {
   const d = `NULLIF(${a}.donem,'')`;
   const ds = _donemSonSql(d);
   const t = tarihExpr || `${a}.tarih`;
-  return `(CASE WHEN ${d} ~ '^\\d{4}-\\d{2}$' AND ${altMarkaAktifSql(ds)} THEN ${odeyenTarihSql(ds)} ELSE ${odeyenTarihSql(t)} END)`;
+  const bitmis = ALT_MARKALAR.filter((m) => m.bitis).map((m) => `WHEN (${_pencereSql(m, ds)}) AND (${t})::date > DATE '${m.bitis}' THEN 'SIMSEK'`).join(" ");
+  const donemli = bitmis ? `CASE ${bitmis} ELSE ${odeyenTarihSql(ds)} END` : odeyenTarihSql(ds);
+  return `(CASE WHEN ${d} ~ '^\\d{4}-\\d{2}$' AND ${altMarkaAktifSql(ds)} THEN ${donemli} ELSE ${odeyenTarihSql(t)} END)`;
 }
 function odeyenVarsayilan(tarih) {
   const t = String(tarih || "").slice(0, 10);
