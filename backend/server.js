@@ -576,7 +576,8 @@ const taseronCozum = require("./taseronCozum"); // 28.10.2026: Günlük İş Gir
 const sahaKonum = require("./sahaKonum");
 const haritaIsDurumu = require("./haritaIsDurumu");
 const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
-const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap) // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
+const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
+const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı) // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
@@ -1320,7 +1321,8 @@ const IZIN_OKUMA_YOLLARI = {
     /^\/finance\/hw-invoice-items\/billable-keys$/, /^\/hw-acceptance\/onay-bekleyen$/, /^\/export\/qc-ready-excel$/],
   arac_depo_goruntule: [/^\/hr\/arac-gecmis$/, /^\/hr\/arac-kira-odemeler$/, /^\/hr\/arac-fatura-kalemleri$/, /^\/hr\/arac-teslim-projeler$/,
     /^\/hr\/araclar\/\d+\/(teslim|lastik|islem-log)$/, /^\/hr\/arac-belge\/file\/[^/]+$/, /^\/hr\/ofis$/, /^\/hr\/ofis-kira-odemeler$/, /^\/hr\/ofis-belge\/file\/[^/]+$/],
-  malzeme_goruntule: [/^\/malzeme\/(talepler|talepler\/\d+|dagitim|dagitim\/ozet|dagitim\/personel|fiyat-listesi|sarf|depo-stok|site-codes)$/],
+  malzeme_goruntule: [/^\/malzeme\/(talepler|talepler\/\d+|dagitim|dagitim\/ozet|dagitim\/personel|fiyat-listesi|sarf|depo-stok|site-codes)$/,
+    /^\/malzeme\/stok\/(ayar|urunler|ozet|personel|personeller|saha|hareketler|iadeler|rezervasyonlar|excel)$/],
   // 27.10.2026: İSG belge yüklemesi için imzalı yükleme adresi (yalnız isg-belgeler klasörü)
   isg_duzenle: [/^\/hr\/isg\/signed-upload-url$/],
 };
@@ -28441,6 +28443,16 @@ async function malzemeAliciMi(email, id) {
           (SELECT LOWER(TRIM(name)) FROM users WHERE LOWER(TRIM(email)) = $2 LIMIT 1)))`, [Number(id), email]);
   return r.rows.length > 0;
 }
+// ── MALZEME STOK DEFTERİ (29.10.2026): /malzeme/stok/* + eski stok uçlarının yönlendirmesi — eski yetki katmanından ÖNCE.
+// Saha kapsamı personelin firmasına göre: alt marka (Teknocenter) personeli yalnız MARKA ROLLOUT KAPSAMI'ndaki ya da kendisine
+// atanmış sahaya tüketim yazar; Şimşek personeli Rollout listesindeki her sahaya.
+async function personelSahaKapsami(firma) {
+  const kod = String(firma || "ERC").trim().toUpperCase();
+  if (!altMarkaMi(kod)) return null;
+  return markaRolloutKapsami({ user: { hw_yukleme: false, marka: kod, role: "user" }, izinler: {} });
+}
+malzemeStok.kur(app, { pool, authMiddleware, optionalAuth, kendiPersonelKaydi, tenantContext: pool.tenantContext, malzemeDepoYetkili,
+  malzemeTamOkuma, malzemeFiyatYetkili, taseronMu, personelSahaKapsami });
 app.use(async (req, res, next) => {
   if (req.method === "OPTIONS" || !/^\/malzeme(\/|$)/.test(req.path)) return next();
   const u = optionalAuth(req);
@@ -28480,6 +28492,9 @@ app.use(async (req, res, next) => {
     if (m === "POST" && yol === "/malzeme/talepler") {
       if (malzemeYonetici(u)) return next();
       if (!req.body || typeof req.body !== "object") req.body = {};
+      // Eski ERC mobil (build ≤30) personel talebini "PM_ONAY" ile gönderiyordu; web akışında personel talebi önce Rollout
+      // Müdürü onayına gider (29.10.2026) — eski sürüm kırılmasın diye aynı anlama çevrilir, onay adımı atlanmaz.
+      if (req.body.durum === "PM_ONAY") req.body.durum = "ROLLOUT_BEKLE";
       if (!MALZEME_KISISEL_DURUM.includes(req.body.durum || "TASLAK"))
         return red("Talebi taslak olarak kaydedebilir ya da rollout onayına gönderebilirsiniz");
       req.body.talep_eden_email = ben; // kimlik oturumdan — başkası adına talep açılamaz
@@ -28493,6 +28508,7 @@ app.use(async (req, res, next) => {
       if (!s.talep) return res.status(404).json({ ok: false, error: "Talep bulunamadı" });
       if (!s.acan) return red("Bu malzeme talebi size ait değil");
       if (!["TASLAK", "REDDEDILDI"].includes(s.talep.durum)) return red("Onaya gönderilmiş talep değiştirilemez");
+      if (m === "PUT" && req.body?.durum === "PM_ONAY") req.body.durum = "ROLLOUT_BEKLE";
       if (m === "PUT" && !MALZEME_KISISEL_DURUM.includes(req.body?.durum || "TASLAK"))
         return red("Talebi taslak olarak kaydedebilir ya da rollout onayına gönderebilirsiniz");
       req.malzemeKisisel = ben;
@@ -28771,6 +28787,7 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
 app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
   try {
     const { durum, notlar, kalemler, onay_notu } = req.body;
+    const oncekiDurum = (await pool.query("SELECT durum FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0]?.durum || null;
     const fields = ["durum=$1"];
     const vals = [durum];
     let idx = 2;
@@ -28803,8 +28820,10 @@ app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
       }
     }
 
-    // Depo stok güncelle: DEPODA durumuna geçince Yeni Alım kalemlerini depoya ekle + fiyat geçmişi kaydet
-    if (durum === "DEPODA") {
+    // 29.10.2026: DEPODA durumu artık STOK ÜRETMEZ. Satın alma onayı ile fiziksel mal kabul ayrıdır; stok yalnız Stok Defteri'ndeki
+    // mal kabulle (POST /malzeme/stok/mal-kabul, kısmi teslim + sipariş aşımı kontrolü) artar. Eskiden her DEPODA geçişinde
+    // (aynı talep tekrar DEPODA yapılınca da) kalemler depo_stok'a yeniden ekleniyordu. Fiyat geçmişi yalnız İLK geçişte yazılır.
+    if (durum === "DEPODA" && oncekiDurum !== "DEPODA") {
       // Talep no'yu al
       const talepInfo = await pool.query("SELECT talep_no FROM malzeme_talepler WHERE id=$1", [req.params.id]);
       const talepNo = talepInfo.rows[0]?.talep_no || null;
@@ -28814,23 +28833,6 @@ app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
         "SELECT * FROM malzeme_talep_kalemleri WHERE talep_id=$1", [req.params.id]
       );
       for (const k of kalemleriDB.rows) {
-        // Depo stok güncelle
-        const existing = await pool.query(
-          "SELECT id, toplam_miktar FROM depo_stok WHERE LOWER(malzeme_adi)=LOWER($1) AND LOWER(birim)=LOWER($2)",
-          [k.malzeme_adi, k.birim]
-        );
-        if (existing.rows.length > 0) {
-          await pool.query(
-            "UPDATE depo_stok SET toplam_miktar=toplam_miktar+$1, updated_at=NOW() WHERE id=$2",
-            [k.miktar, existing.rows[0].id]
-          );
-        } else {
-          await pool.query(
-            "INSERT INTO depo_stok (malzeme_adi, birim, toplam_miktar) VALUES ($1,$2,$3)",
-            [k.malzeme_adi, k.birim, k.miktar]
-          );
-        }
-
         // Fiyat geçmişi kaydet (sadece fiyat girilmişse)
         if (k.birim_fiyat && Number(k.birim_fiyat) > 0) {
           await pool.query(
@@ -29229,14 +29231,14 @@ app.get("/malzeme/dagitim/ozet", authMiddleware, async (req, res) => {
         alici_tipi, alici_personel_email, alici_firma,
         malzeme_adi, birim,
         SUM(CASE WHEN durum='PERSONELDE' THEN miktar ELSE 0 END) as personelde,
-        SUM(CASE WHEN durum='SAHADA' THEN miktar ELSE 0 END) as sahada,
+        SUM(CASE WHEN durum='SAHADA' THEN COALESCE(saha_kullanim_miktar, miktar) ELSE 0 END) as sahada, -- gerçek kullanım (29.10.2026)
         SUM(CASE WHEN durum='DEPOYA_IADE' THEN miktar ELSE 0 END) as iade,
         MIN(verilme_tarihi) as ilk_verilme,
         MAX(verilme_tarihi) as son_verilme
       FROM malzeme_dagitim
       GROUP BY alici, alici_tipi, alici_personel_email, alici_firma, malzeme_adi, birim
       HAVING SUM(CASE WHEN durum='PERSONELDE' THEN miktar ELSE 0 END) > 0
-         OR  SUM(CASE WHEN durum='SAHADA' THEN miktar ELSE 0 END) > 0
+         OR  SUM(CASE WHEN durum='SAHADA' THEN COALESCE(saha_kullanim_miktar, miktar) ELSE 0 END) > 0
       ORDER BY alici, malzeme_adi
     `);
     res.json(r.rows);

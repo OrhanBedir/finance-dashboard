@@ -14,13 +14,15 @@ import { durumBilgisi } from "../mantik/durumlar";
 import { tarih } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
 import { ilerleme } from "../mantik/cleanup";
+import { Malzemelerim } from "./StokEkranlari";
 
 export function SahaEkrani({ navigation }) {
   const [sekme, setSekme] = useState("is");
   return (
     <Ekran baslik="Saha" geri={false}>
-      <Segment secenekler={[{ id: "is", ad: "İşlerim" }, { id: "malzeme", ad: "Malzeme" }, { id: "zimmet", ad: "Zimmetim" }]} deger={sekme} onSec={setSekme} />
-      {sekme === "is" ? <Islerim navigation={navigation} /> : sekme === "malzeme" ? <MalzemeTaleplerim navigation={navigation} /> : <Zimmetim />}
+      <Segment secenekler={[{ id: "is", ad: "İşlerim" }, { id: "zimmet", ad: "Malzemelerim" }, { id: "malzeme", ad: "Taleplerim" }]} deger={sekme} onSec={setSekme} />
+      {/* 29.10.2026: Malzemelerim stok defterinden gelir; defter açılana kadar eski zimmet listesi (salt bilgi) gösterilir */}
+      {sekme === "is" ? <Islerim navigation={navigation} /> : sekme === "malzeme" ? <MalzemeTaleplerim navigation={navigation} /> : <Malzemelerim navigation={navigation} eski={<Zimmetim />} />}
     </Ekran>
   );
 }

@@ -11,6 +11,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 // lisans: src/data/tr-iller.LICENSE.txt). Uygulamaya gömülüdür; çalışma anında dış harita servisi/tile kullanılmaz.
 import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
+import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -35138,6 +35139,7 @@ function PersonelMalzemePanel({ currentUser }) {
 
   // ── TALEP STATE ──
   const [mainTab, setMainTab] = React.useState("malzemelerim");
+  const [defterAcik2, setDefterAcik2] = React.useState(null); // 29.10.2026: stok defteri açıksa eski zimmet listesi gösterilmez
   const [talepler, setTalepler] = React.useState([]);
   const [talepLoading, setTalepLoading] = React.useState(false);
   const [showTalepForm, setShowTalepForm] = React.useState(false);
@@ -35284,7 +35286,8 @@ function PersonelMalzemePanel({ currentUser }) {
       </div>
 
       {/* ── MALZEMELERIM SEKMESİ ── */}
-      {mainTab === "malzemelerim" && (
+      {mainTab === "malzemelerim" && <StokBenimPanel currentUser={currentUser} onDurum={setDefterAcik2} />}
+      {mainTab === "malzemelerim" && defterAcik2 === false && (
         <div>
           {/* Özet kartlar */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
@@ -35649,6 +35652,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   // saltOkunur (21.10.2026): talep ve dağıtım listelerini görür; yeni talep / çıkış / düzenleme düğmeleri yok (sunucu da reddeder)
   const _isPersonelOnly = !saltOkunur && !isAdmin && !isPM && !isDirektor && !isNurcan && !isMurat && !isBolgeMudur;
   const [tab, setTab] = useState(_isPersonelOnly ? "dagitim" : "talepler");
+  // 29.10.2026: Stok Defteri — talep detayından teslim / mal kabul formuna geçiş; personelin defter durumu (eski listeyi gizlemek için)
+  const [stokBaslangic, setStokBaslangic] = useState(null);
+  const [defterAcikBenim, setDefterAcikBenim] = useState(null);
+  const canSeeStok = canSeeDepo || isBolgeMudur || saltOkunur;
   const [talepler, setTalepler] = useState([]);
   const [talepLoading, setTalepLoading] = useState(false);
   const [talepArama, setTalepArama] = useState("");
@@ -36961,60 +36968,24 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                           <span style={{ fontSize:11,color:"#16a34a",fontWeight:700 }}>✓ Tamam</span>
                         ) : k.temin_turu === "Depo Stok" ? (
                           <button
-                            disabled={saving}
-                            onClick={async ()=>{
-                              setSaving(true);
-                              try {
-                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
-                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
-                                // Depoya Giriş + Dağıtım kaydı
-                                const r = await fetch(`${API_BASE}/malzeme/dagitim`,{method:"POST",headers:hdrs,body:JSON.stringify({
-                                  malzeme_adi:k.malzeme_adi, miktar:k.miktar, birim:k.birim||"Adet",
-                                  alici_tipi:"PERSONEL",
-                                  alici_personel_ad: d.talep_edilen_personel||d.talep_eden_ad,
-                                  alici_personel_email: d.talep_eden_email,
-                                  site_id: d.site_id||"", bolge: d.bolge||"",
-                                  notlar:`MT Talep: ${d.talep_no} - Depo Stok dağıtımı`,
-                                  talep_kalem_id: k.id
-                                })});
-                                const rd = await r.json();
-                                if (rd.error){ alert(rd.error); setSaving(false); return; }
-                                // Kalem dagitim_yapildi işaretle
-                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
-                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
-                                // Eğer tüm kalemler dağıtıldı/tamamlandı ise DEPODA'ya çek
-                                const yeniKalemler = detayKalemler.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x);
-                                const hepsiTamam = yeniKalemler.every(x=>x.dagitim_yapildi||(x.temin_turu!=="Depo Stok"));
-                                // Not: Yeni Alım kalemler için ayrıca "Satın Alındı" tıklanacak
-                              } catch(e){ alert(e.message); }
-                              setSaving(false);
+                            onClick={()=>{
+                              // 29.10.2026: teslim Stok Defteri'nden yapılır (eski /malzeme/dagitim stoğu iki yöntemle düşüyordu)
+                              setStokBaslangic({ ekran:"islem", form:"teslim", talep_id:d.id, personel_id:Number(d.talep_edilen_personel)||"",
+                                saha_kodu:d.site_id||"", aciklama:`MT Talep: ${d.talep_no}`, kalemler:[{ urun_id:k.urun_id||null, miktar:"", birim:"", rezervasyon_id:"", talep_kalem_id:k.id }], n:Date.now() });
+                              setDetayModal(null); setTab("stok");
                             }}
                             style={{ padding:"4px 10px",background:"#065f46",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
-                            📦 Dağıtım Yap
+                            📦 Teslim et (Stok Defteri)
                           </button>
                         ) : k.temin_turu === "Yeni Alım" ? (
                           <button
-                            disabled={saving}
-                            onClick={async ()=>{
-                              if(!window.confirm(`"${k.malzeme_adi}" satın alındı ve depoya girişi yapıldı mı?`)) return;
-                              setSaving(true);
-                              try {
-                                const tkn = localStorage.getItem("finance_token")||localStorage.getItem("token")||"";
-                                const hdrs = {"Content-Type":"application/json",Authorization:`Bearer ${tkn}`};
-                                // Depoya Giriş yap
-                                const stokR = await fetch(`${API_BASE}/malzeme/depo-stok-ekle`,{method:"POST",headers:hdrs,body:JSON.stringify({
-                                  malzeme_adi:k.malzeme_adi, birim:k.birim||"Adet", miktar:k.miktar,
-                                  talep_no:d.talep_no, notlar:"Yeni Alım - MT Talep"
-                                })});
-                                const stokD = await stokR.json();
-                                if(stokD.error){ alert(stokD.error); setSaving(false); return; }
-                                await fetch(`${API_BASE}/malzeme/talepler/${d.id}/kalem-dagitildi`,{method:"PUT",headers:hdrs,body:JSON.stringify({kalem_id:k.id})});
-                                setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,dagitim_yapildi:true}:x));
-                              } catch(e){ alert(e.message); }
-                              setSaving(false);
+                            onClick={()=>{
+                              // 29.10.2026: satın alma onayı stok üretmez; fiziksel mal kabul (kısmi olabilir) Stok Defteri'nden
+                              setStokBaslangic({ ekran:"islem", form:"mal-kabul", talep_id:d.id, n:Date.now() });
+                              setDetayModal(null); setTab("stok");
                             }}
                             style={{ padding:"4px 10px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontWeight:700,fontSize:11,whiteSpace:"nowrap" }}>
-                            🛒 Satın Alındı
+                            🛒 Mal kabul (Stok Defteri)
                           </button>
                         ) : <span style={{ fontSize:11,color:"#9ca3af" }}>—</span>}
                       </td>
@@ -37452,8 +37423,9 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       {/* Tabs */}
       <div style={{ display:"flex",borderBottom:"2px solid #e2e8f0",background:"#fff",padding:"0 16px",gap:4 }}>
         {[...(!_isPersonelOnly?[["talepler","📋 Talepler"]]:[]),
-          ...(canSeeDepo?[["depo","🏭 Depo Stok"],...(_fiyatGizliMi()?[]:[["fiyat","💰 Fiyat Listesi"]])]:[]),
-          ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"📤 Dağıtım"]
+          ...(canSeeStok?[["stok","📦 Stok Defteri"]]:[]),
+          ...(canSeeDepo?[...(_fiyatGizliMi()?[]:[["fiyat","💰 Fiyat Listesi"]]),["depo","🗄️ Eski Depo (arşiv)"]]:[]),
+          ["dagitim",_isPersonelOnly?"📦 Üzerimdeki Malzemeler":"🗄️ Eski Dağıtım (arşiv)"]
         ].map(([k,l])=>(
           <button key={k} onClick={()=>setTab(k)}
             style={{ padding:"12px 16px",background:"none",border:"none",cursor:"pointer",fontWeight:tab===k?700:400,fontSize:14,
@@ -37464,6 +37436,15 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       </div>
 
       <div style={{ padding:"16px 20px" }}>
+
+        {/* ── STOK DEFTERİ (29.10.2026) — tek stok kaynağı ── */}
+        {tab==="stok" && canSeeStok && <StokDefteriPanel baslangic={stokBaslangic} key={stokBaslangic?.n || "stok"} />}
+        {tab==="dagitim" && _isPersonelOnly && <StokBenimPanel currentUser={currentUser} onDurum={setDefterAcikBenim} />}
+        {(tab==="depo" || (tab==="dagitim" && !_isPersonelOnly)) && (
+          <div style={{ background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e",borderRadius:8,padding:"9px 12px",fontSize:13,marginBottom:12 }}>
+            Arşiv: stok defterine geçiş öncesi kayıtlar (salt okunur). Bu ekrandaki çıkış / iade / stok düğmeleri artık stoğu değiştirmez — işlemler <b>📦 Stok Defteri</b> sekmesinden yapılır.
+          </div>
+        )}
 
         {/* ── TALEPLER SEKMESİ ── */}
         {tab==="talepler" && (
@@ -37824,7 +37805,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
         )}
 
         {/* ── DAĞITIM ── */}
-        {tab==="dagitim" && (() => {
+        {tab==="dagitim" && (!_isPersonelOnly || defterAcikBenim === false) && (() => {
           const durumRenk = { PERSONELDE:{ bg:"#dbeafe",c:"#1d4ed8",l:"Üzerinde" }, SAHADA:{ bg:"#dcfce7",c:"#15803d",l:"Sahada" }, IADE_BEKLEMEDE:{ bg:"#fef3c7",c:"#d97706",l:"İade Onayı Bekleniyor" }, DEPOYA_IADE:{ bg:"#f3f4f6",c:"#6b7280",l:"İade Edildi" } };
           const isPersonel = !canSeeDepo;
           const liste = isPersonel ? dagitim : dagitim.filter(d=>!dagitimArama || (d.malzeme_adi||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_personel_ad||"").toLowerCase().includes(dagitimArama.toLowerCase()) || (d.alici_firma||"").toLowerCase().includes(dagitimArama.toLowerCase()));

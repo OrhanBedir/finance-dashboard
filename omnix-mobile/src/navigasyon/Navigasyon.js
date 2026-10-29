@@ -21,6 +21,7 @@ import { SahaEkrani } from "../ekranlar/SahaEkrani";
 import { IsDetayEkrani } from "../ekranlar/IsDetayEkrani";
 import { CleanupEkrani } from "../ekranlar/CleanupEkrani";
 import { MalzemeDetayEkrani, MalzemeTalepEkrani } from "../ekranlar/MalzemeEkranlari";
+import { StokIslemEkrani } from "../ekranlar/StokEkranlari";
 import { OnayMasrafDetayEkrani, OnaylarEkrani } from "../ekranlar/OnaylarEkrani";
 import { ProfilEkrani } from "../ekranlar/ProfilEkrani";
 import { PersonelDetayEkrani, PersonelYonetimiEkrani, YonetimAnaSayfa } from "../ekranlar/YonetimEkranlari";
@@ -118,6 +119,7 @@ export function Navigasyon() {
         <Yigin.Screen name="Cleanup" component={CleanupEkrani} />
         <Yigin.Screen name="MalzemeTalep" component={MalzemeTalepEkrani} />
         <Yigin.Screen name="MalzemeDetay" component={MalzemeDetayEkrani} />
+        <Yigin.Screen name="StokIslem" component={StokIslemEkrani} />
       </Yigin.Navigator>
     </NavigationContainer>
   );

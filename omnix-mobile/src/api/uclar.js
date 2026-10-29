@@ -1,4 +1,4 @@
-// Mevcut backend uçları — web ve eski mobil uygulamayla AYNI sözleşme; yeni uç veya yeni alan yok.
+// Mevcut backend uçları — web ve eski mobil uygulamayla AYNI sözleşme. 29.10.2026: stok defteri uçları (stokApi) eklendi.
 // Kişisel listelerde kimlik her zaman oturumdaki kullanıcıdır (sunucu da token'dan kilitler); e-posta
 // parametresi yalnız sunucunun bunu istediği eski uçlarda ve yalnız kendi adresimizle gönderilir.
 import { api } from "./istemci";
@@ -42,6 +42,16 @@ export const masrafApi = {
   fisEkle: (kalemId, islemeId, secimler) => api.post(`/hr/masraf-belge/${kalemId}`, { isleme_id: islemeId, secimler }, { zamanAsimiMs: 120000 }),
   belgeSil: (id) => api.sil(`/hr/masraf-belge/${id}`),
   gonder: (id) => api.put(`/hr/masraf-form/${id}/submit`),
+};
+
+// Stok defteri (29.10.2026): kişisel stok, sahada tüketim, depo iadesi. Kimlik sunucuda token'dan; personel bilgisi gönderilmez.
+// Yazma isteklerinde istek_anahtari taslakta saklanır: bağlantı koparsa aynı anahtarla tekrar → sunucu ikinci kez yazmaz.
+export const stokApi = {
+  benim: () => api.get("/malzeme/stok/benim?limit=60"),
+  sahalarim: (q) => api.get(`/malzeme/stok/sahalarim?q=${kodla(q || "")}`),
+  tuketim: (govde) => api.post("/malzeme/stok/tuketim", govde),
+  iade: (govde) => api.post("/malzeme/stok/iade", govde),
+  iadeIptal: (id, anahtar) => api.post(`/malzeme/stok/iade/${Number(id)}/iptal`, { istek_anahtari: anahtar }),
 };
 
 export const malzemeApi = {
