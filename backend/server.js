@@ -23412,16 +23412,22 @@ app.get("/hr/is-avans", authMiddleware, async (req, res) => {
 // Kartlar ve modal satırları TEK yanıttan gelir (kart tutarı = modal satırlarının toplamı). Kapsam liste ile aynıdır.
 //  • son_odeme: en son ödeme yapılan gün (ödeme tarihi = odeme_tarihi → muhasebe → direktör onay tarihi) ve o günün ödemeleri
 //  • onay_bekleyen: TALEP / RM / PM onaylı talepler — mevcut aşama, sıradaki onaycı(lar), oturumdaki kişinin onaylayıp onaylayamayacağı
-//  • bugun_gereken: nihai onaylı (DIREKTOR_ONAY) ödenmemiş talepler, son ödeme günü (vade) Europe/Istanbul "bugün" olanlar.
+//  • bugun_gereken (29.10.2026 düzeltme): ana değer BUGÜNÜN TOPLAM İHTİYACI = son ödeme günü (vade) Europe/Istanbul "bugün"
+//      olan, geçerli (onay sürecinde veya nihai onaylı) ve ödenmemiş taleplerin kalanı. Kırılım: ödemeye hazır (DIREKTOR_ONAY)
+//      + onay bekleyen (TALEP / RM / PM onaylı). Önceki sürümde ana değer yalnız ödemeye hazır kısımdı (hesap hatası değil, tanım).
+//      Hariç: reddedilen, ödenmiş (TAMAMLANDI); talep oluşturma tarihi kullanılmaz. Geciken (vade < bugün) ve vade bilgisi
+//      eksik kayıtlar ana değere eklenmez, ayrı ve hazır / onay bekleyen kırılımıyla döner.
 //      Kısmi ödeme kaydı yoktur (ödeme tek adımda tutarın tamamı) → kalan = tutar; avans tablosundaki 'IS' kopyası sayılmaz.
-//      Ayrı gösterilenler: bugün vadeli ama onay bekleyen, vadesi geçmiş (geciken), vade bilgisi eksik. Tutarlar TRY
-//      (talepte para birimi alanı yok); farklı para birimi gelirse ayrı toplanır, kurla birleştirilmez.
+//      Tutarlar TRY (talepte para birimi alanı yok); farklı para birimi gelirse ayrı toplanır, kurla birleştirilmez.
 const AVANS_ASAMA = { TALEP: "RM", ROLLOUT_MUDUR_ONAY: "PM", PM_ONAY: "PD", DIREKTOR_ONAY: "ODE" };
 const AVANS_ASAMA_TR = { RM: "Rollout müdürü onayı", PM: "PM onayı", PD: "Direktör onayı", ODE: "Ödeme (muhasebe)" };
 const istanbulBugun = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
 app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
   try {
-    const rows = await isAvansGorunurSatirlar(req, req.query);
+    // Kart, liste filtrelerinden bağımsızdır: yalnız oturumdaki kişinin yetkili kapsamı (sorgu parametresi alınmaz).
+    // Aynı talep birleşimler yüzünden iki kez gelmesin diye kimliğe göre tekilleştirilir.
+    const tekil = new Map(); for (const t of await isAvansGorunurSatirlar(req, {})) if (!tekil.has(t.id)) tekil.set(t.id, t);
+    const rows = [...tekil.values()];
     const bugun = istanbulBugun();
     const gun = (v) => (v ? ymdYerel(v) : null);
     const kullanicilar = (await pool.query(`SELECT id, LOWER(TRIM(email)) AS email, name, role, COALESCE(is_active,true) AS aktif FROM users`)).rows;
@@ -23448,6 +23454,8 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
         id: t.id, talep_no: `AV-${t.id}`, talep_eden: t.talep_eden_ad || t.talep_eden_email, personel: t.personel_ad || null,
         firma: t.firma || null, bolge: t.bolge || null, proje: t.proje || null, gider_turu: t.gider_turu || null, plaka: t.plaka || null,
         tarih: gun(t.tarih), son_odeme_tarihi: gun(t.son_odeme_tarihi), olusturma: t.created_at, tutar: Number(t.tutar || 0), para_birimi: "TRY",
+        kalan: t.durum === "TAMAMLANDI" ? 0 : Number(t.tutar || 0), // kısmi ödeme kaydı yok: ödenmemişse kalanın tamamı
+
         aciklama: t.aciklama || null, not_aciklama: t.not_aciklama || null, durum: t.durum,
         asama: adim, asama_tr: adim ? AVANS_ASAMA_TR[adim] : null, onaycilar: adim ? await onaycilar(adim, t) : [],
         benim_onaylayabilir: benim, firma_secim_gerekli: benim && (adim === "PM" || (adim === "PD" && !t.firma)), // mevcut panel kuralı
@@ -23463,19 +23471,28 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
     // Son ödeme günü kartı: en son ödeme yapılan gün
     const sonGun = odenmis.map((x) => x.odeme_tarihi).sort().pop() || null;
     const sonGunSatirlar = odenmis.filter((x) => x.odeme_tarihi === sonGun);
-    const topla = (l) => { const o = {}; for (const x of l) o[x.para_birimi] = (o[x.para_birimi] || 0) + x.tutar; return o; };
+    // Para birimi başına toplam; ödeme ihtiyacı grupları ödenmemiş KALAN üzerinden, son ödeme günü kartı ödenen tutar üzerinden
+    const topla = (l, alan = "tutar") => { const o = {}; for (const x of l) o[x.para_birimi] = (o[x.para_birimi] || 0) + x[alan]; return o; };
     const grup = (l) => ({ ids: l.map((x) => x.id), adet: l.length, tutar: topla(l) });
-    const bugunHazir = hazir.filter((x) => x.son_odeme_tarihi === bugun);
-    const geciken = hazir.filter((x) => x.son_odeme_tarihi && x.son_odeme_tarihi < bugun);
-    const vadeEksik = hazir.filter((x) => !x.son_odeme_tarihi);
-    const bugunBekleyen = onay_bekleyen.filter((x) => x.son_odeme_tarihi === bugun);
+    const ihtiyac = (l) => ({ ids: l.map((x) => x.id), adet: l.length, tutar: topla(l, "kalan") });
+    const kirilimli = (h, b) => ({ ...ihtiyac([...h, ...b]), odemeye_hazir: ihtiyac(h), onay_bekleyen: ihtiyac(b) });
+    const vadeBugun = (x) => x.son_odeme_tarihi === bugun;
+    const vadeGecti = (x) => !!x.son_odeme_tarihi && x.son_odeme_tarihi < bugun;
+    const vadeYok = (x) => !x.son_odeme_tarihi;
+    const bugunHazir = hazir.filter(vadeBugun);
+    const bugunBekleyen = onay_bekleyen.filter(vadeBugun);
     res.json({
       ok: true, bugun, saat_dilimi: "Europe/Istanbul",
       satirlar: [...onay_bekleyen, ...hazir, ...sonGunSatirlar],
       kartlar: {
         son_odeme: { tarih: sonGun, ...grup(sonGunSatirlar) },
         onay_bekleyen: { ...grup(onay_bekleyen), benim: grup(onay_bekleyen.filter((x) => x.benim_onaylayabilir)) },
-        bugun_gereken: { odemeye_hazir: grup(bugunHazir), bugun_onay_bekleyen: grup(bugunBekleyen), geciken: grup(geciken), vade_eksik: grup(vadeEksik) },
+        bugun_gereken: {
+          toplam_ihtiyac: ihtiyac([...bugunHazir, ...bugunBekleyen]), // ana değer = ödemeye hazır + bugün vadeli onay bekleyen
+          odemeye_hazir: ihtiyac(bugunHazir), bugun_onay_bekleyen: ihtiyac(bugunBekleyen),
+          geciken: kirilimli(hazir.filter(vadeGecti), onay_bekleyen.filter(vadeGecti)),   // ana değere eklenmez
+          vade_eksik: kirilimli(hazir.filter(vadeYok), onay_bekleyen.filter(vadeYok)),     // ana değere eklenmez
+        },
       },
       kullanici: benimEmail,
     });
@@ -23506,7 +23523,7 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
 
     const adFinal    = talep_eden_ad || talep_eden || "";
     const projeFinal = proje || proje_kodu || null;
-    const tarihFinal = tarih || new Date().toISOString().split("T")[0]; // bugün default
+    const tarihFinal = tarih || istanbulBugun(); // bugün default
 
     if (!adFinal)           return res.status(400).json({ error: "talep_eden_ad zorunlu" });
     if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
@@ -23516,7 +23533,7 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
     // İSTİSNA: Talep sahibi Rollout onaycısının kendisi (Orhan) ise, kendi talebi
     // kendi onayına düşmesin → doğrudan Proje Direktörü (Düzgün Şimşek) onayına gitsin.
     // Bunun için durum PM_ONAY başlar (Rollout+PM aşamaları otomatik geçilir).
-    const today = new Date().toISOString().split("T")[0];
+    const today = istanbulBugun();
     const requesterEmail = String(talep_eden_email || "").toLowerCase().trim();
     const isRolloutApprover = requesterEmail === "orhan.bedir@simsektel.com";
     const durumFinal = isRolloutApprover ? "PM_ONAY" : "TALEP";
@@ -23721,6 +23738,7 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
+    // 29.10.2026: onay / ödeme tarihleri Europe/Istanbul günüyle yazılır (önce UTC idi; 00:00–03:00 arası bir önceki güne düşüyordu)
     const row = await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id]);
     if (!row.rows[0]) return res.status(404).json({ error: "Kayıt bulunamadı" });
     const talep = row.rows[0];
@@ -23735,7 +23753,7 @@ app.put("/hr/is-avans/:id/onayla", authMiddleware, async (req, res) => {
     if (firmaSecim) { // aşama hâlâ okunan aşamaysa yazılır (eş zamanlı onayda başka talebin firması değişmez)
       await pool.query("UPDATE is_avans_talep SET firma=$1 WHERE id=$2 AND durum=$3", [firmaSecim, id, talep.durum]);
     }
-    const today = new Date().toISOString().split("T")[0];
+    const today = istanbulBugun();
     let updateSql, updateParams;
 
     // 22.08.2026 (Orhan, mobil şikâyeti): tek tıkta yalnız BİR adım ilerlemesi
@@ -23818,7 +23836,7 @@ app.put("/hr/is-avans/:id/pm-onayla", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Bu durumda PM onayı yapılamaz" });
     }
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
-    const today = new Date().toISOString().split("T")[0];
+    const today = istanbulBugun();
     const updated = await pool.query(
       "UPDATE is_avans_talep SET durum='PM_ONAY', rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1), pm_onay_tarihi=$1, firma=COALESCE($3, NULLIF(TRIM(firma),''), $4) WHERE id=$2 AND durum=$5 RETURNING *",
       [today, id, firmaSecim, guncelMarka("AHY", today) || "ERC", talep.durum]
@@ -23852,7 +23870,7 @@ app.put("/hr/is-avans/:id/direktor-onayla", authMiddleware, async (req, res) => 
         : "Direktör onayı için yetkiniz yok") });
     }
     const firmaSecim = normalizeAvansFirma(req.body?.firma);
-    const today = new Date().toISOString().split("T")[0];
+    const today = istanbulBugun();
     const updated = await pool.query(
       `UPDATE is_avans_talep SET durum='DIREKTOR_ONAY',
          rollout_mudur_onay_tarihi=COALESCE(rollout_mudur_onay_tarihi,$1),

@@ -27617,7 +27617,9 @@ const AVANS_MODAL_CSS = `
 }`;
 
 function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnaylandi, firmaSabit }) {
-  const ilkSekme = (sekmeler.find((s) => s.varsayilan && s.ids.length) || sekmeler.find((s) => s.ids.length) || sekmeler[0]).kod;
+  // varsayilan: "her_zaman" → boş olsa da ilk açılan sekme (ör. Bugünün toplam ihtiyacı); true → boş değilse
+  const ilkSekme = (sekmeler.find((s) => s.varsayilan === "her_zaman") || sekmeler.find((s) => s.varsayilan && s.ids.length)
+    || sekmeler.find((s) => s.ids.length) || sekmeler[0]).kod;
   const [sekme, setSekme] = useState(ilkSekme);
   const [ara, setAra] = useState("");
   const [firma, setFirma] = useState("");
@@ -27662,7 +27664,11 @@ function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnayland
     return [x.talep_no, x.talep_eden, x.personel, x.firma, x.bolge, x.proje, x.gider_turu, x.plaka, x.aciklama, x.not_aciklama,
       ...(x.onaycilar || []).map((o) => o.ad)].some((v) => String(v || "").toLocaleLowerCase("tr-TR").includes(q));
   });
-  const toplam = {}; satirlar.forEach((x) => { toplam[x.para_birimi] = (toplam[x.para_birimi] || 0) + x.tutar; });
+  // Ödeme ihtiyacı sekmeleri ödenmemiş kalanı (alan: "kalan"), diğerleri tutarı toplar. Filtre varken başlıktaki toplam yalnız
+  // filtrelenen kayıtlarındır; sekmenin genel toplamı (sunucu) ayrıca yazılır.
+  const alan = aktif.alan || "tutar";
+  const toplam = {}; satirlar.forEach((x) => { toplam[x.para_birimi] = (toplam[x.para_birimi] || 0) + Number(x[alan] ?? x.tutar ?? 0); });
+  const filtreli = !!(q || firma || bolge || asama);
 
   const onayla = async (x) => {
     if (kilit.current.has(x.id)) return;
@@ -27699,8 +27705,9 @@ function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnayland
               {aciklama && <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>{aciklama}</div>}
             </div>
             <div style={{ textAlign: "right" }}>
+              <div className="avm-k" style={{ fontWeight: 700 }}>{filtreli ? "Filtrelenen kayıtlar toplamı" : `${aktif.ad} — toplam`}</div>
               <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e3a5f" }}>{avansToplamMetni(toplam)}</div>
-              <div className="avm-k">{satirlar.length} talep (filtrede)</div>
+              <div className="avm-k">{satirlar.length} talep{filtreli ? ` · sekmenin tamamı: ${aktif.ids.length} talep · ${avansToplamMetni(aktif.tutar)}` : ""}</div>
             </div>
             <button type="button" className="avm-btn" onClick={onKapat} aria-label="Kapat" style={{ background: "#f1f5f9", color: "#334155", fontSize: "16px" }}>✕</button>
           </div>
@@ -27823,7 +27830,10 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
     } catch (e) { setHata(e.message); }
   }, []);
   useEffect(() => { yukle(); }, [yukle, surum]);
-  if (!veri) return hata ? <div style={{ fontSize: "12.5px", color: "#b91c1c", marginBottom: "12px" }}>Özet kartları yüklenemedi: {hata}</div> : null;
+  // Hesap gelmeden ₺0 gösterilmez: yükleniyor / hata durumu açıkça yazılır
+  if (!veri) return hata
+    ? <div role="alert" style={{ fontSize: "12.5px", color: "#b91c1c", marginBottom: "12px" }}>Özet kartları yüklenemedi: {hata} <button type="button" onClick={yukle} style={{ marginLeft: "6px", border: "1px solid #fecaca", background: "#fff", color: "#b91c1c", borderRadius: "8px", padding: "2px 8px", cursor: "pointer" }}>Tekrar dene</button></div>
+    : <div role="status" style={{ fontSize: "12.5px", color: "#64748b", marginBottom: "12px" }}>Avans özetleri yükleniyor…</div>;
   const k = veri.kartlar;
   const byId = new Map(veri.satirlar.map((x) => [x.id, x]));
   const ac = (tur) => (e) => { tetik.current = e.currentTarget; setModal(tur); };
@@ -27836,11 +27846,13 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
     onay: { baslik: "⏳ Onay Bekleyenler", aciklama: "Rollout müdürü / PM / direktör onayındaki talepler. Onayla düğmesi yalnız onayınızı bekleyen satırlarda görünür.",
       sekmeler: [{ kod: "benim", ad: "Onayımı bekleyen", ids: k.onay_bekleyen.benim.ids, tutar: k.onay_bekleyen.benim.tutar, varsayilan: true },
         { kod: "tum", ad: "Tümü", ids: k.onay_bekleyen.ids, tutar: k.onay_bekleyen.tutar }] },
-    bugun: { baslik: `💰 Bugün Gereken Avans — ${avansGunUzun(veri.bugun)}`, aciklama: "Ana tutar: son ödeme günü bugün olan, nihai onayı tamamlanmış ve henüz ödenmemiş talepler. Diğer sekmeler ana tutara eklenmez.",
-      sekmeler: [{ kod: "hazir", ad: "Ödemeye hazır (bugün)", ids: bg.odemeye_hazir.ids, tutar: bg.odemeye_hazir.tutar, varsayilan: true },
-        { kod: "bekleyen", ad: "Bugün vadeli, onay bekleyen", ids: bg.bugun_onay_bekleyen.ids, tutar: bg.bugun_onay_bekleyen.tutar },
-        { kod: "geciken", ad: "Geciken", ids: bg.geciken.ids, tutar: bg.geciken.tutar },
-        { kod: "eksik", ad: "Vade bilgisi eksik", ids: bg.vade_eksik.ids, tutar: bg.vade_eksik.tutar }] },
+    bugun: { baslik: `💰 Bugün Gereken Avans — ${avansGunUzun(veri.bugun)}`,
+      aciklama: "Bugünün toplam ihtiyacı = son ödeme günü bugün olan, ödenmemiş talepler: ödemeye hazır (nihai onaylı) + onay bekleyen. Onay bekleyenler henüz ödenemez. Geciken ve vade bilgisi eksik kayıtlar toplama eklenmez. Liste filtrelerinden bağımsızdır.",
+      sekmeler: [{ kod: "toplam", ad: "Bugünün toplam ihtiyacı", ids: bg.toplam_ihtiyac.ids, tutar: bg.toplam_ihtiyac.tutar, alan: "kalan", varsayilan: "her_zaman" },
+        { kod: "hazir", ad: "Ödemeye hazır", ids: bg.odemeye_hazir.ids, tutar: bg.odemeye_hazir.tutar, alan: "kalan" },
+        { kod: "bekleyen", ad: "Bugün vadeli, onay bekleyen", ids: bg.bugun_onay_bekleyen.ids, tutar: bg.bugun_onay_bekleyen.tutar, alan: "kalan" },
+        { kod: "geciken", ad: "Geciken", ids: bg.geciken.ids, tutar: bg.geciken.tutar, alan: "kalan" },
+        { kod: "eksik", ad: "Vade bilgisi eksik", ids: bg.vade_eksik.ids, tutar: bg.vade_eksik.tutar, alan: "kalan" }] },
   };
   const m = modal && modaller[modal];
   return (
@@ -27861,13 +27873,18 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
         <button type="button" className="avm-kart" onClick={ac("bugun")} aria-haspopup="dialog"
           style={{ background: "linear-gradient(135deg,#b45309,#d97706)", color: "#fff", borderColor: "transparent", boxShadow: "0 4px 14px rgba(180,83,9,.3)" }}>
           <div style={{ fontSize: "11px", fontWeight: 800, opacity: 0.85 }}>💰 Bugün Gereken Avans</div>
-          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>{avansToplamMetni(bg.odemeye_hazir.tutar)} <span style={{ fontSize: "12px", fontWeight: 600, opacity: 0.85 }}>ödemeye hazır kalan</span></div>
-          <div style={{ fontSize: "11.5px", opacity: 0.9 }}>{bg.odemeye_hazir.adet} talep</div>
+          <div style={{ fontSize: "22px", fontWeight: 800, marginTop: "2px" }}>{avansToplamMetni(bg.toplam_ihtiyac.tutar)} <span style={{ fontSize: "12px", fontWeight: 600, opacity: 0.85 }}>bugünün toplam ihtiyacı</span></div>
+          <div style={{ fontSize: "12px", fontWeight: 700, marginTop: "3px", lineHeight: 1.5 }}>
+            <div>Ödemeye hazır: {avansToplamMetni(bg.odemeye_hazir.tutar)} <span style={{ fontWeight: 500, opacity: 0.85 }}>({bg.odemeye_hazir.adet})</span></div>
+            <div>Onay bekleyen: {avansToplamMetni(bg.bugun_onay_bekleyen.tutar)} <span style={{ fontWeight: 500, opacity: 0.85 }}>({bg.bugun_onay_bekleyen.adet})</span></div>
+          </div>
+          <div style={{ fontSize: "11.5px", opacity: 0.9 }}>{bg.toplam_ihtiyac.adet} talep</div>
           <div style={{ fontSize: "11px", opacity: 0.85, marginTop: "4px" }}>
-            Bugün vadeli onay bekleyen {avansToplamMetni(bg.bugun_onay_bekleyen.tutar)} · Geciken {avansToplamMetni(bg.geciken.tutar)}{bg.vade_eksik.adet ? ` · Vade bilgisi eksik: ${bg.vade_eksik.adet}` : ""}
+            Geciken: {avansToplamMetni(bg.geciken.tutar)} ({bg.geciken.adet}){bg.vade_eksik.adet ? ` · Vade bilgisi eksik: ${bg.vade_eksik.adet}` : ""} · toplama eklenmez
           </div>
         </button>
       </div>
+      {hata && <div role="alert" style={{ fontSize: "12px", color: "#b91c1c", margin: "-8px 0 12px" }}>Özetler güncellenemedi, gösterilen değerler önceki yüklemeye ait: {hata}</div>}
       {m && <AvansListeModal key={modal} baslik={m.baslik} aciklama={m.aciklama} sekmeler={m.sekmeler} byId={byId} onKapat={kapat} onOnaylandi={degisti} firmaSabit={firmaSabit} />}
     </>
   );
