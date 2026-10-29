@@ -41,6 +41,21 @@ function benzerMi(a, b) {
   let ortak = 0; for (const w of x) if (y.has(w)) ortak++;
   return ortak / (x.size + y.size - ortak);
 }
+// Olası mükerrer için öneri (karar yine kullanıcının): yalnız yazım / dolgu kelimesi farkı → eşle; tip harfi, malzeme cinsi, yer, renk ya da
+// başka bir anlamlı kelime farkı → ayrı kart. Yanlış birleştirme iki ürünün stoğunu karıştırır; şüphede ayrı kart önerilir.
+const DOLGU = new Set(["VE", "İLE", "ILE", "ADET", "TEMİNİ", "TEMINI", "TEMİN", "MALZEME", "MALZEMESİ", "MALZEMESI", "TİP", "TİPİ", "TIPI", "TYPE", "AND", "WITH", "OF", "FOR", "THE", "SET", "TAKIM"]);
+const tumKelimeler = (a) => new Set(normalAnahtar(a).split(" ").filter(Boolean).map((w) => w.replace(/^[.+/]+|[.+/]+$/g, "")).filter(Boolean));
+function mukerrerOneri(ad, benzer) {
+  const x = tumKelimeler(ad), y = tumKelimeler(benzer.ad);
+  const fark = [...[...x].filter((w) => !y.has(w)), ...[...y].filter((w) => !x.has(w))].filter((w) => !DOLGU.has(w));
+  const birimFarki = benzer.temel_birim && benzer.temel_birim !== benzer.aday_birim;
+  if (!fark.length && !birimFarki) return benzer.id
+    ? { karar: `esle:${benzer.id}`, neden: "Yalnız yazım farkı var; mevcut karta kaynak olarak bağlanır" }
+    : { karar: "atla", neden: "Bu içe almadaki başka bir satırla aynı; ikinci kart açılmaz" };
+  if (!fark.length) return { karar: "yeni", neden: `Ad aynı ama birim farklı (${benzer.aday_birim} / ${benzer.temel_birim}); ayrı kart` };
+  const tipHarfi = fark.filter((w) => /^[A-ZÇĞİÖŞÜ]$/.test(w));
+  return { karar: "yeni", neden: tipHarfi.length ? `Tip farkı (${tipHarfi.join(" / ")}); ayrı kart` : `Farklı kelime: ${fark.slice(0, 4).join(", ")}; ayrı kart` };
+}
 const birimCoz = (b) => { const s = UST(b).replace(/\s/g, ""); return BIRIMLER.find((x) => UST(x) === s) || BIRIM_ESLE[s] || null; };
 // Belirsiz tanım: kablo / iletken için kesit ya da tip; pole / direk / ofset için ölçü ya da tip
 function belirsizlik(ad, teknik) {
@@ -264,7 +279,8 @@ function kur(app, c) {
       if (a.durum_kaynak === "DOGRULANAMADI") { s.durum = "DOGRULANAMADI"; sonuc.push(s); buTur.set(na, s); continue; }
       const adayBenzer = mevcut.map((m) => ({ m, skor: benzerMi(a.ad, m.ad) })).filter((x) => x.skor >= 0.6).sort((x, y) => y.skor - x.skor)[0]
         || [...buTur.values()].filter((x) => x.durum === "YENI").map((x) => ({ m: { id: null, kod: "(bu içe almada)", ad: x.ad, temel_birim: x.temel_birim }, skor: benzerMi(a.ad, x.ad) })).filter((x) => x.skor >= 0.6).sort((x, y) => y.skor - x.skor)[0];
-      if (adayBenzer) { s.durum = "OLASI_MUKERRER"; s.benzer = { id: adayBenzer.m.id, kod: adayBenzer.m.kod, ad: adayBenzer.m.ad, temel_birim: adayBenzer.m.temel_birim, benzerlik: Math.round(adayBenzer.skor * 100) }; sonuc.push(s); buTur.set(na, s); continue; }
+      if (adayBenzer) { s.durum = "OLASI_MUKERRER"; s.benzer = { id: adayBenzer.m.id, kod: adayBenzer.m.kod, ad: adayBenzer.m.ad, temel_birim: adayBenzer.m.temel_birim, benzerlik: Math.round(adayBenzer.skor * 100) };
+        s.oneri = mukerrerOneri(a.ad, { ...s.benzer, aday_birim: a.temel_birim }); sonuc.push(s); buTur.set(na, s); continue; }
       s.durum = "YENI"; sonuc.push(s); buTur.set(na, s);
     }
     return sonuc;
@@ -342,4 +358,4 @@ function kur(app, c) {
   return { talepNoAl: (db, yil) => talepNoAl(db, yil), sema, normalAnahtar, birimCoz };
 }
 
-module.exports = { kur, semaKur, normalAnahtar, benzerMi, belirsizlik, BIRIMLER, KATEGORILER };
+module.exports = { kur, semaKur, normalAnahtar, benzerMi, mukerrerOneri, belirsizlik, BIRIMLER, KATEGORILER };

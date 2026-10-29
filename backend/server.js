@@ -28468,6 +28468,38 @@ const malzemeFiyatYetkili = (u) => _malzemeIc(u) && (["admin", "platform_admin",
 const malzemeTamOkuma = (u, req) => malzemeYonetici(u) || (!taseronMu(u) && req.izinler?.malzeme_goruntule === true);
 // Stok defteri onayı (ters kayıt, açılış, depo tanımı, sipariş aşımı): Şimşek fiyat yetkilisi ya da Teknocenter direktör/admin / mali yetkilisi
 const malzemeStokOnay = (u) => malzemeFiyatYetkili(u) || (malzemeTeknoYonetim(u) && (["admin", "direktor", "genel_mudur"].includes(_rol(u)) || maliYetkiKaydi(u)?.kapsam === "TEKNO"));
+// 29.10.2026 (Orhan): Teknocenter malzeme talebi onay sırası — 1) Teknocenter Rollout / Bölge Müdürü 2) Orhan Bedir 3) İlhami Şahin
+// → tedarik. 2. ve 3. adım kişiye bağlıdır (users.id + e-posta çifti, mali yetki matrisi gibi); rol adı tek başına bu adımları açmaz.
+// Talep eden kendi adımını ve öncesini atlar; İlhami Şahin'in kendi talebi Orhan Bedir onayıyla tedarike geçer (kendi talebini onaylamaz).
+// Orhan Bedir, Teknocenter Rollout / Bölge Müdürü adımını da verebilir (o zaman iki adım birlikte geçer).
+const TEKNO_TALEP_PM = [{ id: 5, email: "orhan.bedir@simsektel.com" }, { id: 121, email: "orhan.bedir@gmail.com" }];
+const TEKNO_TALEP_DIREKTOR = [{ id: 1694, email: "ilhami.sahin@simsektel.com" }];
+const TEKNO_ONAY_DURUM = ["ROLLOUT_BEKLE", "PM_ONAY", "TEKNO_DIREKTOR_ONAY"];
+const TEKNO_ADIM_KIM = { ROLLOUT_BEKLE: "Teknocenter Rollout / Bölge Müdürü", PM_ONAY: "Orhan Bedir", TEKNO_DIREKTOR_ONAY: "İlhami Şahin", SATINALINACAK: "Teknocenter tedarik" };
+const _kisiEsles = (u, liste) => { const id = Number(u?.user_id || u?.id || 0) || kayitliId(u); const e = _eposta(u); return liste.some((k) => k.id === id && k.email === e); };
+const teknoTalepPm = (u) => !!u && !taseronMu(u) && _kisiEsles(u, TEKNO_TALEP_PM);
+const teknoTalepDirektor = (u) => !!u && !taseronMu(u) && malzemeFirmaKapsami(u) === "TEKNO" && _kisiEsles(u, TEKNO_TALEP_DIREKTOR);
+const teknoTalepRollout = (u) => !!u && !taseronMu(u) && malzemeFirmaKapsami(u) === "TEKNO" && ["rollout_mudur", "bolge_mudur"].includes(_rol(u));
+const teknoTalebi = (t) => String(t?.firma || "").trim().toUpperCase() === "TEKNO";
+function teknoBaslangicDurum(u) {
+  if (teknoTalepPm(u)) return "TEKNO_DIREKTOR_ONAY";
+  if (teknoTalepRollout(u) || teknoTalepDirektor(u)) return "PM_ONAY";
+  return "ROLLOUT_BEKLE";
+}
+// Kullanıcının bu Teknocenter talebinde yapabileceği işlemler — sunucu kuralı; web düğmeleri de buradan çizilir
+function teknoTalepIslemleri(u, t) {
+  const d = t.durum;
+  const edenDirektor = TEKNO_TALEP_DIREKTOR.some((k) => k.email === String(t.talep_eden_email || "").toLowerCase().trim());
+  const pmSonrasi = edenDirektor ? "SATINALINACAK" : "TEKNO_DIREKTOR_ONAY";
+  const pmEtiket = edenDirektor ? "Onayla → Tedarik sürecine al" : "Onayla → İlhami Şahin onayına gönder";
+  const islemler = [];
+  if (d === "ROLLOUT_BEKLE" && teknoTalepRollout(u)) islemler.push({ durum: "PM_ONAY", etiket: "Onayla → Orhan Bedir onayına gönder" });
+  if (d === "ROLLOUT_BEKLE" && teknoTalepPm(u)) islemler.push({ durum: pmSonrasi, etiket: `Rollout adımıyla birlikte ${pmEtiket.charAt(0).toLowerCase()}${pmEtiket.slice(1)}` });
+  if (d === "PM_ONAY" && teknoTalepPm(u)) islemler.push({ durum: pmSonrasi, etiket: pmEtiket });
+  if (d === "TEKNO_DIREKTOR_ONAY" && teknoTalepDirektor(u)) islemler.push({ durum: "SATINALINACAK", etiket: "Onayla → Tedarik sürecine al" });
+  if (d === "SATINALINACAK" && (malzemeTeknoYonetim(u) || teknoTalepPm(u))) islemler.push({ durum: "DEPODA", etiket: "Tedarik tamamlandı (stok mal kabulle girer)" });
+  return { islemler, reddedebilir: TEKNO_ONAY_DURUM.includes(d) && islemler.length > 0, bekleyen: TEKNO_ADIM_KIM[d] || null };
+}
 async function malzemeTalepSahipligi(u, id) {
   const r = await pool.query(`SELECT id, durum, LOWER(TRIM(COALESCE(talep_eden_email,''))) AS eden,
     COALESCE(talep_edilen_personel,'') AS edilen FROM malzeme_talepler WHERE id=$1`, [Number(id)]);
@@ -28520,6 +28552,7 @@ async function talepKalemHazirla(db, kalemler) {
       ad = u.ad; birim = u.temel_birim; tamSayi = u.tam_sayi;
     } else if (!ad) throw hata("malzeme seçin ya da adını yazın");
     const ms = String(k?.miktar ?? "").trim().replace(/\s/g, "");
+    if (typeof k?.miktar === "string" && /^\d{1,3}(\.\d{3})+$/.test(ms)) throw hata(`miktar "${ms}" belirsiz — bin beş yüz için 1500, bir buçuk için 1,5 yazın`);
     const mn = Number(ms.includes(",") ? ms.replace(/\./g, "").replace(",", ".") : ms);
     if (!ms || !Number.isFinite(mn) || mn <= 0) throw hata(`miktar geçersiz (${k?.miktar ?? "boş"})`);
     if (Math.round(mn * 1000) / 1000 !== mn) throw hata("miktar en fazla 3 ondalık olabilir");
@@ -28717,7 +28750,12 @@ app.get("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
     if (malzemeTamOkuma(req.user, req) && !talepFirmaErisimi(req.user, t.rows[0]) && String(t.rows[0].talep_eden_email || "").toLowerCase() !== String(req.user?.email || "").toLowerCase())
       return res.status(403).json({ ok: false, error: "Bu talep firma kapsamınızda değil" });
     const k = await pool.query(`SELECT k.*, u.kod AS urun_kod, u.teknik AS urun_teknik FROM malzeme_talep_kalemleri k LEFT JOIN malzeme_urun u ON u.id = k.urun_id WHERE k.talep_id=$1 ORDER BY k.id`, [req.params.id]).catch(() => pool.query("SELECT * FROM malzeme_talep_kalemleri WHERE talep_id=$1 ORDER BY id", [req.params.id]));
-    res.json({ ...t.rows[0], kalemler: k.rows });
+    let onay;
+    if (teknoTalebi(t.rows[0])) {
+      const g = await pool.query(`SELECT tip, eski, yeni, aciklama, kullanici, created_at FROM islem_gecmisi WHERE modul='malzeme_talep' AND kayit_id=$1 ORDER BY id`, [Number(req.params.id)]).catch(() => ({ rows: [] }));
+      onay = { ...teknoTalepIslemleri(req.user, t.rows[0]), gecmis: g.rows };
+    }
+    res.json({ ...t.rows[0], kalemler: k.rows, ...(onay ? { onay } : {}) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -28730,7 +28768,10 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
             bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi } = req.body;
     const site = await teknoTalepSahasi(site_id);
     const temiz = await talepKalemHazirla(client, kalemler);
-    const durum = istenenDurum || "TASLAK";
+    // Talep eden oturumdaki kişidir (onay sırasında kendi adımını atlama ve kendi talebini onaylamama buna bağlı)
+    const edenEposta = _eposta(req.user) || talep_eden_email || "", edenAd = talep_eden_ad || req.user?.name || edenEposta;
+    // Taslak ya da onaya gönder; gönderilen talebin ilk adımı talep edene göre sunucuda belirlenir (onay adımı atlatılamaz)
+    const durum = istenenDurum && istenenDurum !== "TASLAK" ? teknoBaslangicDurum(req.user) : "TASLAK";
     await client.query("BEGIN");
     const talep_no = await _malzemeKatalog.talepNoAl(client, new Date().getFullYear());
     const t = await client.query(
@@ -28738,7 +28779,7 @@ app.post("/malzeme/talepler", authMiddleware, async (req, res) => {
          (talep_no, talep_eden_email, talep_eden_ad, durum, notlar,
           bolge, proje, site_type, site_id, talep_edilen_personel, talep_edilen_firma, talep_tarihi, firma)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'TEKNO') RETURNING *`,
-      [talep_no, talep_eden_email, talep_eden_ad, durum, notlar||"",
+      [talep_no, edenEposta, edenAd, durum, notlar||"",
        bolge||"", proje||"", site_type||"", site, talep_edilen_personel||"", talep_edilen_firma||"",
        talep_tarihi || new Date().toISOString().split("T")[0]]
     );
@@ -28776,13 +28817,14 @@ app.put("/malzeme/talepler/:id", authMiddleware, async (req, res) => {
     if (!mevcut) { const e = new Error("Talep bulunamadı"); e.http = 404; throw e; }
     if (mevcut.arsiv_tarihi) { const e = new Error("Arşivlenmiş talep değiştirilemez"); e.http = 409; throw e; }
     if (!talepFirmaErisimi(req.user, mevcut)) { const e = new Error("Bu talep firma kapsamınızda değil"); e.http = 403; throw e; }
+    if (!["TASLAK", "REDDEDILDI"].includes(mevcut.durum)) { const e = new Error("Onaya gönderilmiş talep değiştirilemez; önce reddedilmesi gerekir"); e.http = 409; throw e; }
     const site = await teknoTalepSahasi(site_id);
     const kalemler = Array.isArray(kalemlerHam) ? await talepKalemHazirla(client, kalemlerHam) : null;
     if (kalemler) {
       const bagli = await client.query(`SELECT 1 FROM malzeme_hareket h JOIN malzeme_talep_kalemleri k ON k.id = h.talep_kalem_id WHERE k.talep_id = $1 LIMIT 1`, [req.params.id]).catch(() => ({ rows: [] }));
       if (bagli.rows.length) { const e = new Error("Bu talebin kalemlerine stok hareketi (mal kabul / teslim) bağlı; kalemler değiştirilemez"); e.http = 409; throw e; }
     }
-    const durum = istenenDurum || "TASLAK";
+    const durum = istenenDurum && istenenDurum !== "TASLAK" ? teknoBaslangicDurum(req.user) : "TASLAK";
     await client.query("BEGIN");
     await client.query(
       `UPDATE malzeme_talepler SET durum=$1, notlar=$2, bolge=$3, proje=$4, site_type=$5, site_id=$6,
@@ -28885,7 +28927,8 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
     const email = (req.user?.email || "").toLowerCase();
     let durum = "FIYAT_GIRISI"; // default: Murat
     // Nurcan Kuş rolü admin'e alındığında da rollout kuyruğunu görmeli (16.08.2026)
-    if (role === "rollout_mudur" || role === "bolge_mudur" || email === "nurcan.kus@simsektel.com") durum = "ROLLOUT_BEKLE";
+    if (teknoTalepDirektor(req.user)) durum = "TEKNO_DIREKTOR_ONAY";
+    else if (role === "rollout_mudur" || role === "bolge_mudur" || email === "nurcan.kus@simsektel.com") durum = "ROLLOUT_BEKLE";
     else if (email === "orhan.bedir@simsektel.com") durum = "PM_ONAY";
     else if (email === "duzgun.simsek@simsektel.com") durum = "DUZGUN_ONAY";
     const fk = malzemeFirmaKapsami(req.user);
@@ -28900,10 +28943,23 @@ app.get("/malzeme/bekleyen-count", authMiddleware, async (req, res) => {
 app.put("/malzeme/talepler/:id/durum", authMiddleware, async (req, res) => {
   try {
     const { durum, notlar, kalemler, onay_notu } = req.body;
-    const onceki = (await pool.query("SELECT durum, firma, arsiv_tarihi FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0];
+    const onceki = (await pool.query("SELECT id, durum, firma, arsiv_tarihi, talep_eden_email FROM malzeme_talepler WHERE id=$1", [req.params.id])).rows[0];
     if (!onceki) return res.status(404).json({ ok: false, error: "Talep bulunamadı" });
     if (onceki.arsiv_tarihi) return res.status(409).json({ ok: false, error: "Arşivlenmiş talebin durumu değiştirilemez" });
     if (!talepFirmaErisimi(req.user, onceki)) return res.status(403).json({ ok: false, error: "Bu talep firma kapsamınızda değil" });
+    // Teknocenter talebi: yalnız sıradaki onaycı ilerletir / reddeder; kalem ve fiyat bu uçtan değişmez
+    if (teknoTalebi(onceki)) {
+      const isl = teknoTalepIslemleri(req.user, onceki);
+      const red = durum === "REDDEDILDI";
+      if (red ? !isl.reddedebilir : !isl.islemler.some((x) => x.durum === durum))
+        return res.status(403).json({ ok: false, error: isl.bekleyen ? `Bu adımda onay sizde değil (bekleyen: ${isl.bekleyen})` : "Bu talepte yapılacak onay adımı yok" });
+      const not = String(onay_notu || "").trim();
+      if (red && !not) return res.status(400).json({ ok: false, error: "Red gerekçesi yazın" });
+      const r = await pool.query(`UPDATE malzeme_talepler SET durum=$1, onay_notu=$2 WHERE id=$3 AND durum=$4 RETURNING id`, [durum, not || null, onceki.id, onceki.durum]);
+      if (!r.rows.length) return res.status(409).json({ ok: false, error: "Talep bu arada başka bir onaycı tarafından güncellendi; sayfayı yenileyin" });
+      await islemGecmisiYaz(req, "malzeme_talep", onceki.id, red ? "RED" : "ONAY", { durum: onceki.durum }, { durum, adim: TEKNO_ADIM_KIM[onceki.durum] || onceki.durum }, not || null);
+      return res.json({ ok: true, durum });
+    }
     const oncekiDurum = onceki.durum || null;
     const fields = ["durum=$1"];
     const vals = [durum];

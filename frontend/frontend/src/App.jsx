@@ -35268,6 +35268,7 @@ function PersonelMalzemePanel({ currentUser }) {
     FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",  color:"#8b5cf6", bg:"#ede9fe" },
     PM_ONAY:       { label:"PM Onayında",                color:"#2563eb", bg:"#dbeafe" },
     DUZGUN_ONAY:   { label:"Direktör Onayında",          color:"#0284c7", bg:"#e0f2fe" },
+    TEKNO_DIREKTOR_ONAY: { label:"İlhami Şahin Onayında", color:"#0284c7", bg:"#e0f2fe" },
     ONAYLANDI:     { label:"Onaylandı ✓",               color:"#16a34a", bg:"#dcfce7" },
     SATINALINACAK: { label:"Tedarik Aşamasında",         color:"#ea580c", bg:"#ffedd5" },
     DEPODA:        { label:"Tedarik Tamamlandı ✓",       color:"#15803d", bg:"#bbf7d0" },
@@ -35422,7 +35423,7 @@ function PersonelMalzemePanel({ currentUser }) {
                       {(t.kalemler||[]).slice(0,3).map((k,i) => (
                         <div key={i} style={{ display:"flex", gap:6 }}>
                           <span>• {k.malzeme_adi}</span>
-                          <span style={{ color:"#6b7280" }}>{k.miktar} {k.birim}</span>
+                          <span style={{ color:"#6b7280" }}>{Number(k.miktar).toLocaleString("tr-TR", { maximumFractionDigits: 3 })} {k.birim}</span>
                         </div>
                       ))}
                       {(t.kalemler||[]).length > 3 && <div style={{ color:"#9ca3af" }}>+{t.kalemler.length - 3} kalem daha…</div>}
@@ -36212,10 +36213,12 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   const updateDurum = async (id, durum, kalemler, not) => {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/malzeme/talepler/${id}/durum`, {
+      const r = await fetch(`${API_BASE}/malzeme/talepler/${id}/durum`, {
         method:"PUT", headers,
         body: JSON.stringify({ durum, kalemler, onay_notu: not }),
       });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.ok === false || j.error) { alert(j.error || "Durum güncellenemedi"); setSaving(false); return; }
       setDetayModal(null); loadTalepler();
       if (tab==="depo") loadDepoStok();
     } catch (e) { alert(e.message); }
@@ -36226,7 +36229,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
   const excelIndir = (t, kalemler) => {
     const durumLabel = {
       TASLAK:"Taslak", NURCAN_ONAY:"Nurcan Onayı Bekliyor", ROLLOUT_BEKLE:"Rollout Müdürü Onayı Bekleniyor", FIYAT_GIRISI:"Fiyat Girişi (Murat)",
-      PM_ONAY:"PM Onayı (Orhan Bedir)", DUZGUN_ONAY:"Düzgün Onayı Bekliyor",
+      PM_ONAY:"PM Onayı (Orhan Bedir)", DUZGUN_ONAY:"Düzgün Onayı Bekliyor", TEKNO_DIREKTOR_ONAY:"İlhami Şahin Onayı Bekliyor",
       ONAYLANDI:"Onaylandı", SATINALINACAK:"Satın Alınacak", DEPODA:"Depoda", REDDEDILDI:"Reddedildi"
     };
     const tarihFmt = (d) => {
@@ -36584,6 +36587,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
       FIYAT_GIRISI:  { label:"Envanter Onayı Bekleniyor",        color:"#8b5cf6", bg:"#ede9fe" },
       PM_ONAY:       { label:"PM Onayı Bekleniyor",              color:"#2563eb", bg:"#dbeafe" },
       DUZGUN_ONAY:   { label:"Proje Direktörü Onayı Bekleniyor", color:"#0284c7", bg:"#e0f2fe" },
+      TEKNO_DIREKTOR_ONAY: { label:"İlhami Şahin Onayı Bekleniyor", color:"#0284c7", bg:"#e0f2fe" },
       ONAYLANDI:     { label:"Onaylandı",                        color:"#16a34a", bg:"#dcfce7" },
       SATINALINACAK: { label:"Tedarik Aşamasında",               color:"#ea580c", bg:"#ffedd5" },
       DEPODA:        { label:"Tedarik Tamamlandı ✓",             color:"#15803d", bg:"#bbf7d0" },
@@ -36705,15 +36709,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
     const d = detayModal;
     const _detayUserRole = (currentUser?.role || "").toLowerCase();
     const _isRolloutMudurDetay = _detayUserRole === "rollout_mudur" || _detayUserRole === "bolge_mudur";
-    const canRollout       = _isRolloutMudurDetay && d.durum==="ROLLOUT_BEKLE";
-    const canNurcan        = isNurcan   && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE");
-    const canPM            = isPM       && d.durum==="PM_ONAY";
-    const canMurat         = isMurat    && d.durum==="FIYAT_GIRISI";
-    const canDuzgun        = isDirektor && d.durum==="DUZGUN_ONAY";
-    const canMuratTedarik  = isMurat    && d.durum==="SATINALINACAK";
+    const tekno            = !!d.onay; // 29.10.2026: Teknocenter talebi — onay adımları sunucudan (d.onay.islemler)
+    const canRollout       = !tekno && _isRolloutMudurDetay && d.durum==="ROLLOUT_BEKLE";
+    const canNurcan        = !tekno && isNurcan   && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE");
+    const canPM            = !tekno && isPM       && d.durum==="PM_ONAY";
+    const canMurat         = !tekno && isMurat    && d.durum==="FIYAT_GIRISI";
+    const canDuzgun        = !tekno && isDirektor && d.durum==="DUZGUN_ONAY";
+    const canMuratTedarik  = !tekno && isMurat    && d.durum==="SATINALINACAK";
     const canOnay          = false;
     const canDepoda        = canMuratTedarik;
-    const canReddet        = (isNurcan||isPM||isMurat||isDirektor||_isRolloutMudurDetay) && ["ROLLOUT_BEKLE","NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
+    const canReddet        = tekno ? !!d.onay.reddedebilir : (isNurcan||isPM||isMurat||isDirektor||_isRolloutMudurDetay) && ["ROLLOUT_BEKLE","NURCAN_ONAY","PM_ONAY","FIYAT_GIRISI","DUZGUN_ONAY"].includes(d.durum);
     const isOwner     = d.talep_eden_email === currentUser?.email;
     const canDuzenle  = isOwner && ["TASLAK","REDDEDILDI"].includes(d.durum);
 
@@ -36771,7 +36776,16 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
             // Murat/Direktor talep ederse: sırasıyla kendi adımına kadar atlanır
             const skipNurcan = talepEdenPM || talepEdenNurcan || talepEdenMurat || talepEdenDirektor || talepEdenBolgeMudur;
             const skipPM     = talepEdenPM || talepEdenMurat || talepEdenDirektor; // Bölge Müdürü PM'den geçer
-            const ZINCIR = [
+            const TS = ["ROLLOUT_BEKLE","PM_ONAY","TEKNO_DIREKTOR_ONAY","SATINALINACAK","DEPODA"];
+            const ti = TS.indexOf(d.durum);
+            const ZINCIR = d.onay ? [
+              { key:"talep",   label:"Talep Eden",       kisi: d.talep_eden_ad||"—", done: true, color:"#0ea5e9" },
+              { key:"rollout", label:"Rollout / Bölge Müdürü", kisi:"Teknocenter", done: ti > 0, waiting: ti === 0, color:"#8b5cf6" },
+              { key:"pm",      label:"PM Onayı",         kisi:"Orhan Bedir",  done: ti > 1, waiting: ti === 1, color:"#2563eb" },
+              { key:"dir",     label:"Direktör",         kisi:"İlhami Şahin", done: ti > 2, waiting: ti === 2, color:"#0284c7" },
+              { key:"tedarik", label:"Tedarik",          kisi:"Teknocenter",  done: ti > 3, waiting: ti === 3, color:"#ea580c" },
+              { key:"depo",    label:"Tamamlandı ✓",     kisi:"Stok mal kabulle", done: ti === 4, waiting: false, color:"#16a34a" },
+            ] : [
               { key:"talep",    label:"Talep Eden",    kisi: d.talep_eden_ad||"—",      done: true,                                                                             color:"#0ea5e9" },
               { key:"nurcan",   label:"Rollout Müdürü",kisi:"Nurcan Kuş",               done: !skipNurcan && !["TASLAK","NURCAN_ONAY","ROLLOUT_BEKLE"].includes(d.durum)&&d.durum!=="REDDEDILDI", waiting: !skipNurcan && (d.durum==="NURCAN_ONAY" || d.durum==="ROLLOUT_BEKLE"), skipped: skipNurcan, color:"#8b5cf6" },
               { key:"pm",       label:"PM Onayı",      kisi:"Orhan Bedir",              done: !skipPM && ["FIYAT_GIRISI","DUZGUN_ONAY","SATINALINACAK","DEPODA"].includes(d.durum), waiting: !skipPM && d.durum==="PM_ONAY", skipped: skipPM, color:"#2563eb" },
@@ -36883,7 +36897,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                         <input type="number" value={k.miktar}
                           onChange={e=>setDetayKalemler(prev=>prev.map((x,j)=>j===i?{...x,miktar:e.target.value,toplam_tutar:e.target.value*(x.birim_fiyat||0)}:x))}
                           style={{ width:70,padding:"4px 6px",border:"1px solid #a78bfa",borderRadius:4,fontSize:12,background:"#faf5ff",textAlign:"center" }} />
-                      ) : k.miktar}
+                      ) : Number(k.miktar).toLocaleString("tr-TR", { maximumFractionDigits: 3 })}
                     </td>
                     <td style={{ padding:"8px 10px" }}>
                       {canMurat && !k.dagitim_yapildi ? (
@@ -37055,7 +37069,20 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
           })()}
 
           {/* Onay / Düzeltme notu */}
-          {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik) && (
+          {tekno && d.onay.gecmis?.length > 0 && (
+            <div style={{ marginBottom:14, fontSize:12, color:"#475569", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px" }}>
+              <div style={{ fontWeight:700, marginBottom:6 }}>🕘 Onay geçmişi</div>
+              {d.onay.gecmis.map((g, gi) => (
+                <div key={gi} style={{ marginBottom:3 }}>
+                  {new Date(g.created_at).toLocaleString("tr-TR")} · {g.kullanici} · {g.tip === "RED" ? "❌ Reddetti" : "✅ Onayladı"} ({g.yeni?.adim || g.eski?.durum}){g.aciklama ? ` — ${g.aciklama}` : ""}
+                </div>
+              ))}
+            </div>
+          )}
+          {tekno && !d.onay.islemler?.length && d.onay.bekleyen && d.durum !== "DEPODA" && (
+            <div style={{ marginBottom:14, fontSize:12, fontWeight:700, color:"#92400e" }}>🕐 Sıradaki onay: {d.onay.bekleyen}</div>
+          )}
+          {(canNurcan||canMurat||canPM||canDuzgun||canMuratTedarik||(tekno && d.onay.islemler?.length > 0)) && (
             <div style={{ marginBottom:14 }}>
               <label style={{ fontSize:13,fontWeight:600,display:"block",marginBottom:6 }}>
                 {canMurat ? "📝 Envanter Notu / Düzeltme Açıklaması" : "Onay Notu (isteğe bağlı)"}
@@ -37068,6 +37095,10 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
 
           {/* Aksiyon butonları */}
           <div style={{ display:"flex",gap:10,flexWrap:"wrap",alignItems:"center" }}>
+            {tekno && d.onay.islemler.map(x => (
+              <button key={x.durum} onClick={()=>updateDurum(d.id,x.durum,null,onayNotu)} disabled={saving}
+                style={{ padding:"10px 18px",background:x.durum==="DEPODA"?"#15803d":"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ {x.etiket}</button>
+            ))}
             {canRollout       && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)} disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canNurcan        && <button onClick={()=>updateDurum(d.id,"PM_ONAY",null,onayNotu)}        disabled={saving} style={{ padding:"10px 18px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → PM'e Gönder</button>}
             {canPM            && <button onClick={()=>updateDurum(d.id,"FIYAT_GIRISI",null,onayNotu)}  disabled={saving} style={{ padding:"10px 18px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700 }}>✅ Onayla → Envanter Onayına Gönder</button>}
@@ -37405,6 +37436,7 @@ function MalzemeYonetimiPanel({ currentUser, onBack, saltOkunur = false }) {
                   <option value="PM_ONAY">PM Onayı Bekleniyor</option>
                   <option value="FIYAT_GIRISI">Envanter Onayı Bekleniyor</option>
                   <option value="DUZGUN_ONAY">Proje Direktörü Onayı Bekleniyor</option>
+                  <option value="TEKNO_DIREKTOR_ONAY">İlhami Şahin Onayı Bekleniyor</option>
                   <option value="SATINALINACAK">Tedarik Aşamasında</option>
                   <option value="ONAYLANDI">Onaylandı</option>
                   <option value="DEPODA">Depoda</option>

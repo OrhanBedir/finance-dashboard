@@ -225,6 +225,7 @@ export function kalemKontrol(kalemler) {
   if (!dolu.length) return "En az bir malzeme ekleyin";
   for (const k of dolu) {
     const m = sayiCoz(k.miktar);
+    if (/^\d{1,3}(\.\d{3})+$/.test(String(k.miktar ?? "").trim())) return `"${k.malzeme_adi}": ${k.miktar} belirsiz — bin beş yüz için 1500, bir buçuk için 1,5 yazın`;
     if (!(m > 0)) return `"${k.malzeme_adi}" için geçerli bir miktar girin (virgüllü olabilir)`;
     if (Math.round(m * 1000) / 1000 !== m) return `"${k.malzeme_adi}": en fazla 3 ondalık`;
     if (k.tam_sayi && !Number.isInteger(m)) return `"${k.malzeme_adi}" ${k.birim} ile tutulur; tam sayı girin`;
@@ -253,10 +254,12 @@ export function MalzemeKatalogPanel({ yetki }) {
   useEffect(() => { api("/malzeme/katalog/kategoriler").then((j) => setMeta({ kategoriler: j.kategoriler.map((k) => k.kategori), birimler: j.birimler })).catch(() => {}); }, [yenile]);
   useEffect(() => { const t = setTimeout(() => api(`/malzeme/katalog?q=${encodeURIComponent(ara)}&kategori=${encodeURIComponent(kategori)}&limit=300${yetki?.depo ? "&pasif=1" : ""}`).then((j) => setRows(j.rows)).catch((e) => setMesaj({ tur: "hata", metin: e.message })), 250); return () => clearTimeout(t); }, [ara, kategori, yenile, yetki?.depo]);
   const onizle = async (kaynak, govde) => { setMesgul(true); setMesaj(null);
-    try { const j = await api("/malzeme/katalog/ice-al", { method: "POST", body: { kaynak, ...govde } }); setIce({ kaynak, govde, sonuc: j, kararlar: {}, filtre: "" }); }
+    try { const j = await api("/malzeme/katalog/ice-al", { method: "POST", body: { kaynak, ...govde } }); // olası mükerrerlerde sistemin önerisi önceden seçili gelir; kullanıcı istediğini değiştirir
+      const kararlar = Object.fromEntries((j.satirlar || []).filter((x) => x.oneri).map((x) => [x.anahtar, x.oneri.karar]));
+      setIce({ kaynak, govde, sonuc: j, kararlar, filtre: "" }); }
     catch (e) { setMesaj({ tur: "hata", metin: e.message }); } finally { setMesgul(false); } };
   const uygula = async () => {
-    if (!window.confirm(`${ice.sonuc.ozet.yeni} yeni kart eklenecek, ${ice.sonuc.ozet.eslesen} eşleşen karta kaynak bağlanacak. Olası mükerrerlerde yalnız verdiğiniz kararlar uygulanır. Onaylıyor musunuz?`)) return;
+    if (!window.confirm(`${ice.sonuc.ozet.yeni} yeni kart eklenecek, ${ice.sonuc.ozet.eslesen} eşleşen karta kaynak bağlanacak. Olası mükerrerlerde ekranda seçili kararlar (sistem önerisi ya da sizin değişikliğiniz) uygulanır. Onaylıyor musunuz?`)) return;
     setMesgul(true);
     try { const j = await api("/malzeme/katalog/ice-al", { method: "POST", body: { kaynak: ice.kaynak, ...ice.govde, uygula: true, kararlar: ice.kararlar } });
       setMesaj({ tur: "basari", metin: `İçe alındı: ${j.ozet.yeni_kart} yeni kart, ${j.ozet.kaynak_baglandi} kaynak bağlandı, ${j.ozet.atlandi} atlandı. Fiyatlara dokunulmadı.` }); setIce(null); setYenile((x) => x + 1); }
@@ -288,6 +291,7 @@ export function MalzemeKatalogPanel({ yetki }) {
           <div style={{ flex: 1 }}><b>{s.ad}</b> ({s.temel_birim || s.birim_ham || "?"}) · {s.kategori}
             <div style={{ color: "#64748b" }}>{Object.entries(s.teknik || {}).map(([a, b]) => `${a}: ${b}`).join(" · ")} {s.kaynaklar.slice(0, 3).map((k) => k.boq_kod || k.yer).join(", ")}{s.uyarilar?.length ? ` · ⚠ ${s.uyarilar.join("; ")}` : ""}</div>
             {s.benzer && <div style={{ color: "#92400e" }}>Benzer: {s.benzer.kod} · {s.benzer.ad} (%{s.benzer.benzerlik})</div>}
+            {s.oneri && <div style={{ color: "#065f46" }}>Öneri: {s.oneri.neden}</div>}
             {s.eslesen && <div style={{ color: "#1d4ed8" }}>Eşleşen: {s.eslesen.kod} · {s.eslesen.ad}</div>}</div>
           {["OLASI_MUKERRER", "DOGRULANAMADI"].includes(s.durum) && <select value={ice.kararlar[s.anahtar] || "atla"} onChange={(e) => setIce({ ...ice, kararlar: { ...ice.kararlar, [s.anahtar]: e.target.value } })} style={{ ...sInput, width: 190 }}>
             <option value="atla">Atla (incelenecek)</option><option value="yeni">Ayrı yeni kart</option>{s.benzer?.id && <option value={`esle:${s.benzer.id}`}>Benzerle eşle (kaynak bağla)</option>}</select>}
