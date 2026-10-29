@@ -1860,13 +1860,20 @@ async function markaRolloutKapsami(req) {
   const etiketler = await markaRolloutEtiketleri(P.kod);
   const esle = (v) => { const s = String(v || "").trim().toUpperCase(); return !!s && (desen.test(s) || etiketler.includes(s)); };
   const goruntule = iz.rollout_goruntule === true;
+  // 29.10.2026 (Orhan): Günlük İş Girişi'ndeki PR talepleri (master_works — Nurcan Kuş / Serdar Altınova girer) de kapsamı
+  // belirler: iş kodunda firmaya ait kalemi olan saha, Rollout taşeronu başka firma olsa da firmanın kapsamındadır. Kalemde
+  // yalnız firma ADI (önek / ad: TEKNO, TEKNOCENTER, TEKNO_xxx) sayılır — ekip etiketleri sayılmaz, öneksiz 2KX otomatik
+  // Teknocenter olmaz. Görünürlük genişler, yetki genişlemez: maske ve yazma kapısı Rollout iş kolu sahipliğiyle kalır
+  // (başka firmanın iş kolu alanları boş gelir, değiştirilemez).
+  const gunlukEsle = (v) => { const s = String(v || "").trim().toUpperCase(); return !!s && desen.test(s); };
   return {
     kod: P.kod, ad: P.ad, goruntule, excel: goruntule && iz.rollout_excel === true, duzenle: goruntule && iz.rollout_duzenle === true,
-    esle, params: [desenStr, etiketler],
+    esle, gunlukEsle, params: [desenStr, etiketler],
     sql: (alias, i) => "(" + ROLLOUT_SUBCON_ALANLARI.map((k) => {
       const col = `UPPER(TRIM(COALESCE(to_jsonb(${alias})->>'${k}','')))`;
       return `${col} ~ $${i} OR ${col} = ANY($${i + 1}::text[])`;
-    }).join(" OR ") + ")",
+    }).join(" OR ") + ` OR EXISTS (SELECT 1 FROM master_works mwk WHERE UPPER(TRIM(mwk.site_code)) = UPPER(TRIM(${alias}.site_code))
+        AND UPPER(TRIM(COALESCE(mwk.subcon_name,''))) ~ $${i}))`,
   };
 }
 const rolloutKapsam = async (req) => (req.markaRollout !== undefined ? req.markaRollout : await markaRolloutKapsami(req));
@@ -13168,15 +13175,16 @@ async function haritaKapsamSatirlari(K, FM) {
   // Kalem süzgeci: firma görünümünde firmanın kalemleri; alt markada yalnız kendi kalemleri; ERC genel görünümde tümü
   const kalemEsle = FM ? (ad) => FM.esle(ad) && (!K || K.esle(ad)) : K ? (ad) => K.esle(ad) : null;
   const kalemMap = await haritaKalemleri(kalemEsle);
-  if (!FM) return { rows: ham, kalemMap, yalnizGunluk: [] };
+  // Rollout kaydı hiç olmayan, yalnız Günlük İş Girişi'nde (PR talebi) kalemi olan iş kodları: ERC firma görünümünde ve alt marka
+  // hesabında (29.10.2026, Orhan) — alt markada yalnız kalem taşeronu firma ADIYLA eşleşenler (K.gunlukEsle; ekip etiketi sayılmaz)
+  const yalnizGunlukBul = async (esle) => {
+    const tum = new Set((await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS sc FROM rollout_progress`)).rows.map((x) => x.sc));
+    return [...kalemMap.entries()].filter(([k, ks]) => !tum.has(k) && ks.some((x) => esle(x.subcon_name))).map(([k]) => k);
+  };
+  if (!FM) return { rows: ham, kalemMap, yalnizGunluk: K ? await yalnizGunlukBul((v) => K.gunlukEsle(v)) : [] };
   const sc = (r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase();
   const rows = ham.filter((r) => ROLLOUT_IS_KOLU_ALANLARI.some((L) => { const v = rolloutFirmaAdi(r[L.subcon]); return v && FM.esle(v); }) || kalemMap.has(sc(r)));
-  // Rollout kaydı hiç olmayan, yalnız Günlük İş Girişi kalemi olan iş kodları — yalnız ERC (alt marka kapsamı Rollout'tan gelir)
-  let yalnizGunluk = [];
-  if (!K) {
-    const tum = new Set((await pool.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS sc FROM rollout_progress`)).rows.map((x) => x.sc));
-    yalnizGunluk = [...kalemMap.keys()].filter((k) => !tum.has(k));
-  }
+  const yalnizGunluk = await yalnizGunlukBul((v) => FM.esle(v) && (!K || K.gunlukEsle(v)));
   return { rows, kalemMap, yalnizGunluk };
 }
 // Konumu olmayan sahanın nedeni (kayıtlar sessizce kaybolmaz)
@@ -13330,8 +13338,9 @@ app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
     if (!id) return res.status(400).json({ ok: false, error: "fiziksel_id zorunlu" });
     const K = await rolloutKapsam(req);
     if (K) {
-      const sahalar = await markaRolloutSahalar(K);
-      if (![...sahalar].some((sc) => sahaKimlik.fizikselSaha(sc)?.fiziksel_id === id)) return res.status(403).json({ ok: false, error: "Bu saha firma kapsamınızda değil" });
+      // Harita ile aynı kapsam (Rollout + Günlük İş Girişi kalemleri); firma parametresi kapsamı genişletmez
+      const S = await haritaSahaKapsami(req, id);
+      if (S.hata) return res.status(403).json({ ok: false, error: "Bu saha firma kapsamınızda değil" });
     }
     await sahaKonum.tabloHazirla(pool);
     const k = (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = $1`, [id])).rows[0];
