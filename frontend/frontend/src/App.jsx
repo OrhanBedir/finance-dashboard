@@ -7242,7 +7242,14 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
   const [form, setForm] = useState({ donemBas: "", donemBit: "", bas: "08:00", bit: "18:00", molaBas: "12:00", molaDk: 60, kapasiteSaat: 8, minBlokDk: 60, surusPayYuzde: 0,
     konaklama: "BOLGEDE", baslangic: "", malzemeDurum: "", teslimler: [] });
   const [mod, setMod] = useState("ASISTAN");
-  const [isler, setIsler] = useState(() => (adaylar || []).map((x) => ({ ...x, sec: true, sure_gun: "", sure_gerekce: "", par_id: "", kesinti: "", kesinti_dk: "", erisim_bas: "", erisim_bit: "", baslangic_tarih: "", baslangic_saat: "" })));
+  // 29.10.2026 (Orhan): yeni planda hiçbir iş seçili gelmez. Seçim ayrı, SIRALI bir listedir (iş kodu = gerçek iş kaydı kimliği;
+  // liste sırası ya da fiziksel Site ID değil). Satır bilgileri (süre, PAR, tarih) `isler`de kalır: seçimi kaldırmak bilgiyi
+  // silmez, yeniden seçilince geri gelir. Manuel sırada plan sırası = seçim sırası; yeni seçilen sona eklenir. Arama / "Yalnız
+  // seçilenler" görünümü seçimi ve sırayı değiştirmez. Taslak (pencere açıkken adımlar arası, "Başka ekip planla") seçimi korur.
+  const [isler, setIsler] = useState(() => (adaylar || []).map((x) => ({ ...x, sure_gun: "", sure_gerekce: "", par_id: "", kesinti: "", kesinti_dk: "", erisim_bas: "", erisim_bit: "", baslangic_tarih: "", baslangic_saat: "" })));
+  const [secim, setSecim] = useState(() => (adaylar || []).filter((x) => x.secili === true).map((x) => x.kod)); // taslaktan gelen seçim (varsa) korunur
+  const [isArama, setIsArama] = useState("");
+  const [yalnizSecili, setYalnizSecili] = useState(false);
   const [faaliyetler, setFaaliyetler] = useState([]);
   const [yolManuel, setYolManuel] = useState({});
   const [onizleme, setOnizleme] = useState(null); const [yukleniyor, setYukleniyor] = useState(false); const [hata, setHata] = useState("");
@@ -7263,7 +7270,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
     calisma: { bas: form.bas, bit: form.bit, molaBas: form.molaBas, molaDk: Number(form.molaDk), kapasiteSaat: Number(form.kapasiteSaat), minBlokDk: Number(form.minBlokDk), surusPayYuzde: Number(form.surusPayYuzde) },
     baslangic: form.baslangic.startsWith("D:") ? { tur: "DEPO", id: Number(form.baslangic.slice(2)) } : form.baslangic.startsWith("S:") ? { tur: "SAHA", kod: form.baslangic.slice(2) } : null,
     malzeme: { durum: form.malzemeDurum, teslimler: form.teslimler.map((t) => ({ tarih: t.tarih, saat: t.saat, depo_id: Number(t.depo_id), sure_dk: Number(t.sure_dk) || 30, acilis: t.acilis, kapanis: t.kapanis, hazir_tarih: t.hazir_tarih, hazir_saat: t.hazir_saat })) },
-    isler: isler.filter((x) => x.sec && !planlananlar.includes(x.kod)).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_gerekce: x.sure_gerekce,
+    isler: secim.filter((k) => !planlananlar.includes(k)).map((k) => isler.find((x) => x.kod === k)).filter(Boolean).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_gerekce: x.sure_gerekce,
       baslangic_tarih: x.baslangic_tarih, baslangic_saat: x.baslangic_saat,
       par: { par_id: x.par_id, kesinti: x.kesinti, kesinti_dk: x.kesinti_dk, bas: x.erisim_bas, bit: x.erisim_bit } })),
     faaliyetler: faaliyetler.map((f) => ({ ...f, sure_dk: Number(f.sure_dk) })), yol_manuel: yolManuel,
@@ -7286,6 +7293,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
     if (!r.j?.ok) { setHata([r.j?.error, ...(r.j?.engeller || [])].filter(Boolean).join(" · ") || "Kaydedilemedi"); return; }
     const kodlar = (onizleme.plan?.gunler || []).flatMap((g) => g.segmentler).filter((s) => s.tur === "MONTAJ").map((s) => s.kod);
     setPlanlananlar((p) => [...new Set([...p, ...kodlar])]);
+    setSecim((sc) => sc.filter((k) => !kodlar.includes(k))); // planlanan işler seçimden düşer; diğer seçimler sonraki ekip için kalır
     setSonuc({ ...r.j, ekip: onizleme.ekip, donem: onizleme.plan.donem }); setAdim("SONUC"); onKaydedildi && onKaydedildi();
   };
   const baskaEkip = () => { setEkipNo(null); setOnizleme(null); setSonuc(null); setFaaliyetler([]); setYolManuel({}); setAdim("A"); };
@@ -7294,6 +7302,15 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
   const girdi = { padding: "8px 10px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
   const adayKonumlu = isler.filter((x) => x.konum_var);
   const montajAday = isler.filter((x) => !planlananlar.includes(x.kod));
+  const seciliSet = new Set(secim);
+  const seciliAday = secim.filter((k) => montajAday.some((x) => x.kod === k));
+  const aramaQ = isArama.replace(/\s+/g, "").toLocaleUpperCase("tr-TR");
+  const filtreAktif = !!aramaQ || yalnizSecili;
+  const gorunenIsler = montajAday.filter((x) => (!aramaQ || x.kod.includes(aramaQ) || String(x.fiziksel_id || "").toLocaleUpperCase("tr-TR").includes(aramaQ)) && (!yalnizSecili || seciliSet.has(x.kod)));
+  const secDegistir = (kod, sec) => setSecim((sc) => (sec ? (sc.includes(kod) ? sc : [...sc, kod]) : sc.filter((k) => k !== kod)));
+  const topluSec = () => setSecim((sc) => [...sc, ...(filtreAktif ? gorunenIsler : montajAday).map((x) => x.kod).filter((k) => !sc.includes(k))]);
+  const siraTasi = (kod, d) => setSecim((sc) => { const a = [...sc]; const i = a.indexOf(kod), j = i + d; if (i < 0 || j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; });
+  const onizleHazir = seciliAday.length > 0 || faaliyetler.length > 0;
   const ileriB = form.baslangic && form.malzemeDurum && (form.malzemeDurum !== "TESLIM" || (form.teslimler.length && form.teslimler.every((t) => t.tarih && t.saat && t.depo_id)));
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.6)", zIndex: 1300, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
@@ -7388,21 +7405,35 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
                     <div style={{ fontWeight: 800, fontSize: 16 }}>{ad}</div><div style={{ fontSize: 13, color: "#475569" }}>{ac}</div></button>)}
               </div>
             </PlanKart>
-            <PlanKart>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>İşler ({montajAday.filter((x) => x.sec).length} seçili)</div>
-              {!montajAday.length && <div style={{ color: "#64748b" }}>Planlanacak montaj işi kalmadı — aşağıdan diğer faaliyetleri ekleyebilirsiniz.</div>}
-              {montajAday.map((x) => {
-                const i = isler.indexOf(x);
+            <PlanKart style={{ padding: 0 }}>
+              {/* Seçim araç çubuğu: liste kayarken üstte kalır, alanları kapatmaz */}
+              <div style={{ position: "sticky", top: -16, zIndex: 2, background: "#fff", borderBottom: "1px solid #e2e8f0", borderRadius: "12px 12px 0 0", padding: "10px 14px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 800 }}>İşler</div>
+                <span aria-live="polite" style={{ fontSize: 13.5, color: "#334155" }}><b>{montajAday.length}</b> iş · <b>{seciliAday.length}</b> seçili · <b>{gorunenIsler.length}</b> gösteriliyor</span>
+                <input value={isArama} onChange={(e) => setIsArama(e.target.value)} placeholder="Site ID / tam iş kodu ara" aria-label="Site ID ya da iş kodu ara" style={{ ...girdi, width: 220, marginLeft: "auto" }} />
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13.5, cursor: "pointer", userSelect: "none" }}>
+                  <input type="checkbox" role="switch" aria-checked={yalnizSecili} checked={yalnizSecili} onChange={(e) => setYalnizSecili(e.target.checked)} style={{ width: 18, height: 18 }} /> Yalnız seçilenler</label>
+                <button type="button" className="rhmap-btn" onClick={topluSec} disabled={!(filtreAktif ? gorunenIsler : montajAday).some((x) => !seciliSet.has(x.kod))}>{filtreAktif ? "Filtrelenenleri seç" : "Tümünü seç"}</button>
+                <button type="button" className="rhmap-btn" onClick={() => setSecim([])} disabled={!secim.length} title="Arama yüzünden gizlenen işler dahil bu plandaki bütün seçimleri kaldırır">Tüm seçimleri kaldır</button>
+              </div>
+              <div style={{ padding: "4px 14px 10px" }}>
+              {!montajAday.length && <div style={{ color: "#64748b", padding: "8px 0" }}>Planlanacak montaj işi kalmadı — aşağıdan diğer faaliyetleri ekleyebilirsiniz.</div>}
+              {montajAday.length > 0 && !gorunenIsler.length && <div style={{ color: "#64748b", padding: "8px 0" }}>{yalnizSecili && !seciliAday.length ? "Henüz seçili iş yok." : "Aramaya uyan iş yok."}</div>}
+              {gorunenIsler.map((x) => {
+                const i = isler.findIndex((y) => y.kod === x.kod);
+                const sec = seciliSet.has(x.kod), sira = secim.indexOf(x.kod) + 1;
                 const S = (k, v) => setIsler((l) => l.map((y, j) => (j === i ? { ...y, [k]: v } : y)));
-                const tasi = (d) => setIsler((l) => { const a = [...l]; const j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; });
-                return <div key={x.kod} style={{ borderTop: "1px solid #f1f5f9", padding: "8px 0" }}>
+                return <div key={x.kod} style={{ borderTop: "1px solid #f1f5f9", padding: "8px 8px", margin: "0 -8px", borderRadius: 8, background: sec ? "#eff6ff" : "transparent", boxShadow: sec ? "inset 3px 0 0 #1d4ed8" : "none" }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <input type="checkbox" checked={x.sec} onChange={(e) => S("sec", e.target.checked)} />
+                    <input type="checkbox" checked={sec} onChange={(e) => secDegistir(x.kod, e.target.checked)} aria-label={`${x.kod} seç`} style={{ width: 20, height: 20, accentColor: "#1d4ed8", cursor: "pointer" }} />
                     <b style={{ fontSize: 16 }}>{x.fiziksel_id}</b><code>{x.kod}</code>
                     <span className="rhmap-k">{x.montaj_ad}{x.kapsam_ad ? ` · ${x.kapsam_ad}` : ""}{x.konum_var ? "" : " · konum yok"}</span>
-                    {mod === "MANUEL" && <span style={{ marginLeft: "auto" }}><button type="button" className="rhmap-btn" onClick={() => tasi(-1)} aria-label="Yukarı">↑</button> <button type="button" className="rhmap-btn" onClick={() => tasi(1)} aria-label="Aşağı">↓</button></span>}
+                    {sec && mod === "MANUEL" && <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4, alignItems: "center" }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "#1d4ed8" }}>Sıra {sira}</span>
+                      <button type="button" className="rhmap-btn" onClick={() => siraTasi(x.kod, -1)} disabled={sira <= 1} aria-label="Plan sırasında yukarı">↑</button>
+                      <button type="button" className="rhmap-btn" onClick={() => siraTasi(x.kod, 1)} disabled={sira >= secim.length} aria-label="Plan sırasında aşağı">↓</button></span>}
                   </div>
-                  {x.sec && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: 13 }}>
+                  {sec && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, fontSize: 13 }}>
                     <span style={{ alignSelf: "center" }}>Süre: <b>{x.sure_gun_oto != null ? `${String(x.sure_gun_oto).replace(".", ",")} ekip-gün` : "otomatik yok"}</b> <span className="rhmap-k">({x.sure_gerekce_oto})</span></span>
                     <input placeholder="Yeni süre (gün)" style={{ ...girdi, width: 120 }} value={x.sure_gun} onChange={(e) => S("sure_gun", e.target.value)} />
                     {x.sure_gun !== "" && <input placeholder="Değişiklik gerekçesi (zorunlu)" style={{ ...girdi, width: 240 }} value={x.sure_gerekce} onChange={(e) => S("sure_gerekce", e.target.value)} />}
@@ -7414,6 +7445,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
                   </div>}
                 </div>;
               })}
+              </div>
             </PlanKart>
             <PlanKart>
               <div style={{ fontWeight: 800, marginBottom: 6 }}>Diğer faaliyetler (Clean Up, ENH montaj, issue, malzeme iade, araç bakım, İSG eğitimi…)</div>
@@ -7434,7 +7466,9 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
               <datalist id="plan-is-kodlari">{isler.map((x) => <option key={x.kod} value={x.kod} />)}</datalist>
               <button type="button" className="rhmap-btn" onClick={() => setFaaliyetler((l) => [...l, { kategori: "CLEANUP", tarih: form.donemBas, saat: "09:00", sure_dk: 120, kod: "", konum_aciklama: "", aciklama: "" }])}>+ Faaliyet ekle</button>
             </PlanKart>
-            <div style={{ display: "flex", gap: 8 }}><PlanB2 onClick={() => setAdim("B")}>← Geri</PlanB2><PlanB2 onClick={onizle} disabled={yukleniyor} style={{ background: "#1e3a5f", color: "#fff" }}>{yukleniyor ? "Hesaplanıyor…" : "Planı önizle →"}</PlanB2></div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><PlanB2 onClick={() => setAdim("B")}>← Geri</PlanB2>
+              <PlanB2 onClick={onizle} disabled={yukleniyor || !onizleHazir} style={{ background: onizleHazir ? "#1e3a5f" : "#cbd5e1", color: "#fff" }}>{yukleniyor ? "Hesaplanıyor…" : "Planı önizle →"}</PlanB2>
+              {!onizleHazir && <span role="status" style={{ color: "#b45309", fontWeight: 700 }}>Devam etmek için en az bir iş seçin.</span>}</div>
           </>}
 
           {adim === "D" && onizleme && <>

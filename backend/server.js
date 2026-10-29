@@ -13689,9 +13689,15 @@ async function planHazirla(req, b) {
   await sahaKonum.tabloHazirla(pool);
   const noktalar = await planNoktalari();
   const isler = [];
-  for (const x of Array.isArray(b?.isler) ? b.isler : []) {
+  // Yalnız istemcinin GÖNDERDİĞİ (kullanıcının seçtiği) iş kodları plana girer; liste / harita kapsamı otomatik eklenmez.
+  // Aynı iş kodu iki kez gelirse ilk sıradaki geçerlidir (manuel sırada kullanıcının sırası korunur).
+  const gorulen = new Set();
+  const istenen = Array.isArray(b?.isler) ? b.isler : [];
+  if (istenen.length > 200) throw planHata(400, "Tek planda en çok 200 iş seçilebilir");
+  for (const x of istenen) {
     const kod = String(x?.kod || "").replace(/\s+/g, "").toUpperCase();
-    if (!kod) continue;
+    if (!kod || gorulen.has(kod)) continue;
+    gorulen.add(kod);
     const r = rowMap.get(kod) || null;
     if (!r && !yalnizGunluk.includes(kod)) { engeller.push(`${kod}: erişim kapsamınızda değil`); continue; }
     const kalemler = kalemMap.get(kod) || [];
