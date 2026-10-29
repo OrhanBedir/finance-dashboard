@@ -1269,7 +1269,10 @@ function etkinIzinHesapla(u, ayar) {
       o.maas_goruntule = !(ayar && ayar.maas_goruntule === false);
       o.mali_kapsam = y.kapsam;
     } else if (backofisMi(u)) {
-      o.fiyat_goruntule = false;
+      // 29.10.2026 (Orhan): fiyat kısıtı yalnız Şimşek (ERC) tarafında. Teknocenter hesapları kendi firma kapsamındaki
+      // fiyatları görür (veri kapsamı alt marka katmanında ayrıca süzülür); kişiye özel ayar yine kapatabilir. Maaş matristen.
+      o.fiyat_goruntule = altMarkaKullanicisi(u) && String(u.marka || "").trim().toUpperCase() === "TEKNO"
+        ? !(ayar && ayar.fiyat_goruntule === false) : false;
       o.maas_goruntule = false;
     }
   }
@@ -1768,7 +1771,7 @@ app.put("/admin/users/:id/yetkiler", authMiddleware, requireAdmin, async (req, r
     if (!(await guardUserScope(req, res, id))) return;
     const gelen = req.body?.yetki_ayar;
     if (!gelen || typeof gelen !== "object" || Array.isArray(gelen)) return res.status(400).json({ ok: false, error: "yetki_ayar nesnesi gerekli" });
-    const cur = (await pool.query(`SELECT id, email, role, yetki_ayar FROM users WHERE id=$1`, [id])).rows[0];
+    const cur = (await pool.query(`SELECT id, email, role, yetki_ayar, marka FROM users WHERE id=$1`, [id])).rows[0];
     if (!cur) return res.status(404).json({ ok: false, error: "Kullanıcı bulunamadı" });
     const yeni = { ...(cur.yetki_ayar || {}) };
     for (const [k, v] of Object.entries(gelen)) {
@@ -1778,7 +1781,8 @@ app.put("/admin/users/:id/yetkiler", authMiddleware, requireAdmin, async (req, r
     const r = await pool.query(`UPDATE users SET yetki_ayar=$1 WHERE id=$2 RETURNING id, email, role, yetki_ayar`, [Object.keys(yeni).length ? JSON.stringify(yeni) : null, id]);
     _yetkiOnbellek.delete(String(cur.email || "").toLowerCase().trim());
     await islemGecmisiYaz(req, "kullanici", id, "YETKI", { yetki_ayar: JSON.stringify(cur.yetki_ayar || {}) }, { yetki_ayar: JSON.stringify(yeni) }, req.body?.gerekce || null);
-    res.json({ ok: true, user: r.rows[0], etkin: etkinIzinHesapla(cur, yeni) });
+    // 29.10.2026: alt marka hesabının etkin izni marka bilgisiyle hesaplanır (yoksa Teknocenter'ın izinleri kapalı görünüyordu)
+    res.json({ ok: true, user: r.rows[0], etkin: etkinIzinHesapla({ ...cur, hw_yukleme: !(cur.marka && altMarkaMi(cur.marka)) }, yeni) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // Aracın kira bedelini gizli yap / aç (yalnız tam admin) — hangi aracın gizleneceği kayıtlardan doğrulanıp seçilir
@@ -3264,7 +3268,10 @@ app.post("/auth/login", async (req, res) => {
         marka_ad: markaAd,
         hw_yukleme: hwYukleme,
         ...markaProfilAlanlari,
-        ...((() => { const iz = etkinIzinHesapla({ ...user, yonetim_profili: _profil.yonetim_profili }, user.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()), // rol + kullanıcı yetki ayarı
+        // 29.10.2026: hw_yukleme de verilir — users satırında yok; eksikken alt marka (Teknocenter) hesabı girişte alt marka
+        // sayılmıyordu: İlhami Şahin mali yetki matrisinden düşüp fiyatsız görünüme iniyor, Rollout izni de gelmiyordu
+        // (menüde Rollout yok); yalnız sayfa yenilenince (/auth/me) düzeliyordu, mobil hiç düzelmiyordu
+        ...((() => { const iz = etkinIzinHesapla({ ...user, yonetim_profili: _profil.yonetim_profili, hw_yukleme: hwYukleme }, user.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()), // rol + kullanıcı yetki ayarı
         onay: await onayPanel.onayOzeti({ user: { user_id: user.id, email: user.email, role: user.role } }).catch(() => null),
       },
     });
