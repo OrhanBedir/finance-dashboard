@@ -304,7 +304,7 @@ function kur(app, c) {
     if (!f) return hata(res, 404, "Fatura bulunamadı"); // başka taşeronun faturası: varlığı da söylenmez
     const sk = await pool.query(`SELECT site_code, kalem_adi, miktar, birim, tutar FROM fatura_saha_kalem WHERE fatura_id = $1 ORDER BY id`, [id]).catch(() => ({ rows: [] }));
     const od = await pool.query(`SELECT l.id, l.tarih, d->>'tutar' AS tutar FROM taseron_odeme_log l, jsonb_array_elements(COALESCE(l.dagilim, '[]'::jsonb)) d
-      WHERE UPPER(TRIM(l.firma)) = ANY($1::text[]) AND TRIM(d->>'fatura_no') = TRIM($2) ORDER BY l.tarih, l.id`, [k.adlar, String(f.fatura_no || "")]).catch(() => ({ rows: [] }));
+      WHERE UPPER(TRIM(l.firma)) = ANY($1::text[]) AND TRIM(d->>'fatura_no') = TRIM($2) AND COALESCE(to_jsonb(l)->>'durum','AKTIF') = 'AKTIF' ORDER BY l.tarih, l.id`, [k.adlar, String(f.fatura_no || "")]).catch(() => ({ rows: [] }));
     res.json({ ok: true, fatura: f,
       sahalar: sk.rows.map((x) => ({ ...x, miktar: x.miktar === null ? null : Number(x.miktar), tutar: x.tutar === null ? null : Number(x.tutar) })),
       saha_baglantisi_eksik: sk.rows.length === 0,
@@ -506,7 +506,8 @@ function kur(app, c) {
   app.get("/is-atama/taseronlar", authMiddleware, async (req, res) => {
     try {
       if (!isAtamaYetkiliMi(req)) return hata(res, 403, "İş atama yetkiniz yok");
-      const r = await pool.query(`SELECT id, subcon_name, unvan, ana_firma FROM subcons WHERE COALESCE(aktif, true) ORDER BY COALESCE(unvan, subcon_name)`);
+      // 29.10.2026: tedarikçi cari'den açılan taşeron olmayan firma kartı (otel, nakliye…) iş atamada listelenmez
+      const r = await pool.query(`SELECT id, subcon_name, unvan, ana_firma FROM subcons WHERE COALESCE(aktif, true) AND COALESCE(to_jsonb(subcons)->>'tedarikci_turu','') <> 'TEDARIKCI' ORDER BY COALESCE(unvan, subcon_name)`);
       const suz = await taseronSuz(req);
       res.json({ ok: true, rows: r.rows.filter((x) => !suz || suz(x)).map((x) => ({ id: x.id, ad: x.unvan || x.subcon_name, kod: x.subcon_name, ana_firma: x.ana_firma })) });
     } catch (e) { hata(res, 500, e.message); }
