@@ -81,6 +81,8 @@ function kur(app, c) {
     const u = req.user || {};
     const y = maliYetkiKaydi(u);
     if (altMarkaKullanicisi(u)) return !!y && y.kapsam === M;
+    // 30.10.2026: fiyatı görüp değiştiremeyen (fiyat_degistirme=false; ör. Nurcan, Serdar) ödeme yazamaz
+    if (req.izinler?.fiyat_degistirme === false) return false;
     return (!!y && y.kapsam === "ERC") || finansYazmaYetkili(u);
   }
   // Firma kartı tanımlama: ödeme yazarı ya da o firmanın fatura giriş yetkilisi

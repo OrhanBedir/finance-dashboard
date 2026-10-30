@@ -811,9 +811,15 @@ function ikHassasGorur(req, marka) {
 }
 // Para listeleri (avans, maaş ödemesi, maaş geçmişi): alt marka İK yetkilisi kapsam dışı kişinin satırını hiç almaz
 const ikKapsamSuz = (req, rows, markaAl = (r) => r.personel_marka) => (rows || []).filter((r) => ikHassasGorur(req, markaAl(r)));
+const IK_BANKA_ALANLARI = ["iban", "banka_adi", "banka_hesap_no"];
 function ikMaskele(req, rows, markaAl = (r) => r.marka) {
+  const bankaKapali = (req?.izinler || {}).banka_goruntule === false;
   for (const r of rows || []) {
-    if (ikHassasGorur(req, markaAl(r))) continue;
+    if (ikHassasGorur(req, markaAl(r))) {
+      // 30.10.2026: hassas alanı görebilen kişide banka bilgisi ayrı izinle kapatılabilir (maaş GİZLİLİK KATMANI'nda ayrıca silinir)
+      if (bankaKapali) for (const a of IK_BANKA_ALANLARI) if (a in r) r[a] = null;
+      continue;
+    }
     for (const a of IK_HASSAS_ALANLAR) if (a in r) r[a] = null;
     if (r.ek_donem && typeof r.ek_donem === "object") {
       r.ek_donem.hakedis = null;
@@ -1165,6 +1171,10 @@ const IZIN_TANIMLARI = {
   personel_yonetimi: "Personel Yönetimi (kendi firması; maaş ayrı izin)",
   // 29.10.2026: ERC + Teknocenter backofisinde yalnız MALİ YETKİ MATRİSİ açar; yetki ayarı burada yalnız kapatabilir
   fiyat_goruntule: "Fiyat ve mali tutarları görme",
+  // 30.10.2026: ayrı kararlar — fiyat görme değiştirmeyi, İK okuma banka bilgisini otomatik açmaz; ayar ikisini de yalnız kapatır
+  fiyat_degistirme: "Fiyat değiştirme, ödeme ve finans kaydı (fiyat görme yetkisi bunu açmaz)",
+  banka_goruntule: "Personel banka bilgisi (IBAN, banka, hesap no) — İK okuma yetkisi kapsamında",
+  personel_bilgisi_goruntule: "Personel künyesi ekranı (işe giriş/çıkış, durum, firma, ekip) — maaşsız; yalnız mali yetki matrisinden açılır",
   // 28.10.2026: Organizasyon şeması / saha ekipleri — firma ve ekip kartı, personel ekip üyeliği, ekip şefi, aktif/pasif.
   // Maaş, bordro, finans ya da kullanıcı yetkisi vermez. Silme ayrı izindir (yalnız hiç kullanılmamış kayıt).
   org_yonet: "Organizasyon şeması ve saha ekipleri yönetimi", org_sil: "Kullanılmamış ekip / firma kaydını silme",
@@ -1237,7 +1247,16 @@ const MALI_YETKI_MATRISI = [
   // canlı kayıttan salt-okunur doğrulandı: id 359, info@ahyelektrik.com, admin, marka AHY; AHY markasında tek yönetim hesabı
   // (diğerleri saha personeli / UBS taşeron hesabı — değişmez; Emre Akdeğirmen dahil AHY backofisi fiyat görmez). Kapsam yalnız AHY.
   { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true },
+  // 30.10.2026 (Orhan): Nurcan Kuş ve Serdar Altınova — fiyat AÇIK, maaş KAPALI, fiyat değiştirme / ödeme / finans kaydı YOK.
+  // Kimlik 29.10.2026 canlı salt-okunur kayıttan: id 2 nurcan.kus@ ve id 3 serdar.altinova@ (rollout_mudur, marka ERC; her
+  // e-postada tek hesap). Veri kapsamları değişmez (mevcut rol / ekran kapsamı). Personel giriş-çıkış ve banka bilgisi mevcut
+  // İK okuma yetkileriyle açık (banka_goruntule), maaş anahtarları yanıttan çıkar.
+  { id: 2, email: "nurcan.kus@simsektel.com", ad: "Nurcan Kuş", kapsam: "ERC", dogrulandi: true, fiyat: true, maas: false, fiyat_yazma: false, personel: true },
+  { id: 3, email: "serdar.altinova@simsektel.com", ad: "Serdar Altınova", kapsam: "ERC", dogrulandi: true, fiyat: true, maas: false, fiyat_yazma: false, personel: true },
 ];
+// Satır alanları (30.10.2026): fiyat / maas / fiyat_yazma — yazılmamışsa true (eski satırlar: fiyat + maaş + mevcut yazma yetkisi);
+// personel:true → maaşsız personel künyesi (işe giriş/çıkış, durum, firma, ekip, banka) ekranı; veri yine İK okuma kapsamından.
+// Fiyat görme maaş görmeyi, maaş görme fiyatı, fiyat görme fiyat değiştirmeyi TÜRETMEZ; her biri ayrı karardır.
 // ERC kiracısı (marka ERC / TEKNO / AHY — AHY markasında kalan Şimşek ofis hesapları dahil), taşeron değil.
 // 2KX (ayrı kiracı) ve izole kiracılar etkilenmez.
 const maliKapsamKullanicisi = (u) => !!u && !taseronMu(u) && u.kullanici_tipi !== "TASERON"
@@ -1256,7 +1275,7 @@ function maliYetkiKaydi(u) {
 }
 const ercMaasKapsami = (u) => !!u && !taseronMu(u) && !altMarkaMi(u.marka)
   && String(u.tenant || detectTenant(u.email, u.subcon_name)).toLowerCase() === "erc";
-const ercMaasYetkilisi = (u) => maliYetkiKaydi(u)?.kapsam === "ERC";
+const ercMaasYetkilisi = (u) => { const y = maliYetkiKaydi(u); return y?.kapsam === "ERC" && y.maas !== false; };
 // 26.10.2026 (Orhan): alt marka (Teknocenter) YÖNETİM hesabı kendi firma kapsamında Rollout'u görüntüler ve Excel alır;
 // düzenleme AYRI izindir (rollout_duzenle, varsayılan kapalı). Kapsam "MARKA ROLLOUT KAPSAMI" katmanında zorlanır.
 const MARKA_ROLLOUT_ROLLER = ["admin", "direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur"];
@@ -1275,6 +1294,9 @@ function etkinIzinHesapla(u, ayar) {
   const yp = kayitliProfil(u);
   if (yp === "SAHIP") { o.maas_goruntule = true; o.personel_yonetimi = true; }
   else if (yp === "YONETICI") { o.personel_yonetimi = true; if (!(ayar && "maas_goruntule" in ayar)) o.maas_goruntule = false; }
+  // 30.10.2026: personel banka bilgisi (IBAN / banka / hesap no) ayrı izin — varsayılanı mevcut İK okuma yetkisi; ayarla
+  // kapatılabilir, açılsa da İK okuma yetkisi olmayana veri gelmez (ikHassasGorur ayrıca ister)
+  if (!("banka_goruntule" in o)) o.banka_goruntule = ikOkumaYetkili(u);
   if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
   // ERC maaş kuralı en son uygulanır: yetki ayarı / rol / profil ERC'de maaşı açamaz (yalnız kapatabilir)
   if (ercMaasKapsami(u)) o.maas_goruntule = ercMaasYetkilisi(u) && !(ayar && ayar.maas_goruntule === false);
@@ -1282,8 +1304,12 @@ function etkinIzinHesapla(u, ayar) {
   if (maliKapsamKullanicisi(u)) {
     const y = maliYetkiKaydi(u);
     if (y) {
-      o.fiyat_goruntule = !(ayar && ayar.fiyat_goruntule === false);
-      o.maas_goruntule = !(ayar && ayar.maas_goruntule === false);
+      o.fiyat_goruntule = y.fiyat !== false && !(ayar && ayar.fiyat_goruntule === false);
+      o.maas_goruntule = y.maas !== false && !(ayar && ayar.maas_goruntule === false);
+      // 30.10.2026: fiyat görme fiyat değiştirme / ödeme / finans kaydı yetkisi vermez (satırda fiyat_yazma:false ise kapalı)
+      if (y.fiyat_yazma === false || (ayar && ayar.fiyat_degistirme === false)) o.fiyat_degistirme = false;
+      if (y.personel === true && ikOkumaYetkili(u) && !(ayar && ayar.personel_bilgisi_goruntule === false)) o.personel_bilgisi_goruntule = true;
+      else delete o.personel_bilgisi_goruntule;
       o.mali_kapsam = y.kapsam;
     } else if (backofisMi(u)) {
       // 29.10.2026 (Orhan): fiyat kısıtı yalnız Şimşek (ERC) tarafında. Teknocenter hesapları kendi firma kapsamındaki
@@ -1291,6 +1317,7 @@ function etkinIzinHesapla(u, ayar) {
       o.fiyat_goruntule = altMarkaKullanicisi(u) && String(u.marka || "").trim().toUpperCase() === "TEKNO"
         ? !(ayar && ayar.fiyat_goruntule === false) : false;
       o.maas_goruntule = false;
+      delete o.personel_bilgisi_goruntule; // 30.10.2026: künye ekranı yalnız matristen (yetki ayarı açamaz)
     }
   }
   return o;
@@ -1758,8 +1785,19 @@ app.use(async (req, res, next) => {
       res.json = (b) => (b?.user?.izinler?.fiyat_goruntule === false ? orig(_anahtarSil(b, FIYAT_ANAHTARLARI)) : orig(b));
       return next();
     }
-    if (!req.izinler || req.izinler.fiyat_goruntule !== false) return next();
+    if (!req.izinler) return next();
     const m = req.method === "HEAD" ? "GET" : req.method;
+    // 30.10.2026: fiyatı GÖREN ama değiştirme / ödeme yetkisi olmayan (ör. Nurcan, Serdar): mali uçlarda yalnız okuma;
+    // fiyat alanı taşıyan yazmalar fiyatsız kullanıcıdaki gibi temizlenir / reddedilir. Yanıtta fiyat silinmez.
+    if (req.izinler.fiyat_goruntule !== false) {
+      if (req.izinler.fiyat_degistirme === false && m !== "GET") {
+        if (FIYAT_RED_YOLLARI.some((rx) => rx.test(yol)))
+          return res.status(403).json({ ok: false, error: "Fiyatları görme yetkiniz var; fiyat değiştirme, ödeme ve finans kaydı yetkiniz yok" });
+        const red = await fiyatYazmaTemizle(req, yol, m);
+        if (red) return res.status(403).json({ ok: false, error: red });
+      }
+      return next();
+    }
     if (FIYAT_RED_YOLLARI.some((rx) => rx.test(yol)))
       return res.status(403).json({ ok: false, fiyat_gizli: true, error: "Fiyat ve mali tutar bilgilerini görme / değiştirme yetkiniz yok" });
     if (m !== "GET") {

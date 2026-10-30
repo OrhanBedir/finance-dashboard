@@ -21547,6 +21547,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // 21.10.2026: kullanıcı yetki ayarında maaş kapalıysa (sunucu da maaş alanlarını yanıttan çıkarır) aynı gizli mod
   const _maasKapali = currentUser?.izinler?.maas_goruntule === false;
   const _maasGizli = _isMuhasebe || _maasKapali;
+  // 30.10.2026 (Orhan): personel künyesi (işe giriş / çıkış, durum, firma, ekip, banka) ayrı izin — sunucu bu kişiye maaş
+  // anahtarı göndermez; Personel sekmesi maaşsız künye modunda açılır (muhasebe ile aynı mod). Ör. Nurcan Kuş, Serdar Altınova.
+  const _kunyeModu = _isMuhasebe || (_maasKapali && currentUser?.izinler?.personel_bilgisi_goruntule === true);
   // AHY tarafında maaşlar ekstra şifre korumalı: sadece Haşım Bey bilir
   // (ahy2026gsm). ERC yetkilileri şifresiz girer, AHY yetkilisi şifreyle.
   const _maasSifreli = _hrEmail === "info@ahyelektrik.com"; // Teknocenter yöneticisi (teknocenter) şifresiz görür
@@ -22659,7 +22662,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
         .filter(([k]) => !(_maasGizli && !_hrYetkili && k === "maas_avans"))
         .map(([k, ic, l, alt]) => (
           <button key={k} onClick={()=>{
-            if ((k === "personel" || k === "maas_avans") && !personelUnlocked && !(_isMuhasebe && k === "personel")) {
+            if ((k === "personel" || k === "maas_avans") && !personelUnlocked && !(_kunyeModu && k === "personel")) {
               const pwd = prompt("Maaş bilgileri için şifre giriniz:");
               if (!_maasSifreler.includes(pwd)) { alert("Yetkisiz erişim!"); return; }
               setPersonelUnlocked(true);
@@ -23297,7 +23300,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
       })()}
 
       {/* ===== PERSONEL SEKMESİ ===== */}
-      {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && !(_isMuhasebe && tab==="personel") && (
+      {(tab==="personel" || tab==="maas_avans") && !personelUnlocked && !(_kunyeModu && tab==="personel") && (
         <div style={{ textAlign:"center", padding:"60px 20px" }}>
           <div style={{ fontSize:"48px", marginBottom:"16px" }}>🔒</div>
           <div style={{ fontSize:"18px", fontWeight:700, color:"#1f2937", marginBottom:"8px" }}>Bu alan şifre korumalıdır</div>
@@ -23311,7 +23314,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
           </button>
         </div>
       )}
-      {tab==="personel" && (personelUnlocked || _isMuhasebe) && (
+      {tab==="personel" && (personelUnlocked || _kunyeModu) && (
         <div>
               <div style={{ marginBottom:"16px" }}>
                 <div>
@@ -40370,7 +40373,8 @@ function App() {
                     { ikon:'💳', label:'İş Avansı', sub:'Talep ve onay zinciri', aktif: page==='is_avans', badge: pendingAvansCount, onClick:()=>setPage('is_avans') },
                     { ikon:'📄', label:'Masraf Formu', sub:'Fiş / harcama onayları', aktif: page==='masraf', badge: pendingMasrafCount, onClick:()=>setPage('masraf') },
                     ...(isFinanceUser && !isAltMarka ? [
-                      { ikon:'🧾', label:'Fatura Girişi', sub:'Gelen / giden fatura kaydı', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); } },
+                      // 30.10.2026: fiyatı görüp değiştiremeyen (Nurcan, Serdar — fiyat_degistirme=false) fatura kaydı açmaz; sunucu da 403
+                      ...(user?.izinler?.fiyat_degistirme === false ? [] : [{ ikon:'🧾', label:'Fatura Girişi', sub:'Gelen / giden fatura kaydı', onClick:()=>{ setPage('finance'); setFinanceActionTrigger('fatura_girisi'); } }]),
                       { ikon:'📐', label:'Taşeron Hesabı', aktif: page==='erc_taseron', onClick:()=>setPage('erc_taseron') },
                       { ikon:'💳', label:'Taşeron Borçlar', aktif: page==='taseron_borc', onClick:()=>setPage('taseron_borc') },
                     ] : []),
