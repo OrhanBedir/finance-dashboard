@@ -14,6 +14,8 @@
 //   RM   bölge / rollout müdürü — personel kartındaki bölge (boşsa ekibin bölgesi): İzmir → Serdar Altınova,
 //        Ankara / Bursa → Nurcan Kuş. İkisine ardışık gitmez. Bölge bulunamazsa aşama atlanır → talep Orhan'a düşer.
 //   PM   Orhan Bedir
+//   31.10.2026 (Orhan): Orhan Bedir RM ve PD aşamalarında da onay verebilir (ödeme hariç); her tıklama yalnız bulunulan aşamayı
+//   tamamlar. Orhan'ın tamamladığı RM / PD aşaması kayıtta ve işlem geçmişinde Orhan'ın kimliğiyle ayrıca işaretlenir.
 //   PD   Teknocenter direktörü (rol 'direktor' + firma TEKNO = İlhami Şahin; firmaya tarihli onay devri varsa devralan) ve
 //        İlhami ile aynı yetkideki hesaplar (TEKNO_DIREKTOR_ESDEGER: ortak 'teknocenter' hesabı — Orhan kararı 31.10.2026).
 //        Teknocenter muhasebesi (rol 'firma_muhasebe' + firma TEKNO) bu aşamayı YALNIZ Orhan onayından geçmiş talepte
@@ -28,7 +30,10 @@
 //   (Şimşek muhasebesinin MUHASEBE_BEKLE adımı Teknocenter zincirinde yoktur; o durumda bekleyen form PM aşamasındadır.)
 
 const FIRMA = "TEKNO";
-const ORHAN_EMAIL = ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com"];
+// Orhan Bedir'in iki hesabı: users.id + e-posta ÇİFTİ (mali yetki matrisiyle aynı, canlı kayıttan doğrulandı; ada bakılmaz)
+const ORHAN_HESAPLARI = [{ id: 5, email: "orhan.bedir@simsektel.com" }, { id: 121, email: "orhan.bedir@gmail.com" }];
+const ORHAN_EMAIL = ORHAN_HESAPLARI.map((x) => x.email);
+const orhanHesabi = (u) => ORHAN_HESAPLARI.some((x) => x.id === Number(u?.id ?? u?.user_id) && x.email === String(u?.email || "").toLowerCase().trim());
 // Bölge → bölge / rollout müdürü (31.10.2026 Orhan kararı; web Org şeması ORG_YONETIM ile aynı)
 const BOLGE_MUDURU = { IZMIR: "serdar.altinova@simsektel.com", ANKARA: "nurcan.kus@simsektel.com", BURSA: "nurcan.kus@simsektel.com" };
 // Doğrudan Orhan'a giden personel: personel.id + e-posta ÇİFTİ (canlı kayıttan 31.10.2026 salt-okunur doğrulandı)
@@ -46,6 +51,8 @@ const ASAMA_TR = {
   PD: "İlhami Şahin (Teknocenter direktörü) onayı", ODE_avans: "Ödeme — Teknocenter muhasebesi", ODE_masraf: "Kontrol ve arşiv — Teknocenter muhasebesi",
 };
 const VEKALET_NOTU = "İlhami onay aşaması muhasebe yetkisiyle tamamlandı";
+const ORHAN_PD_NOTU = "İlhami onay aşaması Orhan Bedir tarafından tamamlandı";
+const ORHAN_RM_NOTU = "Bölge müdürü onay aşaması Orhan Bedir tarafından tamamlandı";
 const DURUM = {
   avans: { RM: "TALEP", PM: "ROLLOUT_MUDUR_ONAY", PD: "PM_ONAY", ODE: "DIREKTOR_ONAY", BITTI: "TAMAMLANDI" },
   masraf: { RM: "ROLLOUT_BEKLE", PM: "PM_BEKLE", PD: "DIREKTOR_BEKLE", ODE: "TAMAMLANDI", BITTI: "ARSIVLENDI" },
@@ -80,14 +87,15 @@ function zincirKur(b, kisiler, pdDevir) {
   if (dogrudan) ekle("RM", [], `${dogrudan.neden}: doğrudan Orhan`);
   else if (!rmUser) ekle("RM", [], bolge ? `${bolge} için bölge müdürü tanımlı değil — doğrudan Orhan` : "personel kartında ve ekibinde bölge yok — doğrudan Orhan");
   else if (sahipMi(rmUser)) ekle("RM", [], "bölge müdürünün kendi talebi");
-  else ekle("RM", [rmUser]);
+  else ekle("RM", [rmUser, ...kisiler.orhan.filter((u) => !sahipMi(u))]);
   const orhan = kisiler.orhan.filter((u) => !sahipMi(u));
   ekle("PM", orhan, kisiler.orhan.some(sahipMi) ? "Orhan Bedir'in kendi talebi" : null);
   if (pdDevir?.hata) z.push({ k: "PD", onaycilar: [], atlandi: null, kilit: pdDevir.hata });
   else {
     const dir = pdDevir?.devir ? [kisiler.byId[Number(pdDevir.devir.onayci_user_id)]].filter(Boolean) : kisiler.direktor;
     if (dir.length && dir.every(sahipMi)) ekle("PD", [], "direktörün kendi talebi");
-    else z.push({ k: "PD", onaycilar: dir.filter((u) => !sahipMi(u)), atlandi: null, kilit: dir.length ? null : "Teknocenter direktörü (rol direktör, firma TEKNO) tanımlı değil" });
+    else z.push({ k: "PD", onaycilar: [...dir.filter((u) => !sahipMi(u)), ...orhan], atlandi: null,
+      kilit: dir.length || orhan.length ? null : "Teknocenter direktörü (rol direktör, firma TEKNO) tanımlı değil" });
   }
   // Ödeme / arşiv aşaması hiçbir zaman atlanmaz; muhasebe hesabı yoksa ödeme bekler (kilit bilgisiyle)
   z.push({ k: "ODE", onaycilar: kisiler.muhasebe.filter((u) => !sahipMi(u)), atlandi: null,
@@ -137,7 +145,7 @@ function kur(app, c) {
     for (const u of rows) { byId[u.id] = u; if (!byEmail[u.email]) byEmail[u.email] = u; }
     return {
       byId, byEmail,
-      orhan: rows.filter((u) => ORHAN_EMAIL.includes(u.email)),
+      orhan: rows.filter(orhanHesabi),
       // Teknocenter direktörü / muhasebesi: rol + firma (kullanıcı adına bağlı değil)
       direktor: rows.filter((u) => (u.role === "direktor" && u.marka === FIRMA)
         || TEKNO_DIREKTOR_ESDEGER.some((x) => x.id === u.id && x.email === u.email && u.marka === FIRMA)),
@@ -284,6 +292,8 @@ function kur(app, c) {
     const sonraki = sonrakiAcik(z, k);
     const gun = bugun();
     const ben = _e(req.user?.email);
+    // Orhan, bölge müdürü / İlhami aşamasını kendi kimliğiyle tamamlıyorsa ayrıca işaretlenir (o aşamanın asıl sahibi yapmış gibi kaydedilmez)
+    const orhanAsamasi = (k === "RM" || k === "PD") && !bilgi.vekalet && orhanHesabi(req.user);
     const set = [], p = [];
     const ekle = (sql, v) => { p.push(v); set.push(sql.replace("?", `$${p.length}`)); };
     let yeniDurum;
@@ -297,7 +307,7 @@ function kur(app, c) {
       yeniDurum = DURUM[modul][sonraki ? sonraki.k : "ODE"];
       if (k === "RM") ekle(modul === "avans" ? "rollout_mudur_onay_tarihi=?" : "rollout_onay_tarihi=?", gun);
       if (k === "PM") { ekle("pm_onay_tarihi=?", gun); ekle("pm_onaylayan=?", ben); }
-      if (k === "PD") { ekle("direktor_onay_tarihi=?", gun); ekle("direktor_onaylayan=?", ben); ekle("direktor_onay_kaynagi=?", bilgi.vekalet ? "MUHASEBE_VEKALET" : "DIREKTOR"); }
+      if (k === "PD") { ekle("direktor_onay_tarihi=?", gun); ekle("direktor_onaylayan=?", ben); ekle("direktor_onay_kaynagi=?", bilgi.vekalet ? "MUHASEBE_VEKALET" : orhanAsamasi ? "ORHAN" : "DIREKTOR"); }
       // PM onayıyla birlikte ödeme kaynağı Teknocenter'a kilitlenir (istemcinin seçtiği kasa kullanılmaz)
       if (modul === "avans" && ASAMALAR.indexOf(k) >= ASAMALAR.indexOf("PM")) ekle("firma=?", FIRMA);
     }
@@ -320,8 +330,10 @@ function kur(app, c) {
       .map((s) => `${s.k}: ${s.atlandi}`).join("; ") || null;
     await islemGecmisiYaz(req, modul, id, k === "ODE" ? "ODEME" : "ONAY", { durum: b.durum, firma: b.firma || null },
       { durum: yeniDurum, adim: { RM: "ROLLOUT", PM: "PM", PD: "DIREKTOR", ODE: "ODEME" }[k], akis: "TEKNO",
-        onay_kaynagi: k === "PD" ? (bilgi.vekalet ? "muhasebe_vekalet" : "direktor") : undefined, atlanan, ...(k === "ODE" ? { firma: FIRMA } : {}) },
-      k === "PD" && bilgi.vekalet ? `${VEKALET_NOTU} (${ben})` : (k === "ODE" ? (String(req.body?.odeme_notu || "").trim() || null) : not));
+        onay_kaynagi: orhanAsamasi ? "orhan" : k === "PD" ? (bilgi.vekalet ? "muhasebe_vekalet" : "direktor") : undefined, atlanan, ...(k === "ODE" ? { firma: FIRMA } : {}) },
+      k === "PD" && bilgi.vekalet ? `${VEKALET_NOTU} (${ben})`
+        : orhanAsamasi ? `${k === "PD" ? ORHAN_PD_NOTU : ORHAN_RM_NOTU} (${ben})${not ? ` — ${not}` : ""}`
+        : (k === "ODE" ? (String(req.body?.odeme_notu || "").trim() || null) : not));
     res.json(yeni);
     return true;
   }
@@ -332,7 +344,7 @@ function kur(app, c) {
     if (!bilgi.asama) return "Bu kayıt onay aşamasında değil";
     const asama = bilgi.zincir.find((s) => s.k === bilgi.asama);
     const onayci = bilgi.benim && !bilgi.vekalet; // vekâlet yalnız onay içindir; reddi İlhami ya da Orhan verir
-    const orhan = ORHAN_EMAIL.includes(_e(req.user?.email)) && bilgi.asama !== "ODE";
+    const orhan = orhanHesabi(req.user) && bilgi.asama !== "ODE";
     if (onayci || orhan) return null;
     return `Bu aşamada (${asama?.ad || bilgi.asama}) reddetme / iade yetkiniz yok`;
   }
@@ -387,7 +399,7 @@ function kur(app, c) {
   app.put("/hr/is-avans/:id/duzenle", sar(async (req, res, id) => {
     const t = await tekBilgi(req, "avans", id);
     if (!t) return false;
-    const orhan = ORHAN_EMAIL.includes(_e(req.user?.email));
+    const orhan = orhanHesabi(req.user);
     const dir = t.bilgi.asama === "PD" && t.bilgi.benim && !t.bilgi.vekalet;
     if (!t.bilgi.asama || t.bilgi.asama === "ODE") { hata(res, 409, "Onayı tamamlanmış / ödenmiş talebin tutarı değiştirilemez"); return true; }
     if (!orhan && !dir) { hata(res, 403, "Teknocenter talebinin tutarını yalnız Orhan Bedir ya da kendi aşamasında Teknocenter direktörü düzeltebilir"); return true; }
@@ -562,4 +574,4 @@ function firmaMuhasebeKapisi(c) {
   };
 }
 
-module.exports = { TEKNO_DIREKTOR_ESDEGER, semaKur, kur, kapsamKapisi, firmaMuhasebeKapisi, zincirKur, gosterge, ilkAcik, sonrakiAcik, bolgeKodu, FIRMA, ORHAN_EMAIL, BOLGE_MUDURU, DOGRUDAN_PM, ASAMA_TR, VEKALET_NOTU };
+module.exports = { ORHAN_HESAPLARI, orhanHesabi, ORHAN_PD_NOTU, ORHAN_RM_NOTU, TEKNO_DIREKTOR_ESDEGER, semaKur, kur, kapsamKapisi, firmaMuhasebeKapisi, zincirKur, gosterge, ilkAcik, sonrakiAcik, bolgeKodu, FIRMA, ORHAN_EMAIL, BOLGE_MUDURU, DOGRUDAN_PM, ASAMA_TR, VEKALET_NOTU };

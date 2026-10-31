@@ -27663,7 +27663,7 @@ function TeknoAvansDugmeleri({ t, isPM, onOnayla, onReddet, kucuk }) {
   const red = !!tk.asama && ((tk.benim && !tk.vekalet) || (isPM && tk.asama !== "ODE"));
   return (<>
     {tk.benim && <button onClick={() => onOnayla(t)} title={teknoBekleyenMetni(tk)} style={{ ...st, background: "#dcfce7", color: "#166534" }}>
-      {tk.asama === "ODE" ? "Ödendi" : tk.vekalet ? "Onayla (İlhami aşaması · muhasebe)" : "Onayla"}</button>}
+      {tk.asama === "ODE" ? "Ödendi" : tk.vekalet ? "Onayla (İlhami aşaması · muhasebe)" : isPM && tk.asama === "PD" ? "Onayla (İlhami aşaması · Orhan)" : isPM && tk.asama === "RM" ? "Onayla (bölge müdürü aşaması · Orhan)" : "Onayla"}</button>}
     {red && <button onClick={() => onReddet(t.id)} style={{ ...st, background: "#fee2e2", color: "#991b1b" }}>Reddet</button>}
   </>);
 }
@@ -28004,7 +28004,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                         <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
                         <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
                         <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}>
-                          {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} title={r.obj.tekno ? teknoBekleyenMetni(r.obj.tekno) : undefined} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.obj.tekno?.asama === "ODE" ? "💸 Ödendi" : r.obj.tekno?.vekalet ? "✓ Onayla (İlhami aşaması)" : "✓ Onayla"}</button>{!r.obj.tekno?.vekalet && <> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} title={r.obj.tekno ? teknoBekleyenMetni(r.obj.tekno) : undefined} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.obj.tekno?.asama === "ODE" ? "💸 Ödendi" : r.obj.tekno?.vekalet || (isPM && r.obj.tekno?.asama === "PD") ? "✓ Onayla (İlhami aşaması)" : isPM && r.obj.tekno?.asama === "RM" ? "✓ Onayla (bölge müdürü aşaması)" : "✓ Onayla"}</button>{!r.obj.tekno?.vekalet && <> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
                           {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setFormModal({ id: r.id })} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(r.obj.tekno ? !r.obj.tekno.vekalet : (isPM || isDirektor)) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
                           {isRequester && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>}
                         </td>

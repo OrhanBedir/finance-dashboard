@@ -23434,7 +23434,7 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout / bölge müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi", direktor: "Teknocenter direktörü", muhasebe_vekalet: "İlhami aşaması Teknocenter muhasebe yetkisiyle (vekâleten)" })[v] || v : k === "akis" ? ({ TEKNO: "Teknocenter onay zinciri" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout / bölge müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi", direktor: "Teknocenter direktörü", muhasebe_vekalet: "İlhami aşaması Teknocenter muhasebe yetkisiyle (vekâleten)", orhan: "Orhan Bedir (kendi kimliğiyle, aşamanın asıl onaycısı yerine)" })[v] || v : k === "akis" ? ({ TEKNO: "Teknocenter onay zinciri" })[v] || v : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -24584,6 +24584,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
         fmtDate(t.direktor_onay_tarihi || t.pm_onay_tarihi),
         fmtDate(t.odeme_tarihi),
         t.direktor_onay_kaynagi === "MUHASEBE_VEKALET" ? `Muhasebe yetkisiyle (vekâleten): ${t.direktor_onaylayan || ""}`
+          : t.direktor_onay_kaynagi === "ORHAN" ? `Orhan Bedir tarafından: ${t.direktor_onaylayan || ""}`
           : t.direktor_onay_kaynagi === "DIREKTOR" ? `Direktör: ${t.direktor_onaylayan || ""}` : "",
       ];
 
