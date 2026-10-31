@@ -569,6 +569,7 @@ const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron pr
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
 const tedarikciCari = require("./tedarikciCari"); // tedarikçi cari: fatura borcu / ödeme / avans / mahsup (29.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
+const teknoOnay = require("./teknoOnay"); // Teknocenter avans / masraf onay zinciri + firma kapsam kapıları (31.10.2026)
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
 // 27.10.2026 (Orhan): sürümlü BoQ kataloğu (2025 / 2026), yapay zekâ TSSR incelemesi, TSSR+BoQ PR kontrolü, Tekno_2KX hakediş referansı
@@ -588,6 +589,7 @@ const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Y
 const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
 const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
+teknoOnay.semaKur(pool).catch((e) => console.error("[tekno-onay]", e.message));
 
 // 27.10.2026: sürümlü BoQ kataloğu içe alma gövdesi (1-2 MB JSON) — yalnız bu yol için büyük gövde; genel sınır değişmedi
 app.use("/boq/katalog", express.json({ limit: "25mb" }));
@@ -1086,6 +1088,9 @@ const ROL_IZINLERI = {
   // yalnız users.yonetim_profili'ne bakıyordu. Direktör rolü kendi firma kapsamında personel yönetimi görür; maaş
   // AYRI izindir (şirket sahibi profili ya da kişiye özel maas_goruntule), bu rolle açılmaz.
   direktor: { personel_yonetimi: true },
+  // 31.10.2026: Firma muhasebesi (ör. Tekno_Muhasebe) — yalnız kendi alt markasının iş avansı / masraf / personel ödemesi;
+  // izinli yollar teknoOnay.firmaMuhasebeKapisi'nde. Maaş ve personel yönetimi kapalı (genel muhasebe yetkisini devralmaz).
+  firma_muhasebe: { kendi_avans: true, kendi_masraf: true, maas_goruntule: false, personel_yonetimi: false },
   isg: {
     isg_goruntule: true, isg_duzenle: false, isg_sil: false, isg_onayla: false,
     puantaj_goruntule: true, puantaj_duzenle: false,
@@ -1488,6 +1493,14 @@ app.use(async (req, res, next) => {
     return res.status(500).json({ ok: false, error: "Yetki kontrolü yapılamadı" });
   }
 });
+// 31.10.2026 (Orhan, Teknocenter onay akışı): firma muhasebesi rol kapısı (izinli yol listesi) + alt marka kayıt kapsamı
+// kapısı (kimlikle / sorguyla başka firmanın avans, masraf, ödeme, fiş ve geçmiş kaydına erişim yok). Ayrıntı: teknoOnay.js
+const _teknoKapiBaglam = {
+  optionalAuth: (req) => optionalAuth(req), altMarkaKapsam: (req) => altMarkaKapsam(req),
+  avansKapsamda: (k, t) => avansKapsamda(k, t), kapsamPersonelSql: (k) => kapsamPersonelSql(k), pool,
+};
+app.use(teknoOnay.firmaMuhasebeKapisi(_teknoKapiBaglam));
+app.use(teknoOnay.kapsamKapisi(_teknoKapiBaglam));
 
 // ═══ GİZLİLİK KATMANI (21.10.2026, Orhan) — rol fark etmeksizin etkin izinden ═════════════════════
 // maas_goruntule=false  → maaş uçları 403; maaş alanları her JSON yanıttan anahtarıyla çıkar; puantaj özetinde
@@ -2956,8 +2969,13 @@ app.put(
       const { id } = req.params;
       const { role, subcon_name } = req.body;
 
-      if (!role || !["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe", "isg"].includes(role)) {
+      if (!role || !["admin", "user", "subcon", "rollout_mudur", "genel_mudur", "pm", "direktor", "muhasebe", "isg", "firma_muhasebe"].includes(role)) {
         return res.status(400).json({ ok: false, error: "Geçersiz rol" });
+      }
+      // 31.10.2026: firma muhasebesi yalnız alt marka (ör. Teknocenter) hesabına verilir; kapsamı hesabın firmasıdır
+      if (role === "firma_muhasebe") {
+        const mk = (await pool.query(`SELECT UPPER(COALESCE(marka,'ERC')) AS marka FROM users WHERE id=$1`, [id])).rows[0]?.marka;
+        if (!mk || !altMarkaMi(mk)) return res.status(400).json({ ok: false, error: "Firma muhasebesi rolü yalnız alt marka (ör. TEKNO) firmasındaki hesaba verilebilir; önce hesabın firmasını seçin" });
       }
       if (role === "subcon" && !String(subcon_name || "").trim()) {
         return res.status(400).json({ ok: false, error: "Taşeron rolü için taşeron adı zorunlu" });
@@ -15039,6 +15057,15 @@ const onayPanel = onayDevri.kur(app, {
   pmKisiselEmailGorur: (e, r) => pmKisiselEmailGorur(e, r),
   pmAvansSahibiSql: (t, p) => pmAvansSahibiSql(t, p),
 });
+// 31.10.2026 (Orhan): Teknocenter iş avansı / masraf onay zinciri (bölge müdürü → Orhan → İlhami → Teknocenter muhasebesi;
+// ayrı ilk yönetici / ekip şefi aşaması yok). Zincirdeki kayıtların onay / red / düzeltme / arşiv uçları mevcut uçlardan ÖNCE burada kaydedilir.
+const teknoPanel = teknoOnay.kur(app, {
+  pool, authMiddleware, islemGecmisiYaz, onayPanel,
+  avansFirmaSql: onayDevri.avansFirmaSql, masrafFirmaSql: onayDevri.masrafFirmaSql,
+  altMarkaKapsam: (req) => altMarkaKapsam(req), markaProfil: (k) => markaProfil(k), istanbulBugun: () => istanbulBugun(),
+  masrafCezaAvansOlustur: (id) => masrafCezaAvansOlustur(id),
+});
+onayPanel.teknoBagla(teknoPanel);
 app.get("/is-atama/kategoriler", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
@@ -23337,7 +23364,13 @@ function avansTamGorus(req) {
   const email = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
   return ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "rollout_mudur", "bolge_mudur", "pm"].includes(rol)
-    || AVANS_TAM_GORUS.includes(email);
+    || AVANS_TAM_GORUS.includes(email) || firmaMuhasebeTamGorus(req);
+}
+// 31.10.2026: firma muhasebesi (rol firma_muhasebe) yalnız alt marka hesabında tam liste görür; liste uçlarının alt marka
+// süzgeci (altMarkaKapsam) onu kendi firmasının kayıtlarıyla sınırlar. Alt marka kapsamı yoksa tam görüş yok.
+function firmaMuhasebeTamGorus(req) {
+  const u = optionalAuth(req);
+  return !!u && String(u.role || "").toLowerCase() === "firma_muhasebe" && !!altMarkaKapsam(req);
 }
 // 20.10.2026: masraf formu listesinde tam görüş — avans yetkisi + muhasebe kontrol adımı.
 // Onay zincirinde olmayan kullanıcı (saha personeli, taşeron) yalnız kendi formlarını görür;
@@ -23382,11 +23415,12 @@ const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü
 const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
   donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
   form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", onay_kaynagi: "Onay yetkisi", talep_firma: "Talebin firması", kalem: "Kalem",
+  akis: "Onay akışı", atlanan: "Atlanan aşama",
   name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not",
   ekip_turu: "Ekip türü", bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", ad: "Ad" };
-const GECMIS_ROL_TR = { isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
+const GECMIS_ROL_TR = { firma_muhasebe: "Firma Muhasebesi", isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
 const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
-  GERI_GONDER: "Geri gönderildi (iade)", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
+  GERI_GONDER: "Geri gönderildi (iade)", YONLENDIRME: "Onay zincirine yönlendirildi", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
   ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı",
   SINIFLANDIRMA: "Ekip türü / bağlı firma" };
 // Kayıt bazında işlem geçmişi: islem_gecmisi + eski kayıtlardan sentezlenen olaylar (onay tarihi kolonları, kalem notları)
@@ -23400,7 +23434,7 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout / bölge müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi", direktor: "Teknocenter direktörü", muhasebe_vekalet: "İlhami aşaması Teknocenter muhasebe yetkisiyle (vekâleten)" })[v] || v : k === "akis" ? ({ TEKNO: "Teknocenter onay zinciri" })[v] || v : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -23515,7 +23549,7 @@ function masrafTamGorus(req) {
   const email = String(u.email || "").toLowerCase().trim();
   const rol = String(u.role || "").toLowerCase();
   return ["admin", "platform_admin", "direktor", "muhasebe", "genel_mudur", "rollout_mudur", "bolge_mudur", "pm"].includes(rol)
-    || MASRAF_TAM_GORUS.includes(email);
+    || MASRAF_TAM_GORUS.includes(email) || firmaMuhasebeTamGorus(req);
 }
 
 app.get("/hr/is-avans/bakiye", authMiddleware, async (req, res) => {
@@ -23848,7 +23882,8 @@ async function isAvansGorunurSatirlar(req, sorgu = {}) {
       }
       rows = rows.filter((t) => avansKapsamda(kapsam, t));
     }
-    return rows;
+    // 31.10.2026 Teknocenter onay zinciri: açık satırlara zincir bilgisi (aşama, onaycı, oturumdaki kişinin onaylayıp onaylayamayacağı)
+    return teknoPanel.bilgiEkle(req, "avans", rows);
 }
 app.get("/hr/is-avans", authMiddleware, async (req, res) => {
   try { res.json(await isAvansGorunurSatirlar(req, req.query)); }
@@ -23894,9 +23929,11 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
       return [...liste].map((e) => ({ ad: adOf(e) }));
     };
     const satir = async (t) => {
-      const adim = AVANS_ASAMA[t.durum] || null;
+      // 31.10.2026: Teknocenter zincirindeki talepte aşama / onaycı / yetki zincir bilgisinden (teknoOnay) gelir
+      const tk = t.tekno || null;
+      const adim = tk ? tk.asama : (AVANS_ASAMA[t.durum] || null);
       // Hızlı onay yalnız onay aşamalarında (ödeme hariç) ve yalnız mevcut aşama için — aynı yetki fonksiyonu (devir dahil)
-      const benim = !!adim && adim !== "ODE" && (await avansYetkili(req, adim, t));
+      const benim = tk ? (!!adim && adim !== "ODE" && tk.benim) : (!!adim && adim !== "ODE" && (await avansYetkili(req, adim, t)));
       return {
         id: t.id, talep_no: `AV-${t.id}`, talep_eden: t.talep_eden_ad || t.talep_eden_email, personel: t.personel_ad || null,
         firma: t.firma || null, bolge: t.bolge || null, proje: t.proje || null, gider_turu: t.gider_turu || null, plaka: t.plaka || null,
@@ -23904,8 +23941,10 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
         kalan: t.durum === "TAMAMLANDI" ? 0 : Number(t.tutar || 0), // kısmi ödeme kaydı yok: ödenmemişse kalanın tamamı
 
         aciklama: t.aciklama || null, not_aciklama: t.not_aciklama || null, durum: t.durum,
-        asama: adim, asama_tr: adim ? AVANS_ASAMA_TR[adim] : null, onaycilar: adim ? await onaycilar(adim, t) : [],
-        benim_onaylayabilir: benim, firma_secim_gerekli: benim && (adim === "PM" || (adim === "PD" && !t.firma)), // mevcut panel kuralı
+        asama: adim, asama_tr: tk ? tk.asama_tr : (adim ? AVANS_ASAMA_TR[adim] : null),
+        onaycilar: tk ? tk.onaycilar.map((x) => ({ ad: x.ad })) : (adim ? await onaycilar(adim, t) : []),
+        benim_onaylayabilir: benim, firma_secim_gerekli: !tk && benim && (adim === "PM" || (adim === "PD" && !t.firma)), // mevcut panel kuralı
+        ...(tk ? { akis: "TEKNO", vekalet: !!tk.vekalet, kilit: tk.kilit || null } : {}),
         odeme_tarihi: gun(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi),
       };
     };
@@ -24048,8 +24087,15 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
         avansVadeGirdisi(req.body.son_odeme_tarihi) || null, // gönderilmezse boş (mobil eski sürüm) — vade eksik sayılır
       ]
     );
-    const yeniAvans = r.rows[0];
-    islemGecmisiYaz(req, "avans", yeniAvans.id, "OLUSTURMA", null, { ...avansOzet(yeniAvans), durum: yeniAvans.durum, talep_eden: yeniAvans.talep_eden_ad || yeniAvans.talep_eden_email || null }, null);
+    let yeniAvans = r.rows[0];
+    await islemGecmisiYaz(req, "avans", yeniAvans.id, "OLUSTURMA", null, { ...avansOzet(yeniAvans), durum: yeniAvans.durum, talep_eden: yeniAvans.talep_eden_ad || yeniAvans.talep_eden_email || null }, null);
+    // 31.10.2026 Teknocenter onay zinciri: Orhan'ın kendi açtığı talep (mevcut kural: PM aşaması geçilmiş başlar) PM onayı
+    // olarak kimliğiyle kaydedilir (yalnız oturum Orhan'sa); ardından atlanan aşamalar bekletilmeden ilk açık aşamaya yönlenir
+    try {
+      if (isRolloutApprover && ["orhan.bedir@simsektel.com", "orhan.bedir@gmail.com"].includes(_eposta(req.user)) && (await teknoPanel.zincirKimlikleri("avans", [yeniAvans.id])).size)
+        await pool.query(`UPDATE is_avans_talep SET pm_onaylayan=$1, firma='TEKNO' WHERE id=$2`, [_eposta(req.user), yeniAvans.id]);
+      if (await teknoPanel.normalize(req, "avans", yeniAvans.id)) yeniAvans = (await pool.query(`SELECT * FROM is_avans_talep WHERE id=$1`, [yeniAvans.id])).rows[0] || yeniAvans;
+    } catch (e) { console.error("[tekno-onay yönlendirme]", e.message); }
     res.json(yeniAvans);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -24463,7 +24509,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
     }
 
     // Title row
-    ws.mergeCells("A1:O1");
+    ws.mergeCells("A1:P1");
     const titleCell = ws.getCell("A1");
     const _baslikEk = [ara && String(ara).trim(), gider_turu, bolge, proje, baslangic || bitis ? `${baslangic || "…"} – ${bitis || "…"}` : ""].filter(Boolean).join(" · ");
     titleCell.value = "İŞ AVANSI TALEP RAPORU" + (_baslikEk ? " — " + _baslikEk : "");
@@ -24489,6 +24535,8 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
       { header: "Durum",            key: "durum",       width: 18 },
       { header: "Onay Tarihi",      key: "onay",        width: 14 },
       { header: "Ödeme Tarihi",     key: "odeme",       width: 14 },
+      // 31.10.2026: Teknocenter zinciri — İlhami aşaması kendisi mi, muhasebe yetkisiyle (vekâleten) mi tamamlandı
+      { header: "Direktör Aşaması", key: "dir_kaynak",  width: 30 },
     ];
 
     const headerRow = ws.getRow(2);
@@ -24535,6 +24583,8 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
         durumLabels[t.durum] || t.durum,
         fmtDate(t.direktor_onay_tarihi || t.pm_onay_tarihi),
         fmtDate(t.odeme_tarihi),
+        t.direktor_onay_kaynagi === "MUHASEBE_VEKALET" ? `Muhasebe yetkisiyle (vekâleten): ${t.direktor_onaylayan || ""}`
+          : t.direktor_onay_kaynagi === "DIREKTOR" ? `Direktör: ${t.direktor_onaylayan || ""}` : "",
       ];
 
       values.forEach((val, ci) => {
@@ -24604,6 +24654,8 @@ const masrafUpload = multer({
 });
 
 // GET all forms (with totals)
+// 31.10.2026 Teknocenter onay zinciri: masraf listesine zincir bilgisi (aşama, onaycı, oturumdaki kişinin yetkisi)
+const masrafTeknoEkle = (req, rows) => teknoPanel.bilgiEkle(req, "masraf", rows);
 app.get("/hr/masraf-form", async (req, res) => {
   try {
     const u = optionalAuth(req);
@@ -24628,7 +24680,7 @@ app.get("/hr/masraf-form", async (req, res) => {
         GROUP BY mf.id, p.ad_soyad
         HAVING COUNT(mk.id) FILTER (WHERE ${kapsamKalemSql(k)}) > 0
         ORDER BY mf.created_at DESC`, kParams);
-      return res.json(rows);
+      return res.json(await masrafTeknoEkle(req, rows));
     }
     const { rows } = await pool.query(`
       SELECT mf.*, p.ad_soyad as personel_ad,
@@ -24640,7 +24692,7 @@ app.get("/hr/masraf-form", async (req, res) => {
       GROUP BY mf.id, p.ad_soyad
       ORDER BY mf.created_at DESC
     `, kParams);
-    res.json(rows);
+    res.json(await masrafTeknoEkle(req, rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -24849,10 +24901,13 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     const avansBaskasiIcin = isPM || isDirektor || isRM || (AVANS_YETKI.ODE || []).includes(userEmailLower);
 
     let onayBekleyenAvanslar = [];
-    if (isPM || isDirektor || isRM) {
+    // 31.10.2026: Teknocenter onay zincirindeki kişiler (İlhami Şahin, firma muhasebesi vekâleti) eski rol
+    // bayrağı olmasa da kendi aşamasındaki talepleri görür; zincir satırı aşama listesinden bağımsızdır (akis='TEKNO')
+    const teknoBekleyen = (await teknoPanel.bekleyenler(req, "avans").catch(() => [])).length > 0;
+    if (isPM || isDirektor || isRM || teknoBekleyen) {
       const bekleyenDurumlar = isDirektor
         ? ['TALEP', 'ROLLOUT_MUDUR_ONAY', 'PM_ONAY']
-        : isPM ? ['TALEP', 'ROLLOUT_MUDUR_ONAY'] : ['TALEP'];
+        : isPM ? ['TALEP', 'ROLLOUT_MUDUR_ONAY'] : isRM ? ['TALEP'] : [];
       // 22.08.2026 (Orhan): onay ekranında "kim için / not / plaka / KM / firma"
       // görünmüyordu. Alanlar ayrı gönderilir (yeni mobil build satır satır
       // gösterir); mevcut build için aciklama metnine de özet eklenir
@@ -24860,7 +24915,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
       // 25.10.2026: satırlar firmaya ve tarihli onay devrine göre süzülür (onayDevri.avansBekleyenler): devredilmiş firmanın
       // direktör adımı eski direktörün listesinden düşer, devralanın listesine girer. Eski alanlar korunur (+ adim / uc / talep_firma).
       const onayRes = { rows: (await onayPanel.avansBekleyenler({ user: { ..._u, email: userEmailLower }, devirler: req.devirler || [] })).rows
-        .filter(r => bekleyenDurumlar.includes(r.durum)).slice(0, 20) };
+        .filter(r => r.akis === "TEKNO" || bekleyenDurumlar.includes(r.durum)).slice(0, 20) };
       onayBekleyenAvanslar = onayRes.rows.map(r => {
         const parca = [];
         if (r.personel_ad) parca.push(`Kim için: ${r.personel_ad}${r.personel_unvan ? ` (${r.personel_unvan})` : ""}`);
@@ -24933,7 +24988,7 @@ app.get("/hr/masraf-formlari", async (req, res) => {
       ${k ? `HAVING COUNT(mk.id)${kalemKosul} > 0` : ""}
       ORDER BY mf.created_at DESC
     `, params);
-    res.json(rows);
+    res.json(await masrafTeknoEkle(req, rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -24994,7 +25049,8 @@ app.get("/hr/masraf-form/:id", masrafFormOkuma, async (req, res) => {
       LEFT JOIN masraf_belge mb ON mb.kalem_id = mk.id
       WHERE mk.form_id=$1 ${k ? `AND ${kapsamKalemSql(k)}` : ""} GROUP BY mk.id ORDER BY mk.tarih, mk.id`, [id]);
     if (k && !kalemler.rows.length) return res.status(403).json({ error: "Bu formda firmanızın dönemine ait kalem yok" });
-    res.json({ ...form.rows[0], kalemler: kalemler.rows, ...(k ? { kapsam: { marka: k.kod, baslangic: k.devir } } : {}) });
+    const [fx] = await teknoPanel.bilgiEkle(req, "masraf", [form.rows[0]]); // Teknocenter zinciri bilgisi (varsa)
+    res.json({ ...fx, kalemler: kalemler.rows, ...(k ? { kapsam: { marka: k.kod, baslangic: k.devir } } : {}) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -28147,7 +28203,14 @@ app.put("/hr/masraf-form/:id/submit", masrafFormSahibiVeyaTam, async (req, res) 
       [hedef, req.params.id]
     );
     if (!rows[0]) return res.status(422).json({ error: "Form taslak durumunda değil veya bulunamadı" });
-    islemGecmisiYaz(req, "masraf", req.params.id, "GONDERIM", { durum: "TASLAK" }, { durum: hedef }, null);
+    await islemGecmisiYaz(req, "masraf", req.params.id, "GONDERIM", { durum: "TASLAK" }, { durum: hedef }, null);
+    // 31.10.2026 Teknocenter onay zinciri: form bölge müdürü aşamasından başlar (ROLLOUT_BEKLE); atlanan aşamalar
+    // bekletilmez. Eski 'atla' listesi (TAMAMLANDI'ya kadar atlama) Teknocenter formunda kullanılmaz.
+    if ((await teknoPanel.zincirKimlikleri("masraf", [Number(req.params.id)])).size) {
+      if (hedef !== "ROLLOUT_BEKLE") await pool.query(`UPDATE masraf_form SET durum='ROLLOUT_BEKLE' WHERE id=$1 AND durum=$2`, [req.params.id, hedef]);
+      await teknoPanel.normalize(req, "masraf", Number(req.params.id));
+      return res.json((await pool.query(`SELECT * FROM masraf_form WHERE id=$1`, [req.params.id])).rows[0]);
+    }
     if (hedef === "TAMAMLANDI") await masrafCezaAvansOlustur(req.params.id);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }

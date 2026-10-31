@@ -21347,6 +21347,26 @@ function PoTaleplerimPanel({ onYeniTalep }) {
    Rol bazlı (kişiye özel değil). Mevcut ekranları kullanır: İK modülünün ISG sekmesi (salt okunur),
    Puantaj (salt okunur), Rollout Data (salt okunur) ve personel akışındaki kendi İş Avansı / Masraf Formu.
    Yetkiler sunucudan gelen user.izinler ile okunur; asıl kontrol sunucudaki İSG kapısındadır. */
+function FirmaMuhasebeCalismaAlani({ user, onLogout, setPendingAvansCount, setPendingMasrafCount }) {
+  // Tek ekran: Personel Harcamaları (onay / ödeme kuyruğu, iş avansları, masraf formları, ödemeler & bakiyeler)
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8fafc" }}>
+      <div style={{ background: "#1e3a5f", color: "#fff", padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", position: "sticky", top: 0, zIndex: 100 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: "15px" }}>{user?.marka_ad || user?.marka || "Firma"} · Muhasebe</div>
+          <div style={{ fontSize: "11.5px", opacity: 0.75 }}>İş avansı ödemesi · masraf kontrolü / arşiv · İlhami aşaması (Orhan onayından sonra)</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "12px", opacity: 0.8 }}>{user?.name || user?.email}</span>
+          <button onClick={onLogout} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: "8px", padding: "6px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Çıkış</button>
+        </div>
+      </div>
+      <div style={{ padding: "12px" }}>
+        <PersonelHarcamalariPanel currentUser={user} initialTab="genel" onPendingAvans={setPendingAvansCount} onPendingMasraf={setPendingMasrafCount} />
+      </div>
+    </div>
+  );
+}
 function IsgCalismaAlani({ user, page, setPage, onLogout, setPendingAvansCount, setPendingMasrafCount }) {
   const izin = user?.izinler || {};
   const [dar, setDar] = useState(typeof window !== "undefined" && window.innerWidth < 768);
@@ -25756,7 +25776,8 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   const _meAd = String(currentUser?.name || "").toLocaleLowerCase("tr-TR").trim();
   const benimMi = (f) => (!!_meEmail && String(f.talep_eden_email || "").toLowerCase().trim() === _meEmail)
     || (!!_meAd && String(f.personel_ad || f.talep_eden_ad || "").toLocaleLowerCase("tr-TR").trim() === _meAd);
-  const bendeBekliyor = (f) => (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE") || (isMuhasebe && f.durum==="TAMAMLANDI");
+  // 31.10.2026: Teknocenter zincirindeki formda "bende mi" kararı sunucudan (f.tekno.benim; arşiv = muhasebe ödeme yetkisi)
+  const bendeBekliyor = (f) => f.tekno ? !!f.tekno.benim : (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE") || (isMuhasebe && f.durum==="TAMAMLANDI");
   const iadeMi = (f) => f.durum === "TASLAK" && String(f.red_aciklama || "").startsWith("↩");
   const [filterAra, setFilterAra] = useState("");     // ad / form no
   const [filterDonem, setFilterDonem] = useState(""); // YYYY-MM
@@ -26350,6 +26371,15 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     load();
   };
 
+  // Teknocenter zinciri: tek uç — sunucu aşamayı (bölge müdürü / Orhan / İlhami / muhasebe vekâleti) kendisi bulur
+  const handleTeknoOnayla = async () => {
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/onayla`, {
+      method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"}, body: JSON.stringify({ not: notText })
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onaylanamadı"); }
+    setNotModal(null); setNotText(""); load();
+    if (viewForm?.id === notModal.id) loadDetail(notModal.id);
+  };
   const handleRolloutOnayla = async () => {
     await fetch(`${API_BASE}/hr/masraf-form/${notModal.id}/rollout-onayla`, {
       method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
@@ -26388,7 +26418,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
 
   const handleReddet = async () => {
     if (!redText.trim()) return alert("Red açıklaması girilmeden reddedilemez!");
-    const ep = isPM ? "pm-reddet" : "direktor-reddet";
+    const ep = isPM || list.find(x => x.id === redModal)?.tekno || viewForm?.tekno ? "pm-reddet" : "direktor-reddet"; // zincirde yetkiyi sunucu belirler
     try {
       const r = await fetch(`${API_BASE}/hr/masraf-form/${redModal}/${ep}`, {
         method:"PUT", headers:{ ...AUTH_H(), "Content-Type":"application/json"},
@@ -26431,7 +26461,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
     return <span style={{ background:s.bg, color:s.color, borderRadius:"20px", padding:"3px 12px", fontSize:12, fontWeight:600, whiteSpace:"nowrap" }}>{s.label}</span>;
   };
 
-  const myPending = isPM ? list.filter(f=>f.durum==="PM_BEKLE").length
+  const myPending = list.some(f => f.tekno) ? list.filter(bendeBekliyor).length : isPM ? list.filter(f=>f.durum==="PM_BEKLE").length
     : isDirektor ? list.filter(f=>f.durum==="DIREKTOR_BEKLE").length
     : isRollout ? list.filter(f=>f.durum==="ROLLOUT_BEKLE").length
     : isMuhOnay ? list.filter(f=>["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length
@@ -26448,7 +26478,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
       if (!direktorGorur && !muhasebeGorur) return false;
     }
     // Personel sadece kendi formlarını görür
-    if (!isApprover && f.talep_eden_email !== currentUser?.email) return false;
+    if (!isApprover && !f.tekno && f.talep_eden_email !== currentUser?.email) return false; // zincir satırını sunucu kapsamla gönderir
     // Onaylayıcılar başkasının TASLAK'larını görmez ama KENDİ TASLAK'larını görebilir
     if (isApprover && f.durum === "TASLAK" && f.talep_eden_email !== currentUser?.email) return false;
     if (kapsam === "BENIM" && !benimMi(f)) return false;
@@ -26498,10 +26528,12 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
   // ── Detail view ──
   if (viewForm) {
     const vToplam = (viewForm.kalemler||[]).reduce((s,k)=>s+Number(k.tutar),0);
-    const needsPMAction = isPM && viewForm.durum === "PM_BEKLE";
-    const needsDirektorAction = isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
-    const needsRolloutAction = isRollout && viewForm.durum === "ROLLOUT_BEKLE";
-    const needsMuhasebeAction = isMuhOnay && viewForm.durum === "MUHASEBE_BEKLE";
+    const tkV = viewForm.tekno || null; // Teknocenter zinciri: eski rol düğmeleri kapalı, karar sunucudan
+    const needsTeknoAction = !!tkV && tkV.benim && tkV.asama !== "ODE";
+    const needsPMAction = !tkV && isPM && viewForm.durum === "PM_BEKLE";
+    const needsDirektorAction = !tkV && isDirektor && viewForm.durum === "DIREKTOR_BEKLE";
+    const needsRolloutAction = !tkV && isRollout && viewForm.durum === "ROLLOUT_BEKLE";
+    const needsMuhasebeAction = !tkV && isMuhOnay && viewForm.durum === "MUHASEBE_BEKLE";
     const isOwner = currentUser?.email === viewForm.talep_eden_email;
     const canDelete = (isOwner || isPM) && viewForm.durum !== "TAMAMLANDI";
     const canEditCeza = isPM || isDirektor || isOwner;
@@ -26650,6 +26682,25 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
         {renderKalemModal()}
 
         {/* Onay aksiyonları */}
+        {tkV && (
+          <div style={{ fontSize:"12.5px", color:"#475569", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:"10px", padding:"10px 14px", marginBottom:"10px" }}>
+            <TeknoZincirSatiri tk={tkV} />{tkV.asama && <div style={{ marginTop:"4px", fontWeight:700, color:"#92400e" }}>⏳ {teknoBekleyenMetni(tkV)}</div>}
+          </div>
+        )}
+        {needsTeknoAction && (
+          <div style={{ display:"flex", gap:"12px", flexWrap:"wrap" }}>
+            <button onClick={()=>{ if (tkV.vekalet && !window.confirm('Bu form İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?')) return; setNotModal({ id: viewForm.id, action: "tekno" }); setNotText(""); }}
+              style={{ padding:"12px 24px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>
+              ✅ Onayla ({tkV.vekalet ? "İlhami aşaması · muhasebe yetkisiyle" : tkV.asama_tr})
+            </button>
+            {!tkV.vekalet && <>
+              <button onClick={()=>{ setGeriModal(viewForm.id); setGeriText(""); }}
+                style={{ padding:"12px 24px", background:"#b45309", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>↩ Geri Gönder</button>
+              <button onClick={()=>{ setRedModal(viewForm.id); setRedText(""); }}
+                style={{ padding:"12px 24px", background:"#dc2626", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, fontSize:"14px", cursor:"pointer" }}>❌ Reddet</button>
+            </>}
+          </div>
+        )}
         {(needsPMAction || needsDirektorAction || needsRolloutAction || needsMuhasebeAction) && (
           <div style={{ display:"flex", gap:"12px" }}>
             <button onClick={()=>{ setNotModal({ id: viewForm.id, action: needsRolloutAction?"rollout":needsMuhasebeAction?"muhasebe":needsPMAction?"pm":"dir" }); setNotText(""); }}
@@ -26698,7 +26749,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
                 style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
               <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
-                <button onClick={notModal.action==="rollout"?handleRolloutOnayla:notModal.action==="muhasebe"?handleMuhasebeOnayla:notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+                <button onClick={notModal.action==="tekno"?handleTeknoOnayla:notModal.action==="rollout"?handleRolloutOnayla:notModal.action==="muhasebe"?handleMuhasebeOnayla:notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
                   style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
                 <button onClick={()=>{setNotModal(null);setNotText("");}}
                   style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
@@ -27373,7 +27424,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
           {visibleList.map(f => {
-            const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE");
+            const needsMyAction = f.tekno ? (!!f.tekno.benim && f.tekno.asama !== "ODE") : ((isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE"));
             const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
             const cardBorder = needsMyAction ? "3px solid #f59e0b" : myPendingRow ? "3px solid #f87171" : "3px solid #e5e7eb";
             const cardBg = needsMyAction ? "#fffbeb" : myPendingRow ? "#fef2f2" : "#fff";
@@ -27413,13 +27464,13 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                   )}
                   {needsMyAction && (
                     <>
-                      <button onClick={()=>{ setNotModal({id:f.id,action:isPM?"pm":"dir"}); setNotText(""); }}
+                      <button onClick={()=>{ setNotModal({id:f.id,action:f.tekno?"tekno":isPM?"pm":"dir"}); setNotText(""); }}
                         style={{ padding:"7px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{ setRedModal(f.id); setRedText(""); }}
                         style={{ padding:"7px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
-                  {isMuhasebe && f.durum==="TAMAMLANDI" && (
+                  {(f.tekno ? !!f.tekno.odeme : isMuhasebe) && f.durum==="TAMAMLANDI" && (
                     <button onClick={async()=>{ if(window.confirm("Arşivlensin mi?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{ headers: AUTH_H(),method:"PUT"}); load(); } }}
                       style={{ padding:"7px 14px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
                   )}
@@ -27443,7 +27494,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
               <tr><td colSpan={7} style={{ padding:"40px", textAlign:"center", color:"#9ca3af" }}>Kayıt bulunamadı</td></tr>
             )}
             {visibleList.map((f,i)=>{
-              const needsMyAction = (isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE");
+              const needsMyAction = f.tekno ? (!!f.tekno.benim && f.tekno.asama !== "ODE") : ((isPM && f.durum==="PM_BEKLE") || (isDirektor && f.durum==="DIREKTOR_BEKLE") || (isRollout && f.durum==="ROLLOUT_BEKLE") || (isMuhOnay && f.durum==="MUHASEBE_BEKLE"));
               const myPendingRow = !isApprover && f.talep_eden_email===currentUser?.email && ["ROLLOUT_BEKLE","MUHASEBE_BEKLE","PM_BEKLE","DIREKTOR_BEKLE"].includes(f.durum);
               // Kendi taslağım: en üstte, yeşil şeritli — hemen göze çarpsın (21.09.2026)
               const myDraftRow = f.durum==="TASLAK" && f.talep_eden_email===currentUser?.email;
@@ -27480,14 +27531,14 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
                       )}
                       {needsMyAction && (
                         <>
-                          <button onClick={()=>{ setNotModal({id:f.id,action:isPM?"pm":"dir"}); setNotText(""); }}
+                          <button onClick={()=>{ setNotModal({id:f.id,action:f.tekno?"tekno":isPM?"pm":"dir"}); setNotText(""); }}
                             style={{ padding:"4px 10px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                           <button onClick={()=>{ setRedModal(f.id); setRedText(""); }}
                             style={{ padding:"4px 10px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                         </>
                       )}
                       {(isPM || isDirektor || isMuhasebe) && <a href={dlUrl(`/hr/masraf-form/${f.id}/excel`)} style={{ padding:"4px 10px", background:"#f0fdf4", color:"#166534", borderRadius:"6px", fontSize:"12px", fontWeight:600, textDecoration:"none" }}>Excel</a>}
-                      {isMuhasebe && f.durum==="TAMAMLANDI" && (
+                      {(f.tekno ? !!f.tekno.odeme : isMuhasebe) && f.durum==="TAMAMLANDI" && (
                         <button onClick={async()=>{ if(window.confirm("Bu formu arşivlendi olarak işaretleyeceksiniz. Emin misiniz?")){ await fetch(`${API_BASE}/hr/masraf-form/${f.id}/arsivle`,{ headers: AUTH_H(),method:"PUT"}); load(); } }}
                           style={{ padding:"4px 10px", background:"#ede9fe", color:"#5b21b6", border:"none", borderRadius:"6px", fontSize:"12px", fontWeight:600, cursor:"pointer" }}>🗂 Arşivle</button>
                       )}
@@ -27544,7 +27595,7 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
             <textarea value={notText} onChange={e=>setNotText(e.target.value)} rows={3} placeholder="Not eklemek ister misiniz?"
               style={{ width:"100%", padding:"10px 12px", borderRadius:"10px", border:"1.5px solid #e5e7eb", fontSize:"14px", boxSizing:"border-box", resize:"vertical" }} />
             <div style={{ display:"flex", gap:"10px", marginTop:"14px" }}>
-              <button onClick={notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
+              <button onClick={notModal.action==="tekno"?handleTeknoOnayla:notModal.action==="pm"?handlePMOnayla:handleDirektorOnayla}
                 style={{ flex:1, padding:"12px", background:"#166534", color:"#fff", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer" }}>Onayla</button>
               <button onClick={()=>{setNotModal(null);setNotText("");}}
                 style={{ padding:"12px 20px", background:"#f3f4f6", color:"#374151", border:"none", borderRadius:"10px", cursor:"pointer" }}>Vazgeç</button>
@@ -27578,6 +27629,54 @@ function MasrafFormuPanel({ currentUser, onPendingCount, embedded = false, initi
    zinciri aynen); bu bileşen üstte ortak başlık, KPI şeridi, onay kuyruğu
    ve bakiye özetini verir. Mobil akışlar değişmez.
    ═══════════════════════════════════════════════════════════════════════ */
+// ═══ TEKNOCENTER ONAY ZİNCİRİ (31.10.2026) — ekranda gösterim; karar ve yetki sunucuda (backend/teknoOnay.js) ═══
+// Kayıttaki "tekno" alanı: aşama (RM bölge müdürü · PM Orhan · PD İlhami · ODE muhasebe), onaycılar, atlanan
+// aşamalar, oturumdaki kişinin işlem yapıp yapamayacağı (benim), muhasebe vekâleti ve ödeme yetkisi.
+const TEKNO_ADIM_KISA = { RM: "R", PM: "PM", PD: "İŞ", ODE: "M" };
+function teknoEtiketler(tk) {
+  return (tk?.zincir || []).map(z => ({ k: TEKNO_ADIM_KISA[z.k] || z.k,
+    title: `${z.ad}${z.atlandi ? ` — atlandı (${z.atlandi})` : z.kisiler?.length ? ` — ${z.kisiler.join(", ")}` : ""}` }));
+}
+function teknoAdimNo(tk) {
+  const i = (tk?.zincir || []).findIndex(z => z.k === tk.asama);
+  return i < 0 ? (tk?.zincir || []).length : i;
+}
+function teknoBekleyenMetni(tk) {
+  if (!tk?.asama) return "";
+  if (tk.kilit) return `⚠ ${tk.kilit}`;
+  const kim = (tk.onaycilar || []).map(x => x.ad).join(", ");
+  return `${tk.asama_tr}${kim ? ` — ${kim}` : ""}`;
+}
+function TeknoDurumRozeti({ tk }) {
+  const renk = tk.asama === "ODE" ? ["#fef9c3", "#713f12"] : tk.asama === "PD" ? ["#fed7aa", "#92400e"] : ["#dbeafe", "#1e40af"];
+  return (
+    <span title={teknoBekleyenMetni(tk)} style={{ background: renk[0], color: renk[1], borderRadius: "20px", padding: "3px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+      {tk.asama === "ODE" ? "Ödeme bekliyor (Tekno muhasebe)" : tk.asama === "PD" ? "İlhami Şahin onayı bekleniyor" : tk.asama === "PM" ? "Orhan Bedir onayı bekleniyor"
+        : tk.asama === "RM" ? `Bölge müdürü onayı${tk.onaycilar?.[0] ? ` (${tk.onaycilar[0].ad})` : ""}` : "—"}
+    </span>
+  );
+}
+function TeknoAvansDugmeleri({ t, isPM, onOnayla, onReddet, kucuk }) {
+  const tk = t.tekno;
+  const st = { padding: kucuk ? "4px 10px" : "6px 14px", border: "none", borderRadius: kucuk ? "6px" : "8px", fontSize: kucuk ? "12px" : "13px", fontWeight: 600, cursor: "pointer" };
+  // Red: aşamanın onaycısı (vekâlet hariç) ya da Orhan; ödeme aşamasında muhasebe — son karar sunucuda
+  const red = !!tk.asama && ((tk.benim && !tk.vekalet) || (isPM && tk.asama !== "ODE"));
+  return (<>
+    {tk.benim && <button onClick={() => onOnayla(t)} title={teknoBekleyenMetni(tk)} style={{ ...st, background: "#dcfce7", color: "#166534" }}>
+      {tk.asama === "ODE" ? "Ödendi" : tk.vekalet ? "Onayla (İlhami aşaması · muhasebe)" : "Onayla"}</button>}
+    {red && <button onClick={() => onReddet(t.id)} style={{ ...st, background: "#fee2e2", color: "#991b1b" }}>Reddet</button>}
+  </>);
+}
+function TeknoZincirSatiri({ tk }) {
+  return (
+    <span>Teknocenter akışı: {(tk?.zincir || []).map((z, i) => (
+      <React.Fragment key={z.k}>{i > 0 && " → "}<span title={z.atlandi ? `Atlandı: ${z.atlandi}` : (z.kisiler || []).join(", ")}
+        style={{ fontWeight: z.durum === "bekliyor" ? 800 : 500, color: z.atlandi ? "#94a3b8" : z.durum === "bekliyor" ? "#b45309" : z.durum === "tamam" ? "#15803d" : "#475569", textDecoration: z.atlandi ? "line-through" : "none" }}>
+        {z.ad.split(" — ")[0]}</span></React.Fragment>
+    ))}</span>
+  );
+}
+
 function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPendingAvans, onPendingMasraf }) {
   const [tab, setTab] = useState(initialTab);
   useEffect(() => { setTab(initialTab); }, [initialTab]);
@@ -27593,8 +27692,10 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
   const _altMarka = currentUser?.hw_yukleme === false;
   const _marka = String(currentUser?.marka || "AHY").toUpperCase();
   const _altMarkaYonetici = _altMarka && (["admin", "direktor", "genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com" || _email === "teknocenter");
-  const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
-  const canPay = isMuhasebe || isPM || isDirektor || isNurcan || _altMarkaYonetici;
+  // 31.10.2026: Firma muhasebesi (ör. Tekno_Muhasebe) — kendi firmasının iş avansı / masraf ödemesi; kapsam sunucuda
+  const isFirmaMuhasebe = _role === "firma_muhasebe" && _altMarka;
+  const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur && !isFirmaMuhasebe;
+  const canPay = isMuhasebe || isPM || isDirektor || isNurcan || _altMarkaYonetici || isFirmaMuhasebe;
   const _auth = { Authorization: `Bearer ${localStorage.getItem("token") || ""}` };
   const [avanslar, setAvanslar] = useState([]);
   const [formlar, setFormlar] = useState([]);
@@ -27630,7 +27731,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
         fetch(`${API_BASE}/hr/masraf-formlari${qs}`, { headers: _auth }).then(r => r.json()).catch(() => []),
       ]);
       let av = Array.isArray(ra) ? ra : [];
-      if (_altMarka && !isRequester) av = av.filter(t => String(t.firma || "").toUpperCase() === _marka);
+      // Teknocenter zincirindeki talep (t.tekno) henüz kasa seçilmeden de firmanın kapsamındadır (sunucu süzer)
+      if (_altMarka && !isRequester) av = av.filter(t => t.tekno || String(t.firma || "").toUpperCase() === _marka);
       setAvanslar(av);
       setFormlar(Array.isArray(rf) ? rf : []);
       if (!isRequester) {
@@ -27678,12 +27780,13 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
       .catch(() => setHesap({ ok: false, hareketler: [], ozet: {}, bekleyen: { avanslar: [], formlar: [] } }));
   }, [tab, hesapKisi, tazele]);
 
-  // Kuyruk: bana düşenler
-  const avansBana = (t) => isRolloutMudur || isNurcan ? t.durum === "TALEP"
+  // Kuyruk: bana düşenler. 31.10.2026: Teknocenter zincirindeki kayıtta karar sunucudan (t.tekno.benim: bölge
+  // müdürü, Orhan, İlhami, muhasebe vekâleti / ödemesi); eski rol kuralı yalnız zincir dışı kayıtlarda
+  const avansBana = (t) => t.tekno ? !!t.tekno.benim : isRolloutMudur || isNurcan ? t.durum === "TALEP"
     : isPM ? (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")
     : isDirektor ? t.durum === "PM_ONAY"
     : isMuhasebe ? t.durum === "DIREKTOR_ONAY" : false;
-  const masrafBana = (f) => isPM ? f.durum === "PM_BEKLE"
+  const masrafBana = (f) => f.tekno ? !!f.tekno.benim : isPM ? f.durum === "PM_BEKLE"
     : isDirektor ? f.durum === "DIREKTOR_BEKLE"
     : isNurcan ? f.durum === "ROLLOUT_BEKLE"
     : isMuhOnay ? ["MUHASEBE_BEKLE", "TAMAMLANDI"].includes(f.durum)
@@ -27741,6 +27844,12 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
 
   // İşlemler
   const avansOnayla = async (t) => {
+    // Teknocenter zinciri: sunucu aşamayı kendisi bulur; ödeme kaynağı Teknocenter'a kilitli (kasa seçimi yok)
+    if (t.tekno) {
+      if (t.tekno.asama === "ODE" && !window.confirm(`${t.personel_ad || t.talep_eden_ad} · ₺${fmt(t.tutar)} Teknocenter hesabından ÖDENDİ olarak işaretlensin mi?`)) return;
+      if (t.tekno.vekalet && !window.confirm(`Bu talep İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?`)) return;
+      await avansGonder(t.id, "onayla"); return;
+    }
     const path = (isPM ? "pm-onayla" : isDirektor ? "direktor-onayla" : "onayla");
     const firmaGerek = isPM || (isDirektor && !t.firma);
     if (firmaGerek && !_altMarka) { setFirmaSec({ id: t.id, path }); return; }
@@ -27755,7 +27864,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     const sebep = window.prompt(`${t.personel_ad || t.talep_eden_ad} · ₺${fmt(t.tutar)} — red açıklaması:`);
     if (!sebep || !sebep.trim()) return;
     const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
-    if (!r.ok) alert("Reddedilemedi");
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Reddedilemedi"); }
     setTazele(x => x + 1);
   };
   const masrafOnayla = async (f) => {
@@ -27766,19 +27875,22 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
       if (!r.ok) alert("Arşivlenemedi");
       setTazele(x => x + 1); return;
     }
-    const m = map[f.durum]; if (!m) return;
+    // Teknocenter zinciri: tek uç (sunucu aşamayı kendisi bulur)
+    const m = f.tekno ? ["onayla", "not"] : map[f.durum]; if (!m) return;
+    if (f.tekno?.vekalet && !window.confirm(`Form #${f.form_no || f.id} İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?`)) return;
     const not = window.prompt(`Form #${f.form_no || f.id} onayı — not (isteğe bağlı):`, "");
     if (not === null) return;
     const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${m[0]}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ [m[1]]: not }) });
-    if (!r.ok) alert("Onaylanamadı");
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onaylanamadı"); }
     setTazele(x => x + 1);
   };
   const masrafReddet = async (f) => {
-    if (!(isPM || isDirektor)) { alert("Red yetkisi PM ve Direktör'de; 'Masraf Formları' sekmesinden geri gönderebilirsiniz."); return; }
+    if (!f.tekno && !(isPM || isDirektor)) { alert("Red yetkisi PM ve Direktör'de; 'Masraf Formları' sekmesinden geri gönderebilirsiniz."); return; }
     const sebep = window.prompt(`Form #${f.form_no || f.id} — red açıklaması:`);
     if (!sebep || !sebep.trim()) return;
-    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${isPM ? "pm-reddet" : "direktor-reddet"}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
-    if (!r.ok) alert("Reddedilemedi");
+    // Teknocenter zincirinde red yetkisini sunucu belirler (aşamanın onaycısı ya da Orhan)
+    const r = await fetch(`${API_BASE}/hr/masraf-form/${f.id}/${f.tekno || isPM ? "pm-reddet" : "direktor-reddet"}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Reddedilemedi"); }
     setTazele(x => x + 1);
   };
 
@@ -27805,8 +27917,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     ["arsiv", "Arşiv", 0],
   ];
   const kuyruk = [
-    ...avBana.map(t => ({ tip:"AVANS", id:t.id, ad: t.personel_ad || t.talep_eden_ad, alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "), tutar: t.tutar, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, obj: t })),
-    ...mfBana.map(f => ({ tip:"MASRAF", id:f.id, ad: f.talep_eden_ad, alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`, tutar: f.toplam_tutar, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, obj: f, arsiv: f.durum === "TAMAMLANDI" })),
+    ...avBana.map(t => ({ tip:"AVANS", id:t.id, ad: t.personel_ad || t.talep_eden_ad, alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "), tutar: t.tutar, adim: t.tekno ? teknoAdimNo(t.tekno) : (AV_ADIM[t.durum] ?? 0), et: t.tekno ? teknoEtiketler(t.tekno) : AV_ET, tarih: t.tarih, obj: t })),
+    ...mfBana.map(f => ({ tip:"MASRAF", id:f.id, ad: f.talep_eden_ad, alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`, tutar: f.toplam_tutar, adim: f.tekno ? teknoAdimNo(f.tekno) : (MF_ADIM[f.durum] ?? 0), et: f.tekno ? teknoEtiketler(f.tekno) : MF_ET, tarih: f.created_at, obj: f, arsiv: f.durum === "TAMAMLANDI" })),
   ].sort((a, b) => gun(b.tarih) - gun(a.tarih));
   /* Bir kayıt hangi adımdaysa onayı kimde bekliyor (10.09.2026) — "başkasında
      bekleyen" listesi bunu isimle gösterir, kimseyi aramaya gerek kalmaz. */
@@ -27818,11 +27930,13 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     ...avBekleyen.filter(t => !avansBana(t)).map(t => ({ tip:"AVANS", id: t.id, ad: t.personel_ad || t.talep_eden_ad,
       benim: _benimMi(t.talep_eden_email, t.personel_ad || t.talep_eden_ad),
       alt: [t.bolge, t.proje].filter(Boolean).join(" · "), ne: [t.gider_turu, t.plaka, t.aciklama].filter(Boolean).join(" · "),
-      tutar: t.tutar, durum: t.durum, adim: AV_ADIM[t.durum] ?? 0, et: AV_ET, tarih: t.tarih, kimde: KIMDE_AVANS[t.durum] || "—" })),
+      tutar: t.tutar, durum: t.durum, adim: t.tekno ? teknoAdimNo(t.tekno) : (AV_ADIM[t.durum] ?? 0), et: t.tekno ? teknoEtiketler(t.tekno) : AV_ET, tarih: t.tarih,
+      kimde: t.tekno ? teknoBekleyenMetni(t.tekno) || "—" : KIMDE_AVANS[t.durum] || "—" })),
     ...mfBekleyen.filter(f => !masrafBana(f)).map(f => ({ tip:"MASRAF", id: f.id, ad: f.talep_eden_ad,
       benim: _benimMi(f.talep_eden_email, f.talep_eden_ad),
       alt: `Form #${f.form_no || f.id} · ${f.donem || ""}`, ne: `${f.kalem_sayisi || 0} kalem`,
-      tutar: f.toplam_tutar, durum: f.durum, adim: MF_ADIM[f.durum] ?? 0, et: MF_ET, tarih: f.created_at, kimde: KIMDE_MASRAF[f.durum] || "—" })),
+      tutar: f.toplam_tutar, durum: f.durum, adim: f.tekno ? teknoAdimNo(f.tekno) : (MF_ADIM[f.durum] ?? 0), et: f.tekno ? teknoEtiketler(f.tekno) : MF_ET, tarih: f.created_at,
+      kimde: f.tekno ? teknoBekleyenMetni(f.tekno) || "—" : KIMDE_MASRAF[f.durum] || "—" })),
   ].sort((a, b) => (b.benim ? 1 : 0) - (a.benim ? 1 : 0) || gun(b.tarih) - gun(a.tarih));
   const DURUM_AD = { TALEP:"Rollout onayı", ROLLOUT_MUDUR_ONAY:"PM onayı", PM_ONAY:"Direktör onayı", DIREKTOR_ONAY:"Muhasebe", MUHASEBE_ONAY:"Muhasebe", ROLLOUT_BEKLE:"Rollout onayı", MUHASEBE_BEKLE:"Muhasebe kontrolü", PM_BEKLE:"PM onayı", DIREKTOR_BEKLE:"Direktör onayı", TAMAMLANDI:"Ödeme / arşiv" };
 
@@ -27890,8 +28004,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                         <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
                         <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
                         <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}>
-                          {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>✓ Onayla</button> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}
-                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setFormModal({ id: r.id })} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(isPM || isDirektor) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {!isRequester && r.tip === "AVANS" && <><button onClick={() => avansOnayla(r.obj)} title={r.obj.tekno ? teknoBekleyenMetni(r.obj.tekno) : undefined} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.obj.tekno?.asama === "ODE" ? "💸 Ödendi" : r.obj.tekno?.vekalet ? "✓ Onayla (İlhami aşaması)" : "✓ Onayla"}</button>{!r.obj.tekno?.vekalet && <> <button onClick={() => avansReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
+                          {!isRequester && r.tip === "MASRAF" && <><button onClick={() => setFormModal({ id: r.id })} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#0f1c2e", border:"1px solid #cfd7e2" }}>İncele</button> <button onClick={() => masrafOnayla(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#15803d", color:"#fff" }}>{r.arsiv ? "💸 Ödendi · Arşivle" : "✓ Onayla"}</button>{(r.obj.tekno ? !r.obj.tekno.vekalet : (isPM || isDirektor)) && !r.arsiv && <> <button onClick={() => masrafReddet(r.obj)} style={{ ...btn, padding:"5px 10px", fontSize:"12px", background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>Reddet</button></>}</>}
                           {isRequester && <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[r.durum] || r.durum}</span>}
                         </td>
                       </tr>
@@ -27959,7 +28073,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
           : f.durum === "ARSIVLENDI" ? <span style={pill("#ccfbf1", "#0f766e")}>Ödendi · arşiv</span>
           : <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[f.durum] || f.durum}</span>;
         const mfKimde = (f) => f.durum === "TASLAK" ? (iadeMi(f) ? "Sizde — düzeltme bekleniyor" : "Sizde")
-          : ["REDDEDILDI", "ARSIVLENDI"].includes(f.durum) ? "—" : (KIMDE_MASRAF[f.durum] || "—");
+          : ["REDDEDILDI", "ARSIVLENDI"].includes(f.durum) ? "—" : f.tekno ? (teknoBekleyenMetni(f.tekno) || "—") : (KIMDE_MASRAF[f.durum] || "—");
         const avDurum = (t) => t.durum === "TAMAMLANDI" ? <span style={pill("#ccfbf1", "#0f766e")}>Ödendi</span>
           : t.durum === "REDDEDILDI" ? <span style={pill("#fee2e2", "#b91c1c")}>Reddedildi</span>
           : <span style={pill("#dbeafe", "#1d4ed8")}>{DURUM_AD[t.durum] || t.durum}</span>;
@@ -28087,7 +28201,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                         <td style={{ ...td, maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={[t.aciklama, t.not_aciklama].filter(Boolean).join(" · ")}>{[t.bolge, t.proje].filter(Boolean).join(" · ")}{t.aciklama ? <div style={{ fontSize:"11.5px", color:"#6b7a90", overflow:"hidden", textOverflow:"ellipsis" }}>{t.aciklama}</div> : null}</td>
                         <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{fmt(t.tutar)}</td>
                         <td style={td}>{avDurum(t)}{t.durum === "REDDEDILDI" && t.red_aciklama && <div style={{ fontSize:"11.5px", color:"#b91c1c", marginTop:"4px" }}>{t.red_aciklama}</div>}</td>
-                        <td style={td}>{AV_BEKLEYEN.includes(t.durum) ? <><div style={{ fontSize:"12.5px", fontWeight:600 }}>{KIMDE_AVANS[t.durum] || "—"}</div><div style={{ marginTop:"4px" }}><Adimlar idx={AV_ADIM[t.durum] ?? 0} etiketler={AV_ET} /></div></> : "—"}</td>
+                        <td style={td}>{AV_BEKLEYEN.includes(t.durum) ? <><div style={{ fontSize:"12.5px", fontWeight:600 }}>{t.tekno ? teknoBekleyenMetni(t.tekno) : (KIMDE_AVANS[t.durum] || "—")}</div><div style={{ marginTop:"4px" }}><Adimlar idx={t.tekno ? teknoAdimNo(t.tekno) : (AV_ADIM[t.durum] ?? 0)} etiketler={t.tekno ? teknoEtiketler(t.tekno) : AV_ET} /></div></> : "—"}</td>
                         <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}><button onClick={() => setTab("avans")} style={bG}>Listede Gör</button></td>
                       </tr>
                     ))}
@@ -28203,12 +28317,16 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
         const kal = f?.kalemler || [];
         const toplam = kal.reduce((t, k) => t + Number(k.tutar || 0), 0);
         const d = f?.durum;
-        const rolloutAdim = d === "ROLLOUT_BEKLE" && (isNurcan || isPM || isDirektor);
-        const muhasebeAdim = d === "MUHASEBE_BEKLE" && (isMuhOnay || isPM || isDirektor);
-        const pmAdim = d === "PM_BEKLE" && isPM;
-        const direktorAdim = d === "DIREKTOR_BEKLE" && isDirektor;
-        const arsivAdim = d === "TAMAMLANDI" && (isMuhOnay || isMuhasebe);
-        const onayVar = rolloutAdim || muhasebeAdim || pmAdim || direktorAdim;
+        // 31.10.2026: Teknocenter zincirindeki formda düğmeler sunucunun zincir kararından (f.tekno); eski rol kuralı kapalı
+        const tk = f?.tekno || null;
+        const teknoAdim = !!tk && tk.benim && tk.asama !== "ODE";
+        const teknoRed = !!tk && !!tk.asama && tk.asama !== "ODE" && ((tk.benim && !tk.vekalet) || isPM);
+        const rolloutAdim = !tk && d === "ROLLOUT_BEKLE" && (isNurcan || isPM || isDirektor);
+        const muhasebeAdim = !tk && d === "MUHASEBE_BEKLE" && (isMuhOnay || isPM || isDirektor);
+        const pmAdim = !tk && d === "PM_BEKLE" && isPM;
+        const direktorAdim = !tk && d === "DIREKTOR_BEKLE" && isDirektor;
+        const arsivAdim = tk ? (d === "TAMAMLANDI" && !!tk.odeme) : (d === "TAMAMLANDI" && (isMuhOnay || isMuhasebe));
+        const onayVar = rolloutAdim || muhasebeAdim || pmAdim || direktorAdim || teknoAdim;
         const KAT_IKON = { YAKIT:"⛽", KONAKLAMA:"🏨", YEMEK:"🍽", NAKLIYE:"🚚", MALZEME:"🔧", TRAFIK_CEZA:"🚨", KOPRU_OTOYOL:"🛣", KIRTASIYE:"📎", DIGER:"📋" };
         return (
           <div style={{ position:"fixed", inset:0, background:"rgba(10,20,35,.55)", display:"flex", alignItems:"flex-start", justifyContent:"center", zIndex:700, overflowY:"auto", padding:"24px 14px" }} onClick={() => !formIslem && setFormModal(null)}>
@@ -28269,23 +28387,24 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                       style={{ width:"100%", padding:"8px 12px", border:"1px solid #cfd7e2", borderRadius:"9px", fontSize:"13px", marginBottom:"10px", boxSizing:"border-box" }} />
                   )}
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
-                    <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Akış: Rollout → Muhasebe → PM → Direktör → Ödeme/Arşiv</div>
+                    <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>{tk ? <TeknoZincirSatiri tk={tk} /> : "Akış: Rollout → Muhasebe → PM → Direktör → Ödeme/Arşiv"}</div>
                     <div style={{ display:"flex", gap:"8px", flexWrap:"wrap" }}>
                       <button onClick={() => { setInceleFormId(formModal.id); setFormModal(null); setTab("masraf"); }} style={{ ...btn, background:"#fff", color:"#3c4a5d", border:"1px solid #cfd7e2" }}>Tam sayfada aç</button>
-                      {(isPM || isDirektor || isNurcan || isMuhOnay) && !arsivAdim && (
+                      {(tk ? teknoRed : (isPM || isDirektor || isNurcan || isMuhOnay)) && !arsivAdim && (
                         <button disabled={formIslem} onClick={() => {
                           const t = window.prompt("Personele geri gönderme açıklaması (neyi düzeltecek?):");
                           if (!t || !t.trim()) return;
                           formAksiyon("geri-gonder", { aciklama: t, gonderen_email: _email });
                         }} style={{ ...btn, background:"#fff", color:"#b45309", border:"1px solid #fed7aa" }}>↩ Geri Gönder</button>
                       )}
-                      {(isPM || isDirektor) && !arsivAdim && (
+                      {(tk ? teknoRed : (isPM || isDirektor)) && !arsivAdim && (
                         <button disabled={formIslem} onClick={() => {
                           const t = window.prompt("Red açıklaması:");
                           if (!t || !t.trim()) return;
-                          formAksiyon(isPM ? "pm-reddet" : "direktor-reddet", { red_aciklama: t, reddeden_email: _email });
+                          formAksiyon(tk || isPM ? "pm-reddet" : "direktor-reddet", { red_aciklama: t, reddeden_email: _email });
                         }} style={{ ...btn, background:"#fff", color:"#b91c1c", border:"1px solid #fecaca" }}>✕ Reddet</button>
                       )}
+                      {teknoAdim && <button disabled={formIslem} onClick={() => formAksiyon("onayla", { not: formNot }, tk.vekalet ? `Bu form İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?` : null)} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla ({tk.vekalet ? "İlhami aşaması · muhasebe yetkisiyle" : tk.asama_tr})</button>}
                       {rolloutAdim && <button disabled={formIslem} onClick={() => formAksiyon("rollout-onayla", { rollout_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (Rollout)</button>}
                       {muhasebeAdim && <button disabled={formIslem} onClick={() => formAksiyon("muhasebe-onayla", { muhasebe_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (Muhasebe)</button>}
                       {pmAdim && <button disabled={formIslem} onClick={() => formAksiyon("pm-onayla", { pm_not: formNot })} style={{ ...btn, background:"#15803d", color:"#fff" }}>✓ Onayla (PM)</button>}
@@ -28757,7 +28876,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   // isRequester: sadece kendi avanslarını görür.
   // Alt marka (AHY) panelinde yalnız YÖNETİCİ hesabı tam listeyi görür;
   // markalı personel (ör. saha ekibi) kendi kayıtlarıyla sınırlıdır (17.08.2026).
-  const _altMarkaYonetici = _altMarka && (["admin","direktor","genel_mudur"].includes(_role) || _email === "info@ahyelektrik.com" || _email === "teknocenter");
+  const _altMarkaYonetici = _altMarka && (["admin","direktor","genel_mudur","firma_muhasebe"].includes(_role) || _email === "info@ahyelektrik.com" || _email === "teknocenter");
   const isRequester = !_altMarkaYonetici && !isPM && !isDirektor && !isMuhasebe && !isNurcan && !isRolloutMudur;
   // 20.10.2026 (Orhan): liste kapsamı — Benim Kayıtlarım / Onayımı Bekleyen / Tüm Kayıtlar (talep edene yalnız kendi kayıtları)
   const [kapsam, setKapsam] = useState(isRequester ? "BENIM" : (initialKapsam || "BENIM"));
@@ -28767,7 +28886,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   // Benim: avans benim üzerimde (personel adım) ya da personel seçilmeden kendi adıma açtığım talep
   const benimMi = (t) => t.personel_ad ? (_adBenim(t.personel_ad) || (!!_email && String(t.personel_email || "").toLowerCase().trim() === _email))
     : (!!_email && String(t.talep_eden_email || "").toLowerCase().trim() === _email) || _adBenim(t.talep_eden_ad);
-  const bendeBekliyor = (t) => (isRolloutMudur && t.durum === "TALEP") || (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) || (isDirektor && t.durum === "PM_ONAY") || (isMuhasebe && t.durum === "DIREKTOR_ONAY");
+  // 31.10.2026: Teknocenter zincirindeki talepte "bende mi" kararı sunucudan (t.tekno.benim)
+  const bendeBekliyor = (t) => t.tekno ? !!t.tekno.benim : (isRolloutMudur && t.durum === "TALEP") || (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) || (isDirektor && t.durum === "PM_ONAY") || (isMuhasebe && t.durum === "DIREKTOR_ONAY");
   const [filterDonem, setFilterDonem] = useState(""); // talep tarihi ayı (YYYY-MM)
   const [filterFirma, setFilterFirma] = useState("");
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
@@ -28832,7 +28952,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     let data = await r.json();
     // Alt marka YÖNETİCİ görünümü: yalnız kendi firması seçilen avanslar.
     // Personel (requester) kendi TÜM geçmişini görür — bakiye kartıyla tutarlı (17.08.2026).
-    if (_altMarka && !isRequester) data = (Array.isArray(data) ? data : []).filter(t => String(t.firma || "").toUpperCase() === _marka);
+    // Teknocenter zincirindeki talep (t.tekno) kasa seçimi beklemeden de firmanın kapsamındadır (sunucu süzer)
+    if (_altMarka && !isRequester) data = (Array.isArray(data) ? data : []).filter(t => t.tekno || String(t.firma || "").toUpperCase() === _marka);
     data = adlariTeklestir(data, ["personel_ad", "talep_eden_ad"]);
     setList(data);
     if (onPendingCount) {
@@ -28969,6 +29090,15 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     load(); loadBakiye();
   };
 
+  // Teknocenter zinciri: tek uç, kasa seçimi yok (ödeme kaynağı sunucuda Teknocenter'a kilitli); vekâlet ve ödeme ayrıca sorulur
+  const teknoOnayla = async (t) => {
+    const tk = t.tekno;
+    if (tk.asama === "ODE" && !window.confirm(`${t.personel_ad || t.talep_eden_ad} · ₺${Number(t.tutar).toLocaleString("tr-TR")} Teknocenter hesabından ÖDENDİ olarak işaretlensin mi? Personelin iş avansı hareketi bir kez yazılır.`)) return;
+    if (tk.vekalet && !window.confirm(`Bu talep İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?`)) return;
+    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/onayla`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" }, body: JSON.stringify({ beklenen_durum: t.durum }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onay yapılamadı"); }
+    load(); loadBakiye();
+  };
   const handleOnayla = async (id) => {
     if (_firmaSecimGerekli(id)) { setFirmaModal({ id, action: "onayla" }); return; }
     await _approve(id, "onayla");
@@ -29037,7 +29167,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
 
   const cardSt = { background: "#fff", borderRadius: "16px", boxShadow: "0 4px 20px rgba(0,0,0,0.07)", border: "1px solid #f3f4f6", padding: "24px" };
 
-  const myPendingCount =
+  const myPendingCount = list.some(t => t.tekno) ? list.filter(bendeBekliyor).length :
     isRolloutMudur ? list.filter(t => t.durum === "TALEP").length :
     isPM           ? list.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length :
     isDirektor     ? list.filter(t => t.durum === "PM_ONAY").length :
@@ -29278,7 +29408,9 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
       {mode !== "odemeler" && (<>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         {embedded
-          ? <div style={{ fontSize:"13px", color:"#6b7a90" }}>Talep ve onay zinciri: Rollout müdürü → PM → Direktör → Muhasebe · ödenen avans personelin üzerine yazılır, masraf formuyla kapanır</div>
+          ? <div style={{ fontSize:"13px", color:"#6b7a90" }}>{_marka === "TEKNO" && _altMarka
+              ? "Teknocenter onay zinciri: Bölge müdürü (Serdar / Nurcan) → Orhan Bedir → İlhami Şahin → Teknocenter muhasebesi (ödeme) · depo personeli ve Hatice Omuş doğrudan Orhan"
+              : "Talep ve onay zinciri: Rollout müdürü → PM → Direktör → Muhasebe · ödenen avans personelin üzerine yazılır, masraf formuyla kapanır"}</div>
           : <h2 style={{ margin: 0, fontSize: isMobile?"18px":"22px", fontWeight: 700 }}>🏗 İş Avansı</h2>}
         <div style={{ display: "flex", gap: "8px" }}>
           {!isMobile && (() => {
@@ -29495,7 +29627,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
           {visibleList.length === 0 && <div style={{ textAlign:"center", color:"#9ca3af", padding:"32px" }}>Kayıt bulunamadı</div>}
           {visibleList.map(t => {
-            const needsMyAction =
+            const needsMyAction = t.tekno ? !!t.tekno.benim :
               (isRolloutMudur && t.durum==="TALEP") ||
               (isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY")) ||
               (isDirektor && t.durum==="PM_ONAY") ||
@@ -29517,7 +29649,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                     <div style={{ fontSize:"12px", color:"#6b7280" }}>{formatDateOnly(t.tarih)}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    {durumBadge(t.durum)}
+                    {t.tekno ? <TeknoDurumRozeti tk={t.tekno} /> : durumBadge(t.durum)}
                     <div style={{ fontWeight:800, fontSize:"16px", color:"#1e3a5f", marginTop:"4px" }}>₺{Number(t.tutar).toLocaleString("tr-TR")}</div>
                   </div>
                 </div>
@@ -29542,29 +29674,30 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   {isPM && t.durum!=="DIREKTOR_ONAY" && t.durum!=="TAMAMLANDI" && (
                     <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
                   )}
+                  {t.tekno && <TeknoAvansDugmeleri t={t} isPM={isPM} onOnayla={teknoOnayla} onReddet={(id)=>{setRedModal(id);setRedText("");}} kucuk={false} />}
                   {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
-                  {isRolloutMudur && t.durum==="TALEP" && (
+                  {!t.tekno && isRolloutMudur && t.durum==="TALEP" && (
                     <>
                       <button onClick={()=>handleOnayla(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
                   {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
-                  {isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY") && (
+                  {!t.tekno && isPM && (t.durum==="TALEP" || t.durum==="ROLLOUT_MUDUR_ONAY") && (
                     <>
                       <button onClick={()=>handlePmDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                     </>
                   )}
                   {/* Direktör: PM_ONAY veya önceki aşamalardan doğrudan onay */}
-                  {isDirektor && (t.durum==="PM_ONAY" || t.durum==="ROLLOUT_MUDUR_ONAY" || t.durum==="TALEP") && (
+                  {!t.tekno && isDirektor && (t.durum==="PM_ONAY" || t.durum==="ROLLOUT_MUDUR_ONAY" || t.durum==="TALEP") && (
                     <>
                       <button onClick={()=>handleDirektorDogrudan(t.id)} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Onayla</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
                       <button onClick={()=>setEditAvansModal({ id:t.id, tutar:t.tutar, orijinalTutar:t.tutar })} style={{ padding:"6px 14px", background:"#fef3c7", color:"#92400e", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>✏️ Düzenle</button>
                     </>
                   )}
-                  {isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
+                  {!t.tekno && isMuhasebe && t.durum==="DIREKTOR_ONAY" && (
                     <>
                       <button onClick={()=>{if(window.confirm("Tamamlandı olarak işaretlensin mi?"))handleOnayla(t.id);}} style={{ padding:"6px 14px", background:"#dcfce7", color:"#166534", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Ödendi</button>
                       <button onClick={()=>{setRedModal(t.id);setRedText("");}} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Reddet</button>
@@ -29591,7 +29724,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                 <tr><td colSpan={10} style={{ padding: "32px", textAlign: "center", color: "#9ca3af" }}>Kayıt bulunamadı</td></tr>
               )}
               {visibleList.map((t, i) => {
-                const needsMyAction =
+                const needsMyAction = t.tekno ? !!t.tekno.benim :
                   (isRolloutMudur && t.durum === "TALEP") ||
                   (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) ||
                   (isDirektor && t.durum === "PM_ONAY") ||
@@ -29630,11 +29763,11 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                     {t.red_aciklama && <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Red: {t.red_aciklama}</div>}
                   </td>
                   <td style={{ padding: "8px 9px" }}>
-                    {durumBadge(t.durum)}
+                    {t.tekno ? <TeknoDurumRozeti tk={t.tekno} /> : durumBadge(t.durum)}
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
                     {myPendingRequest && !needsMyAction && (
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>
-                        🕐 {t.durum === "TALEP" ? "Rollout Müdür onayı bekleniyor" : t.durum === "ROLLOUT_MUDUR_ONAY" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
+                        🕐 {t.tekno ? teknoBekleyenMetni(t.tekno) : t.durum === "TALEP" ? "Rollout Müdür onayı bekleniyor" : t.durum === "ROLLOUT_MUDUR_ONAY" ? "PM onayı bekleniyor" : t.durum === "PM_ONAY" ? "Direktör onayı bekleniyor" : "Ödeme bekleniyor"}
                       </div>
                     )}
                   </td>
@@ -29650,28 +29783,29 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                       {isPM && t.durum !== "DIREKTOR_ONAY" && t.durum !== "TAMAMLANDI" && (
                         <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
                       )}
+                      {t.tekno && <TeknoAvansDugmeleri t={t} isPM={isPM} onOnayla={teknoOnayla} onReddet={(id) => { setRedModal(id); setRedText(""); }} kucuk />}
                       {/* Rollout Manager: TALEP → ROLLOUT_MUDUR_ONAY */}
-                      {isRolloutMudur && t.durum === "TALEP" && (
+                      {!t.tekno && isRolloutMudur && t.durum === "TALEP" && (
                         <>
                           <button onClick={() => handleOnayla(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
                       {/* PM: TALEP veya ROLLOUT_MUDUR_ONAY → PM_ONAY (doğrudan) */}
-                      {isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY") && (
+                      {!t.tekno && isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY") && (
                         <>
                           <button onClick={() => handlePmDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                         </>
                       )}
-                      {isDirektor && t.durum === "PM_ONAY" && (
+                      {!t.tekno && isDirektor && t.durum === "PM_ONAY" && (
                         <>
                           <button onClick={() => handleDirektorDogrudan(t.id)} style={{ padding: "4px 10px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Onayla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
                           <button onClick={() => setEditAvansModal({ id: t.id, tutar: t.tutar, orijinalTutar: t.tutar })} style={{ padding: "4px 10px", background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>✏️ Düzenle</button>
                         </>
                       )}
-                      {isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
+                      {!t.tekno && isMuhasebe && t.durum === "DIREKTOR_ONAY" && (
                         <>
                           <button onClick={() => { if (window.confirm("Bu talebi tamamlandı olarak işaretleyeceksiniz. Onaylıyor musunuz?")) handleOnayla(t.id); }} style={{ padding: "4px 12px", background: "#dcfce7", color: "#166534", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Ödendi / Tamamla</button>
                           <button onClick={() => { setRedModal(t.id); setRedText(""); }} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Reddet</button>
@@ -39302,15 +39436,17 @@ function App() {
           const role  = (user.role  || "").toLowerCase();
           const isRM  = role === "rollout_mudur" || role === "bolge_mudur";
           let count = 0;
+          // 31.10.2026: Teknocenter zinciri satırları sunucu kararıyla (t.tekno.benim) sayılır; eski rol kuralı yalnız zincir dışı satırlarda
+          const zd = data.filter(t => !t.tekno), zBen = data.filter(t => t.tekno?.benim).length;
           if (email === "orhan.bedir@simsektel.com")
-            count = data.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
+            count = zd.filter(t => t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY").length;
           else if (email === "duzgun.simsek@simsektel.com")
-            count = data.filter(t => t.durum === "PM_ONAY").length;
+            count = zd.filter(t => t.durum === "PM_ONAY").length;
           else if (email === "muhasebe@simsektel.com" || role === "muhasebe")
-            count = data.filter(t => t.durum === "DIREKTOR_ONAY").length;
+            count = zd.filter(t => t.durum === "DIREKTOR_ONAY").length;
           else if (isRM)
-            count = data.filter(t => t.durum === "TALEP").length;
-          setPendingAvansCount(count);
+            count = zd.filter(t => t.durum === "TALEP").length;
+          setPendingAvansCount(count + zBen);
         }
         // Masraf formu bekleyenleri say
         const mr = await fetch(`${API_BASE}/hr/masraf-form`, { headers: { Authorization: `Bearer ${token}` } });
@@ -39318,12 +39454,13 @@ function App() {
         if (Array.isArray(mdata)) {
           const email = user.email;
           let mc = 0;
-          if (email === "orhan.bedir@simsektel.com") mc = mdata.filter(f => f.durum === "PM_BEKLE").length;
-          else if (email === "duzgun.simsek@simsektel.com") mc = mdata.filter(f => f.durum === "DIREKTOR_BEKLE").length;
-          else if (email === "nurcan.kus@simsektel.com") mc = mdata.filter(f => f.durum === "ROLLOUT_BEKLE").length;
-          else if (email === "tugce.yelmen@simsektel.com") mc = mdata.filter(f => ["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length;
-          else if (email === "muhasebe@simsektel.com" || (user?.role || "") === "muhasebe") mc = mdata.filter(f => f.durum === "TAMAMLANDI").length;
-          setPendingMasrafCount(mc);
+          const md = mdata.filter(f => !f.tekno), mBen = mdata.filter(f => f.tekno?.benim).length; // zincir satırı: sunucu kararı
+          if (email === "orhan.bedir@simsektel.com") mc = md.filter(f => f.durum === "PM_BEKLE").length;
+          else if (email === "duzgun.simsek@simsektel.com") mc = md.filter(f => f.durum === "DIREKTOR_BEKLE").length;
+          else if (email === "nurcan.kus@simsektel.com") mc = md.filter(f => f.durum === "ROLLOUT_BEKLE").length;
+          else if (email === "tugce.yelmen@simsektel.com") mc = md.filter(f => ["MUHASEBE_BEKLE","TAMAMLANDI"].includes(f.durum)).length;
+          else if (email === "muhasebe@simsektel.com" || (user?.role || "") === "muhasebe") mc = md.filter(f => f.durum === "TAMAMLANDI").length;
+          setPendingMasrafCount(mc + mBen);
         }
         // Malzeme talebi bekleyenleri say
         try {
@@ -40096,6 +40233,11 @@ function App() {
     );
   }
 
+  // 31.10.2026: Firma muhasebesi (role='firma_muhasebe', ör. Tekno_Muhasebe) — yalnız kendi firmasının iş avansı / masraf /
+  // personel ödemesi; izinli yollar ve firma kapsamı sunucuda (teknoOnay.firmaMuhasebeKapisi + kapsam kapısı)
+  if (String(user?.role || "").toLowerCase() === "firma_muhasebe") {
+    return <FirmaMuhasebeCalismaAlani user={user} onLogout={handleLogout} setPendingAvansCount={setPendingAvansCount} setPendingMasrafCount={setPendingMasrafCount} />;
+  }
   // 21.10.2026: İSG Sorumlusu (role='isg') — rol bazlı ayrı çalışma alanı; yetkiler sunucudaki İSG kapısında
   if (String(user?.role || "").toLowerCase() === "isg") {
     return <IsgCalismaAlani user={user} page={page} setPage={setPage} onLogout={handleLogout}
@@ -40794,8 +40936,8 @@ function App() {
    satırda "Düzenle" + ⋯ menüsü (Detay-İşlem Geçmişi, Aktif Et/Pasife Al, Şifre, Sil), sağdan açılan ekle/düzenle paneli.
    Veri modeli korunur: role (erişim rolü), marka (firma: ERC/AHY/TEKNO), subcon_name (taşeron / bağlı firma), tenant, is_active.
    Yetki: tam admin her şeyi yapar; kısıtlı kullanıcı yöneticisi (users_admin) yalnız ekler, şifre belirler ve detay görür. */
-const ADM_ROL_TR = { isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
-const ADM_ROL_SECENEK = ["user", "isg", "subcon", "admin", "rollout_mudur", "pm", "direktor", "muhasebe"]; // sunucunun /role ucunda kabul ettiği roller (genel_mudur yalnız mevcut kayıtta korunur)
+const ADM_ROL_TR = { firma_muhasebe: "Firma Muhasebesi (alt marka)", isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
+const ADM_ROL_SECENEK = ["user", "isg", "subcon", "admin", "rollout_mudur", "pm", "direktor", "muhasebe", "firma_muhasebe"]; // sunucunun /role ucunda kabul ettiği roller (genel_mudur yalnız mevcut kayıtta korunur)
 const admNorm = (v) => String(v || "").toLocaleLowerCase("tr-TR").replace(/ı/g, "i").replace(/i̇/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").normalize("NFD").replace(/[̀-ͯ]/g, "");
 // Sayıya Türkçe iyelik eki (12’si, 30’u, 40’ı, 100’ü): sonuç sayacı doğru okunsun
 const admSayiEki = (n) => { const a = Math.abs(Number(n) || 0); if (a === 0) return "ı"; const b = a % 10 || (a % 100) || (a % 1000) || a; const t = { 1: "i", 2: "si", 3: "ü", 4: "ü", 5: "i", 6: "sı", 7: "si", 8: "i", 9: "u", 10: "u", 20: "si", 30: "u", 40: "ı", 50: "si", 60: "ı", 70: "i", 80: "i", 90: "ı", 100: "ü", 1000: "i" }; return t[a % 10 ? a % 10 : (a % 100 ? a % 100 : (a % 1000 ? a % 1000 : 1000))] || "i"; };

@@ -106,19 +106,34 @@ function kur(app, c) {
   }
 
   // ── Bekleyen işlemler: kullanıcının ŞU AN işlem yapabileceği kayıtlar (mobil Onaylar + ana sayfa sayacı) ──
+  // 31.10.2026: Teknocenter onay zinciri (teknoOnay) bağlanınca zincirdeki kayıtlar eski listelerle DEĞİL, zincirin o anki
+  // aşamasına göre listelenir (ekip şefi / bölge müdürü / Orhan / İlhami / muhasebe vekâleti). Alt marka kullanıcısı eski
+  // listelerden yalnız kendi firmasının kayıtlarını görür (ör. ortak 'teknocenter' hesabı Şimşek talebini görmez).
+  let tekno = null;
+  const teknoBagla = (t) => { tekno = t; };
+  const kendiFirmasi = (u, firma) => !c.altMarkaKullanicisi(u) || firmaKodu(u.marka) === firma;
   async function avansBekleyenler(req) {
     const u = req.user || {};
     const rm = c.eskiAvansYetkisi(req, "RM"), pm = c.eskiAvansYetkisi(req, "PM"), pdEski = c.eskiAvansYetkisi(req, "PD");
     const devirPd = (req.devirler || []).filter((d) => d.adim === "AVANS_PD").map((d) => firmaKodu(d.firma));
-    if (!rm && !pm && !pdEski && !devirPd.length) return { rows: [], yetkili: false, hatalar: [] };
+    const eskiYetki = rm || pm || pdEski || devirPd.length > 0;
+    const zincir = tekno ? new Map((await tekno.bekleyenler(req, "avans")).map((x) => [Number(x.id), x.tekno])) : new Map();
+    if (!eskiYetki && !zincir.size) return { rows: [], yetkili: false, hatalar: [] };
     const r = await pool.query(`SELECT t.id, t.tutar, t.aciklama, t.not_aciklama, t.gider_turu, t.bolge, t.proje, t.durum, t.tarih, t.created_at,
         t.talep_eden_ad, t.talep_eden_email, t.plaka, t.arac_km, t.firma, p.ad_soyad AS personel_ad, p.unvan AS personel_unvan, ${avansFirmaSql("t", "p")} AS talep_firma
       FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
-      WHERE t.durum IN ('TALEP','ROLLOUT_MUDUR_ONAY','PM_ONAY') ${c.pmKisiselEmailGorur(_eposta(u), _rol(u)) ? "" : `AND NOT ${c.pmAvansSahibiSql("t", "p")}`}
-      ORDER BY t.created_at ASC LIMIT 100`);
+      WHERE (t.durum IN ('TALEP','ROLLOUT_MUDUR_ONAY','PM_ONAY') ${c.pmKisiselEmailGorur(_eposta(u), _rol(u)) ? "" : `AND NOT ${c.pmAvansSahibiSql("t", "p")}`})
+      ORDER BY t.created_at ASC LIMIT 300`);
+    const zincirdeki = tekno ? await tekno.zincirKimlikleri("avans", r.rows.map((x) => x.id)) : new Set();
     const rows = [], hatalar = [];
     for (const x of r.rows) {
       const firma = firmaKodu(x.talep_firma);
+      if (zincirdeki.has(Number(x.id))) {
+        const tk = zincir.get(Number(x.id));
+        if (tk) rows.push({ ...x, tutar: Number(x.tutar), talep_firma: firma, adim: tk.asama, uc: "onayla", akis: "TEKNO", onay_kaynagi: tk.vekalet ? "muhasebe_vekalet" : "zincir", asama_tr: tk.asama_tr });
+        continue;
+      }
+      if (!eskiYetki || !kendiFirmasi(u, firma)) continue;
       const pd = await avansPdYetkisi(req, firma);
       if (pd.hata && (pdEski || devirPd.includes(firma)) && !hatalar.includes(pd.hata)) hatalar.push(pd.hata);
       let adim = null, uc = null;
@@ -129,6 +144,7 @@ function kur(app, c) {
       else if (x.durum === "TALEP" && pm) { adim = "PM"; uc = "onayla"; } // PM, RM adımını da kapsar (mevcut zincir)
       if (!adim) continue;
       rows.push({ ...x, tutar: Number(x.tutar), talep_firma: firma, adim, uc, onay_kaynagi: adim === "PD" ? pd.kaynak : "eski" });
+      if (rows.length >= 100) break;
     }
     return { rows, yetkili: true, hatalar };
   }
@@ -139,16 +155,26 @@ function kur(app, c) {
     const devirPd = (req.devirler || []).filter((d) => d.adim === "MASRAF_PD").map((d) => firmaKodu(d.firma));
     const durumlar = Object.entries(kap).filter(([, v]) => v).map(([k]) => k);
     if (pdEski || devirPd.length) durumlar.push("DIREKTOR_BEKLE");
-    if (!durumlar.length) return { rows: [], yetkili: false, hatalar: [] };
+    const zincir = tekno ? new Map((await tekno.bekleyenler(req, "masraf")).map((x) => [Number(x.id), x.tekno])) : new Map();
+    if (!durumlar.length && !zincir.size) return { rows: [], yetkili: false, hatalar: [] };
     const r = await pool.query(`SELECT mf.id, mf.form_no, mf.donem, mf.durum, mf.created_at, mf.talep_eden_ad, mf.talep_eden_email, mf.personel_id,
         p.ad_soyad AS personel_ad, ${masrafFirmaSql("mf", "p")} AS talep_firma,
         COALESCE((SELECT SUM(mk.tutar) FROM masraf_kalem mk WHERE mk.form_id = mf.id),0) AS tutar,
         COALESCE((SELECT COUNT(*) FROM masraf_kalem mk WHERE mk.form_id = mf.id),0)::int AS kalem,
         COALESCE((SELECT COUNT(*) FROM masraf_belge mb JOIN masraf_kalem mk ON mk.id = mb.kalem_id WHERE mk.form_id = mf.id),0)::int AS belge
-      FROM masraf_form mf LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.durum = ANY($1) ORDER BY mf.created_at ASC LIMIT 100`, [durumlar]);
+      FROM masraf_form mf LEFT JOIN personel p ON p.id = mf.personel_id WHERE mf.durum = ANY($1) OR mf.id = ANY($2) ORDER BY mf.created_at ASC LIMIT 300`,
+      [durumlar, [...zincir.keys()]]);
+    const zincirdeki = tekno ? await tekno.zincirKimlikleri("masraf", r.rows.map((x) => x.id)) : new Set();
     const rows = [], hatalar = [];
     for (const x of r.rows) {
       const firma = firmaKodu(x.talep_firma);
+      if (zincirdeki.has(Number(x.id))) {
+        const tk = zincir.get(Number(x.id));
+        if (tk) rows.push({ ...x, tutar: Number(x.tutar), talep_firma: firma, adim: { ORG: "ORG", RM: "ROLLOUT", PM: "PM", PD: "DIREKTOR" }[tk.asama] || tk.asama,
+          uc: "onayla", akis: "TEKNO", onay_kaynagi: tk.vekalet ? "muhasebe_vekalet" : "zincir", asama_tr: tk.asama_tr });
+        continue;
+      }
+      if (!durumlar.includes(x.durum) || !kendiFirmasi(u, firma)) continue;
       if (x.durum === "DIREKTOR_BEKLE") {
         const pd = await masrafPdYetkisi(req, firma);
         if (pd.hata && (pdEski || devirPd.includes(firma)) && !hatalar.includes(pd.hata)) hatalar.push(pd.hata);
@@ -157,6 +183,7 @@ function kur(app, c) {
       } else {
         rows.push({ ...x, tutar: Number(x.tutar), talep_firma: firma, adim: { ROLLOUT_BEKLE: "ROLLOUT", MUHASEBE_BEKLE: "MUHASEBE", PM_BEKLE: "PM" }[x.durum], onay_kaynagi: "eski" });
       }
+      if (rows.length >= 100) break;
     }
     return { rows, yetkili: true, hatalar };
   }
@@ -173,8 +200,10 @@ function kur(app, c) {
     const uid = _uid(u);
     const devirler = uid ? await kullaniciDevirleri(uid) : [];
     const planli = uid ? await kullaniciPlanli(uid) : [];
-    const avans = ["RM", "PM", "PD"].some((a) => c.eskiAvansYetkisi(req, a)) || devirler.some((d) => d.adim === "AVANS_PD");
-    const masraf = Object.values(c.masrafAdimYetkileri(u)).some(Boolean) || c.eskiMasrafPdYetkisi(u) || devirler.some((d) => d.adim === "MASRAF_PD");
+    // 31.10.2026: Teknocenter zinciri onaycısı (ekip şefi, direktör, firma muhasebesi) — şu an bekleyen kaydı olmasa da sekme açık kalsın
+    const zincirOnaycisi = !!tekno && (["direktor", "firma_muhasebe"].includes(_rol(u)) && firmaKodu(u.marka) === "TEKNO");
+    const avans = ["RM", "PM", "PD"].some((a) => c.eskiAvansYetkisi(req, a)) || devirler.some((d) => d.adim === "AVANS_PD") || zincirOnaycisi;
+    const masraf = Object.values(c.masrafAdimYetkileri(u)).some(Boolean) || c.eskiMasrafPdYetkisi(u) || devirler.some((d) => d.adim === "MASRAF_PD") || zincirOnaycisi;
     const malzeme = !!c.malzemePmMi(u);
     const kisa = (d) => ({ firma: firmaKodu(d.firma), adim: d.adim, adim_ad: ADIMLAR[d.adim]?.ad || d.adim, baslangic: d.baslangic, bitis: d.bitis });
     return { onayci: avans || masraf || malzeme || planli.length > 0, yetkiler: { avans, masraf, malzeme }, devirler: devirler.map(kisa), planli: planli.map(kisa) };
@@ -245,7 +274,7 @@ function kur(app, c) {
   });
 
   return { ADIMLAR, firmaKodu, devirAktifMi, satirlar, sifirla, adimOnaycisi, kullaniciDevirleri, kullaniciPlanli, adimYetkisi, avansPdYetkisi, masrafPdYetkisi,
-    talepFirmasiAvans, talepFirmasiMasraf, avansBekleyenler, masrafBekleyenler, malzemeBekleyenler, onayOzeti };
+    talepFirmasiAvans, talepFirmasiMasraf, avansBekleyenler, masrafBekleyenler, malzemeBekleyenler, onayOzeti, teknoBagla };
 }
 
 module.exports = { ADIMLAR, firmaKodu, devirAktifMi, devirPlanliMi, semaKur, kur, avansFirmaSql, masrafFirmaSql };
