@@ -9,7 +9,7 @@
 --          aşamasında sayar; bu bölüm yalnız durum etiketini (eski mobil sürüm, raporlar) gerçek aşamayla eşler.
 --          Onay tarihleri / onaylayanlar DEĞİŞMEZ; ödenmiş, reddedilmiş, arşivlenmiş kayda dokunulmaz.
 --          Her değişiklik işlem geçmişine "Onay zincirine yönlendirildi" olarak, kullanıcı alanı 'sistem: tekno-onay geçişi' ile yazılır.
--- BÖLÜM 3 (YORUMDA, onaysız çalıştırma): Beyazıt Bestami Dedeoğlu talep e-postası personel kaydıyla eşleşmiyor.
+-- BÖLÜM 3 (bilgi): Beyazıt Bestami Dedeoğlu kayıt düzeltmesi 31.10.2026'da canlıda ayrıca uygulandı.
 --
 -- Uygulamadan önce önizlemeyi yeniden çalıştırın (canlı veri sürekli değişiyor). Bu dosya tek başına bir işlem (transaction) içindedir.
 
@@ -47,15 +47,12 @@ FROM _tekno_mf t;
 UPDATE masraf_form mf SET durum = 'PM_BEKLE'
 FROM _tekno_mf t WHERE mf.id = t.id AND mf.durum = 'MUHASEBE_BEKLE';
 
--- İş avansı: 31.10.2026 önizlemesinde durum hizalaması gereken talep YOK (24 talep; 18'i PM_ONAY → artık İlhami Şahin,
--- 6'sı ROLLOUT_MUDUR_ONAY → Orhan Bedir). Aşama kod tarafından hesaplanır; veri değişikliği gerekmez.
+-- İş avansı: 31.10.2026 önizlemesinde durum hizalaması gereken talep YOK (28 talep; 20'si PM_ONAY → artık İlhami Şahin,
+-- 6'sı ROLLOUT_MUDUR_ONAY → Orhan Bedir, 2'si TALEP → Nurcan Kuş). Aşama kod tarafından hesaplanır; veri değişikliği gerekmez.
 
 COMMIT;
 
--- ── BÖLÜM 3 — YORUMDA; Orhan ayrıca onaylamadan ÇALIŞTIRMAYIN ──────────────────────────────────
--- Beyazıt Bestami Dedeoğlu'nun personel kartı (personel.id 35, e-posta beyazit.bestami@simsektel.com, marka TEKNO) ile talep
--- e-postası (beyazit.bustami@simsektel.com) farklı → 2 iş avansı (1760, 1761) ve 4 masraf formu (275, 278, 280, 287) Teknocenter
--- zincirine girmiyor, eski akışta (Düzgün Şimşek) kalıyor. Seçenekler: (a) avanslara personel bağı, (b) kullanıcı e-postasının düzeltilmesi.
--- (a) örneği:
---   UPDATE is_avans_talep SET personel_id = 35 WHERE id IN (1760, 1761) AND personel_id IS NULL AND LOWER(talep_eden_email) = 'beyazit.bustami@simsektel.com';
---   UPDATE masraf_form SET personel_id = 35 WHERE form_no IN (275, 278, 280, 287) AND personel_id IS NULL AND LOWER(talep_eden_email) = 'beyazit.bustami@simsektel.com';
+-- ── BÖLÜM 3 — 31.10.2026'DA CANLIDA UYGULANDI (Orhan talimatı: "düzelt haber edersin"); tekrar çalıştırmayın ──────────
+-- Beyazıt Bestami Dedeoğlu: personel kartı (35) e-postası giriş hesabıyla eşitlendi (beyazit.bestami@ → beyazit.bustami@) ve
+-- kart kullanıcı 693'e bağlandı; açık 4 iş avansı (1760, 1761, 1776, 1777) karta bağlandı (onay durumları değişmedi).
+-- Ödenmiş / reddedilmiş eski kayıtlara dokunulmadı. Yedek ve betik: Claude_Teslim/Tekno_Onay_Akisi_2026-10-31/canli_duzeltme/

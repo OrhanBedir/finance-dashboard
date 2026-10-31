@@ -14,7 +14,8 @@
 //   RM   bölge / rollout müdürü — personel kartındaki bölge (boşsa ekibin bölgesi): İzmir → Serdar Altınova,
 //        Ankara / Bursa → Nurcan Kuş. İkisine ardışık gitmez. Bölge bulunamazsa aşama atlanır → talep Orhan'a düşer.
 //   PM   Orhan Bedir
-//   PD   Teknocenter direktörü (rol 'direktor' + firma TEKNO = İlhami Şahin; firmaya tarihli onay devri varsa devralan).
+//   PD   Teknocenter direktörü (rol 'direktor' + firma TEKNO = İlhami Şahin; firmaya tarihli onay devri varsa devralan) ve
+//        İlhami ile aynı yetkideki hesaplar (TEKNO_DIREKTOR_ESDEGER: ortak 'teknocenter' hesabı — Orhan kararı 31.10.2026).
 //        Teknocenter muhasebesi (rol 'firma_muhasebe' + firma TEKNO) bu aşamayı YALNIZ Orhan onayından geçmiş talepte
 //        kendi kimliğiyle tamamlayabilir (vekâlet; işlem geçmişinde ve kayıtta ayrıca işaretlenir).
 //   ODE  Teknocenter muhasebesi: iş avansında ödeme (onay ≠ ödendi), masrafta kontrol + arşiv
@@ -35,6 +36,10 @@ const DOGRUDAN_PM = [
   { personel_id: 15, email: "hatice.omus@simsektel.com", neden: "Hatice Omuş" },
   { personel_id: 47, email: "emre.akdegirmen@simsektel.com", neden: "depo personeli (Envanter / Depo)" },
 ];
+// İlhami Şahin ile aynı (direktör aşaması) yetkideki hesaplar — users.id + e-posta ÇİFTİ. 31.10.2026 Orhan: "teknocenter hesabını
+// artık Orhan Bedir kullanacak, İlhami Bey ile aynı yetkide olsun" (canlıda id 1285, kullanıcı adı 'teknocenter', marka TEKNO).
+// Yalnız direktör aşaması: onay, red, tutar düzeltme. Orhan aşaması ve ödeme bu yetkiye dahil değil.
+const TEKNO_DIREKTOR_ESDEGER = [{ id: 1285, email: "teknocenter" }];
 const ASAMALAR = ["RM", "PM", "PD", "ODE"];
 const ASAMA_TR = {
   RM: "Bölge / rollout müdürü onayı", PM: "Orhan Bedir (PM) onayı",
@@ -117,8 +122,8 @@ function kur(app, c) {
     if (!_k.v || Date.now() - _k.t > 10000) {
       const r = await pool.query(`SELECT id, LOWER(TRIM(email)) AS email, name, LOWER(COALESCE(role,'')) AS role, UPPER(COALESCE(marka,'ERC')) AS marka
         FROM users WHERE COALESCE(is_active,true) AND COALESCE(status,'active') = 'active' AND COALESCE(role,'') <> 'subcon'
-          AND (LOWER(TRIM(email)) = ANY($1) OR (UPPER(COALESCE(marka,'')) = $2 AND LOWER(COALESCE(role,'')) IN ('direktor','firma_muhasebe')))
-        ORDER BY id`, [[...ORHAN_EMAIL, ...Object.values(BOLGE_MUDURU), ...DOGRUDAN_PM.map((d) => d.email)], FIRMA]);
+          AND (LOWER(TRIM(email)) = ANY($1) OR (UPPER(COALESCE(marka,'')) = $2 AND LOWER(COALESCE(role,'')) IN ('direktor','firma_muhasebe')) OR id = ANY($3))
+        ORDER BY id`, [[...ORHAN_EMAIL, ...Object.values(BOLGE_MUDURU), ...DOGRUDAN_PM.map((d) => d.email)], FIRMA, TEKNO_DIREKTOR_ESDEGER.map((x) => x.id)]);
       _k = { t: Date.now(), v: r.rows };
     }
     let rows = _k.v;
@@ -134,7 +139,8 @@ function kur(app, c) {
       byId, byEmail,
       orhan: rows.filter((u) => ORHAN_EMAIL.includes(u.email)),
       // Teknocenter direktörü / muhasebesi: rol + firma (kullanıcı adına bağlı değil)
-      direktor: rows.filter((u) => u.role === "direktor" && u.marka === FIRMA),
+      direktor: rows.filter((u) => (u.role === "direktor" && u.marka === FIRMA)
+        || TEKNO_DIREKTOR_ESDEGER.some((x) => x.id === u.id && x.email === u.email && u.marka === FIRMA)),
       muhasebe: rows.filter((u) => u.role === "firma_muhasebe" && u.marka === FIRMA),
     };
   }
@@ -556,4 +562,4 @@ function firmaMuhasebeKapisi(c) {
   };
 }
 
-module.exports = { semaKur, kur, kapsamKapisi, firmaMuhasebeKapisi, zincirKur, gosterge, ilkAcik, sonrakiAcik, bolgeKodu, FIRMA, ORHAN_EMAIL, BOLGE_MUDURU, DOGRUDAN_PM, ASAMA_TR, VEKALET_NOTU };
+module.exports = { TEKNO_DIREKTOR_ESDEGER, semaKur, kur, kapsamKapisi, firmaMuhasebeKapisi, zincirKur, gosterge, ilkAcik, sonrakiAcik, bolgeKodu, FIRMA, ORHAN_EMAIL, BOLGE_MUDURU, DOGRUDAN_PM, ASAMA_TR, VEKALET_NOTU };
