@@ -1254,7 +1254,8 @@ const MALI_YETKI_MATRISI = [
   { id: 6, email: "duzgun.simsek@simsektel.com", ad: "Düzgün Şimşek", kapsam: "ERC", dogrulandi: true },
   // 29.10.2026 canlı kayıttan salt-okunur doğrulandı (Orhan onayıyla): "EREN CAN ŞİMŞEK" admin, ERC; bu e-postada tek hesap.
   // erencan.simsek@simsektel.com adında bir kullanıcı yok (kodda geçen eski liste girdisi).
-  { id: 200, email: "eren.simsek@simsektel.com", ad: "Erencan Şimşek", kapsam: "ERC", dogrulandi: true },
+  // 01.11.2026 (Orhan): maaşı yalnız Orhan, Düzgün, İlhami ve teknocenter hesabı görür → Erencan maaş KAPALI (fiyat / mali tutar açık)
+  { id: 200, email: "eren.simsek@simsektel.com", ad: "Erencan Şimşek", kapsam: "ERC", dogrulandi: true, maas: false },
   // 29.10.2026 canlı kayıttan doğrulandı: "İLHAMİ ŞAHİN" direktör, marka TEKNO (alt marka), firma TEKNOCENTER; tek hesap.
   { id: 1694, email: "ilhami.sahin@simsektel.com", ad: "İlhami Şahin", kapsam: "TEKNO", dogrulandi: true },
   // 29.10.2026 (Orhan: "teknodaki yetkiyi de full aç, İlhami Şahin gibi"): Teknocenter ortak yönetim hesabı — canlı kayıttan
@@ -1263,7 +1264,8 @@ const MALI_YETKI_MATRISI = [
   // 29.10.2026 (Orhan: "AHY tarafı kendi yaptığı işleri full görebilmeli, fiyat maaşlar ne varsa"): AHY Elektrik yönetim hesabı —
   // canlı kayıttan salt-okunur doğrulandı: id 359, info@ahyelektrik.com, admin, marka AHY; AHY markasında tek yönetim hesabı
   // (diğerleri saha personeli / UBS taşeron hesabı — değişmez; Emre Akdeğirmen dahil AHY backofisi fiyat görmez). Kapsam yalnız AHY.
-  { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true },
+  // 01.11.2026 (Orhan): AHY yönetim hesabında maaş KAPALI (fiyat / mali tutar AHY kapsamında açık kalır)
+  { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true, maas: false },
   // 30.10.2026 (Orhan): Nurcan Kuş ve Serdar Altınova — fiyat AÇIK, maaş KAPALI, fiyat değiştirme / ödeme / finans kaydı YOK.
   // Kimlik 29.10.2026 canlı salt-okunur kayıttan: id 2 nurcan.kus@ ve id 3 serdar.altinova@ (rollout_mudur, marka ERC; her
   // e-postada tek hesap). Veri kapsamları değişmez (mevcut rol / ekran kapsamı). Personel giriş-çıkış ve banka bilgisi mevcut
