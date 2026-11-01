@@ -4172,17 +4172,19 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
             </div>
           ))}
           {kartAcabilir && !qBos && !yeni && (
-            <div onClick={() => setYeni({ ad: q.trim(), unvan: "", tur: "TEDARIKCI" })} style={{ padding: "10px 12px", cursor: "pointer", fontSize: "12.5px", fontWeight: 800, color: "#1d4ed8", background: "#f8fafc" }}>
+            <div onClick={() => { const t = q.trim(); const resmi = /(^|\s)(LTD|ŞTİ|STİ|ŞTI|A\.?Ş\.?|LİMİTED|LIMITED|ANONİM|ŞİRKETİ)(\.|\s|$)/i.test(t); setYeni({ ad: resmi ? "" : t, unvan: resmi ? t : "", tur: "TEDARIKCI" }); }} style={{ padding: "10px 12px", cursor: "pointer", fontSize: "12.5px", fontWeight: 800, color: "#1d4ed8", background: "#f8fafc" }}>
               ＋ Yeni tedarikçi tanımla: “{q.trim()}”
             </div>
           )}
           {yeni && (
             <div style={{ padding: "10px 12px", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "12px", fontWeight: 800, color: "#1e3a5f", marginBottom: "6px" }}>Yeni firma kartı</div>
+              {/* 01.11.2026: kısa ad + resmi fatura unvanı aynı karta yazılır — fatura hangi adla gelirse gelsin aynı cariye işlenir */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                <input value={yeni.ad} onChange={(e) => setYeni((y) => ({ ...y, ad: e.target.value }))} placeholder="Görünen ad *" style={odmInp} />
-                <input value={yeni.unvan} onChange={(e) => setYeni((y) => ({ ...y, unvan: e.target.value }))} placeholder="Resmi unvan (faturadaki)" style={odmInp} />
+                <input value={yeni.ad} autoFocus={!yeni.ad} onChange={(e) => setYeni((y) => ({ ...y, ad: e.target.value }))} placeholder="Kısa ad (ör. İztaş) *" style={odmInp} />
+                <input value={yeni.unvan} onChange={(e) => setYeni((y) => ({ ...y, unvan: e.target.value }))} placeholder="Resmi fatura unvanı (ör. İztaş İletişim Mühendislik Ltd. Şti.)" style={odmInp} />
               </div>
+              <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>Kısa ad ve resmi unvan aynı cari hesaba bağlanır; avans ve fatura hangi adla girilirse girilsin bu karta işlenir.</div>
               <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
                 {[["TEDARIKCI", "Tedarikçi (otel, nakliye, malzeme…)"], ["TASERON", "Taşeron (saha işi)"]].map(([k, v]) => (
                   <button key={k} type="button" onClick={() => setYeni((y) => ({ ...y, tur: k }))} style={{ padding: "5px 9px", borderRadius: "8px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", border: `1.5px solid ${yeni.tur === k ? "#1e3a5f" : "#e5e7eb"}`, background: yeni.tur === k ? "#1e3a5f" : "#fff", color: yeni.tur === k ? "#fff" : "#475569" }}>{v}</button>
@@ -4242,11 +4244,22 @@ function CariOdemePenceresi({ marka, markaAd, baslangic, onClose, onDone }) {
       try {
         const j = await cariIstek("onizleme", { method: "POST", marka, govde: { tedarikci: sec, islem: form.islem, tutar: String(Math.round(tutarN * 100) / 100), para_birimi: form.pb, secili_fatura_ids: form.islem === "FATURA_ODEME" && secili.length ? secili : undefined } });
         if (!iptal) { setOniz(j); setOnizHata(""); }
-      } catch (e) { if (!iptal) { setOniz(null); setOnizHata(e.message); } }
+      } catch (e) {
+        if (iptal) return;
+        setOniz(null); setOnizHata(e.message);
+        // 01.11.2026: açık faturası olmayan tedarikçide sunucu "Avans seçin" derse tür kendiliğinden Avans olur
+        if (e.veri?.avans_secin) setForm((f) => ({ ...f, islem: "AVANS", fazla_onay: false }));
+      }
     }, 280);
     return () => { iptal = true; clearTimeout(t); };
   }, [sec, kartli, tutarN, form.islem, form.pb, secili.join(","), cari]);
   const acikFat = (cari?.faturalar || []).filter((f) => f.tur === "GELEN" && f.acik > 0.009);
+  // 01.11.2026: seçilen tedarikçinin açık faturası yoksa varsayılan işlem türü Avans (faturasız ödeme = avans; açıklama metni türü belirlemez)
+  useEffect(() => {
+    if (!kartli) return;
+    const acikVar = (cari?.faturalar || []).some((f) => f.tur === "GELEN" && f.acik > 0.009 && !f.arac);
+    if (!acikVar) setForm((f) => (f.islem === "FATURA_ODEME" ? { ...f, islem: "AVANS", fazla_onay: false } : f));
+  }, [cari, kartli]);
   const pbler = [...new Set(["TRY", ...Object.keys(cari?.pb || {})])];
   const kaydet = async () => {
     if (busy) return;
@@ -4275,6 +4288,7 @@ function CariOdemePenceresi({ marka, markaAd, baslangic, onClose, onDone }) {
       await yukle(); onDone && onDone();
     } catch (e) {
       if (e.veri?.onizleme) setOniz(e.veri.onizleme);
+      if (e.veri?.avans_secin) setForm((f) => ({ ...f, islem: "AVANS", fazla_onay: false }));
       setMesaj({ tip: "hata", metin: e.message }); // girilen alanlar korunur
     } finally { setBusy(false); }
   };

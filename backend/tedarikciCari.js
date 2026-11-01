@@ -107,6 +107,12 @@ function kur(app, c) {
     return { byId, coz: (ad) => [...(adIdx.get(katla(ad)) || [])] };
   }
   const kartAd = (s) => temiz(s?.gorunen_ad) || temiz(s?.subcon_name) || "—";
+  // 01.11.2026: firma kartı kapsamı (arama, ad çözümü ve hareketi olmayan yeni kartın ödemeye kabulü aynı kuralı kullanır):
+  // alt marka → firmaya bağlı kart (ana_firma) ya da firma önekli iş etiketi; Şimşek → alt markaya bağlı olmayan kart.
+  const kartKapsamda = (s, M) => M === "SIMSEK"
+    ? !(s.ana_firma && altMarkaMi(String(s.ana_firma).trim().toUpperCase()))
+    : String(s.ana_firma || "").trim().toUpperCase() === M
+      || (s.adlar || []).some((a) => String(a).trim().toUpperCase().startsWith(`${markaProfil(M).onek}_`));
 
   // ── CARİ HESAPLAMA (tek kaynak: ekran, önizleme, kayıt, Excel) ───────────────────────────────────────────────────────
   // ids: kilitlenecek fatura id'leri (kayıt anında FOR UPDATE ile yeniden okunur)
@@ -146,6 +152,9 @@ function kur(app, c) {
       const adl = adlar.map((x) => temiz(x)).filter(Boolean);
       const ids = new Set(); adl.forEach((a) => R.coz(a).forEach((x) => ids.add(x)));
       if (ids.size === 1) { const x = [...ids][0]; return { anahtar: `id:${x}`, id: x, durum: "KART" }; }
+      // 01.11.2026: aynı ad birden çok karta uyuyorsa önce BU firmanın kapsamındaki kart aranır (ör. Şimşek'in eski "İZTAŞ"
+      // kartı ile Teknocenter'ın İztaş kartı); kapsamda tek kart varsa kimlik odur. Kapsam dışı çoklu eşleşme yine "belirsiz".
+      if (ids.size > 1) { const icerde = [...ids].filter((x) => kartKapsamda(R.byId.get(x), M)); if (icerde.length === 1) return { anahtar: `id:${icerde[0]}`, id: icerde[0], durum: "KART" }; }
       const birincil = adl[0] || "—";
       if (ids.size > 1) return { anahtar: `ad:${katla(birincil)}`, id: null, durum: "BELIRSIZ", ad: birincil, adaylar: [...ids] };
       return { anahtar: `ad:${katla(birincil)}`, id: null, durum: "KIMLIKSIZ", ad: birincil };
@@ -266,7 +275,16 @@ function kur(app, c) {
       c0.hareketler.sort((a, b) => String(b.tarih || "").localeCompare(String(a.tarih || "")) || b.id - a.id);
       c0.toplam_acik = Object.values(c0.pb).reduce((s, P) => s + (P.kalan > 0 ? 1 : 0), 0);
     }
-    return { cari, R, fById, M };
+    // 01.11.2026: tedarikçi bulma — hareketi olan cari satırı; yoksa bu firmanın kapsamındaki AKTİF firma kartı boş cari olarak
+    // açılır (yeni tanımlanan taşerona ilk avans / ilk fatura buradan girilir). Kapsam dışı ya da pasif kart "bulunamadı".
+    const bul = (anahtar) => {
+      const k = String(anahtar || "");
+      if (cari.has(k)) return cari.get(k);
+      const m = /^id:(\d+)$/.exec(k); const s = m ? R.byId.get(Number(m[1])) : null;
+      if (!s || s.aktif === false || !kartKapsamda(s, M)) return null;
+      const c0 = satir({ anahtar: `id:${Number(s.id)}`, id: Number(s.id), durum: "KART" }); c0.toplam_acik = 0; return c0;
+    };
+    return { cari, R, fById, M, bul };
   }
 
   // FIFO dağıtımı (saf hesap): aynı firma + aynı tedarikçi + aynı para birimi, uygun (GELEN, araç kirası dışı, açık) faturalar
@@ -287,7 +305,7 @@ function kur(app, c) {
   }
   // Ödeme isteğinin doğrulanması + dağıtım önizlemesi (kayıt ve önizleme aynı yolu kullanır)
   function odemePlani(veri, b) {
-    const c0 = veri.cari.get(String(b.tedarikci || ""));
+    const c0 = veri.bul(b.tedarikci);
     if (!c0) throw hataK(404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
     if (c0.kimlik !== "KART" || !c0.id) throw hataK(409, "Bu ad bir firma kartına bağlı değil ya da birden çok karta uyuyor — önce firma kartını seçin / oluşturun", { kimlik: c0.kimlik });
     const islem = String(b.islem || "").toUpperCase();
@@ -302,6 +320,10 @@ function kur(app, c) {
     if (Array.isArray(b.secili_fatura_ids) && b.secili_fatura_ids.length && acik.length !== new Set(b.secili_fatura_ids.map(Number)).size)
       throw hataK(409, "Seçilen faturalardan biri bu tedarikçinin açık faturası değil (ödenmiş, iade, araç kirası ya da başka para birimi)");
     const acikToplam = r2(acik.reduce((s, f) => s + f.acik, 0));
+    // 01.11.2026: açık faturası olmayan tedarikçiye "Fatura Ödemesi" girilmez — faturasız ödeme AVANS'tır (açıklama metni
+    // işlem türünü değiştirmez; ekran bu yanıtla türü Avans'a çevirir). Avans fatura gelince mahsup edilir.
+    if (islem === "FATURA_ODEME" && acikToplam <= 0.009)
+      throw hataK(409, `Bu tedarikçinin ${pb} cinsinden açık faturası yok. Faturası henüz gelmemiş ödeme için işlem türünü "Avans" seçin; fatura gelince avans mahsup edilir.`, { avans_secin: true });
     const plan = islem === "AVANS" ? { dagilim: [], kalan: tutar } : fifoDagit(acik, tutar);
     const P = c0.pb[pb] || {};
     const baskaPb = Object.entries(c0.pb).filter(([k, v]) => k !== pb && (v.kalan > 0.009 || v.avans_acik > 0.009)).map(([k]) => k);
@@ -359,12 +381,9 @@ function kur(app, c) {
       const q = katla(req.query.q);
       const v = await cariHesapla(pool, M);
       const onek = M === "SIMSEK" ? null : katla(markaProfil(M).onek);
-      const kapsamda = (s) => M === "SIMSEK"
-        ? !(s.ana_firma && altMarkaMi(String(s.ana_firma).toUpperCase()))
-        : String(s.ana_firma || "").toUpperCase() === M || s.adlar.some((a) => String(a).trim().toUpperCase().startsWith(`${markaProfil(M).onek}_`)) || false;
       const sonuc = new Map();
       for (const c0 of v.cari.values()) sonuc.set(c0.anahtar, c0);
-      for (const s of v.R.byId.values()) if (!sonuc.has(`id:${s.id}`) && kapsamda(s) && s.aktif !== false)
+      for (const s of v.R.byId.values()) if (!sonuc.has(`id:${s.id}`) && kartKapsamda(s, M) && s.aktif !== false)
         sonuc.set(`id:${s.id}`, { anahtar: `id:${s.id}`, id: Number(s.id), kimlik: "KART", ad: kartAd(s), unvan: s.unvan || null, etiketler: s.adlar,
           etiket_katla: s.katlar, tur: s.tedarikci_turu || "TASERON", aktif: true, pb: {}, faturalar: [], hareketler: [], uyarilar: [] });
       const puan = (c0) => {
@@ -394,12 +413,19 @@ function kur(app, c) {
       const tur = String(req.body?.tur || "TEDARIKCI").toUpperCase() === "TASERON" ? "TASERON" : "TEDARIKCI";
       if (ad.length < 2) return hata(res, 400, "Firma adı gerekli");
       const R = await rehberOku(pool);
-      const ayni = [...new Set([...R.coz(ad), ...(unvan ? R.coz(unvan) : [])])];
+      // 01.11.2026: aynı ad yalnız BU firmanın kapsamındaki kartla çakışırsa engellenir. Başka firmanın kartı (ör. Şimşek'in eski
+      // "İZTAŞ" iş etiketi) Teknocenter'ın kendi İztaş carisini açmasına engel değildir; ad çözümü de firma kapsamına göre yapılır.
+      const ayniHepsi = [...new Set([...R.coz(ad), ...(unvan ? R.coz(unvan) : [])])];
+      const ayni = ayniHepsi.filter((id) => kartKapsamda(R.byId.get(id), M));
       if (ayni.length) return hata(res, 409, `"${ad}" adıyla kayıtlı firma kartı var — mevcut kartı seçin`, { mevcut: ayni.map((id) => ({ anahtar: `id:${id}`, id, ad: kartAd(R.byId.get(id)) })) });
       const ana = M === "SIMSEK" ? "ERC" : M;
+      // İş etiketi (subcon_name) tekildir: başka firmada aynı etiket varsa alt markanın etiketi firma önekiyle yazılır (TEKNO_İZTAŞ)
+      let etiket = ad.toLocaleUpperCase("tr-TR");
+      const etiketVar = (await pool.query(`SELECT 1 FROM subcons WHERE subcon_name = $1 LIMIT 1`, [etiket])).rowCount > 0;
+      if (etiketVar && M !== "SIMSEK") etiket = `${markaProfil(M).onek}_${etiket}`;
       const r = await pool.query(`INSERT INTO subcons (subcon_name, gorunen_ad, unvan, ana_firma, aktif, kaynak, olusturan, tedarikci_turu)
         VALUES ($1,$2,$3,$4,true,'CARI',$5,$6) RETURNING id, subcon_name, gorunen_ad, unvan, ana_firma`,
-        [ad.toLocaleUpperCase("tr-TR"), ad, unvan || null, ana, kim(req), tur === "TEDARIKCI" ? "TEDARIKCI" : null]);
+        [etiket, ad, unvan || null, ana, kim(req), tur === "TEDARIKCI" ? "TEDARIKCI" : null]);
       await islemGecmisiYaz(req, "firma", r.rows[0].id, "OLUSTURMA", null, { ad, unvan: unvan || null, ana_firma: ana, tur, _ekran: "Tedarikçi cari" }, null);
       res.json({ ok: true, tedarikci: { anahtar: `id:${r.rows[0].id}`, id: r.rows[0].id, ad, unvan: unvan || null, kimlik: "KART", tur } });
     } catch (e) {
@@ -434,13 +460,9 @@ function kur(app, c) {
   app.get("/finance/marka-cari/ozet", okuKapi, async (req, res) => {
     try {
       const v = await cariHesapla(pool, req.cariFirma);
-      const c0 = v.cari.get(String(req.query.tedarikci || ""));
-      if (!c0) {
-        const id = Number(String(req.query.tedarikci || "").replace(/^id:/, ""));
-        const s = id ? v.R.byId.get(id) : null;
-        if (!s) return hata(res, 404, "Tedarikçi bulunamadı");
-        return res.json({ ok: true, firma: req.cariFirma, cari: { anahtar: `id:${id}`, id, ad: kartAd(s), unvan: s.unvan || null, kimlik: "KART", etiketler: s.adlar, pb: {}, faturalar: [], hareketler: [], uyarilar: [] }, kural: FIFO_KURAL, yazabilir: yazar(req, req.cariFirma) });
-      }
+      // 01.11.2026: hareketi olmayan kart yalnız bu firmanın kapsamındaysa boş cari olarak döner (eski kapsamsız fallback kaldırıldı)
+      const c0 = v.bul(req.query.tedarikci);
+      if (!c0) return hata(res, 404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
       res.json({ ok: true, firma: req.cariFirma, cari: c0, kural: FIFO_KURAL, yazabilir: yazar(req, req.cariFirma) });
     } catch (e) { console.error("[cari ozet]", e.message); hata(res, 500, "Cari özet alınamadı"); }
   });
@@ -519,7 +541,7 @@ function kur(app, c) {
       if (ex) return { tekrar: true, log_id: ex.id };
       await kilitle(db, "cari", M, String(b.tedarikci || ""));
       const v = await cariHesapla(db, M, { kilit: true });
-      const c0 = v.cari.get(String(b.tedarikci || ""));
+      const c0 = v.bul(b.tedarikci);
       if (!c0 || c0.kimlik !== "KART") throw hataK(409, "Tedarikçi firma kartı seçilmeli");
       const pb = String(b.para_birimi || "TRY").toUpperCase();
       const P = c0.pb[pb];
@@ -645,7 +667,7 @@ function kur(app, c) {
       const M = req.cariFirma;
       const v = await cariHesapla(pool, M);
       const anahtar = String(req.query.tedarikci || "");
-      const liste = anahtar ? [v.cari.get(anahtar)].filter(Boolean) : [...v.cari.values()];
+      const liste = anahtar ? [v.bul(anahtar)].filter(Boolean) : [...v.cari.values()];
       if (anahtar && !liste.length) return hata(res, 404, "Tedarikçi bulunamadı");
       const firmaAd = M === "SIMSEK" ? "Şimşek Haberleşme" : markaProfil(M).ad;
       const wb = new ExcelJS.Workbook();
