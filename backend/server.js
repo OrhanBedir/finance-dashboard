@@ -586,6 +586,9 @@ const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, ka
 const kmzKonum = require("./kmzKonum"); // 29.10.2026: Türk Telekom KMZ konum kaynağı (yalnız konum)
 const haritaPinDurum = require("./haritaPinDurum"); // 29.10.2026: pin rengi = iş durumu; anten / bant detayı
 const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
+const hwMalzeme = require("./hwMalzeme"); // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
+const fiiliDurum = require("./fiiliDurum"); // 31.10.2026: fiilî çalışma durumu (QC'den bağımsız fiziksel montaj)
+const operasyon = require("./operasyon"); // 31.10.2026: Rollout Weekly Plan, ekipler nerede, fiilî bildirim
 const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
 const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
@@ -915,7 +918,7 @@ app.use((req, res, next) => {
   }
 
   res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-istemci"); // 31.10.2026: x-istemci (web / mobil kanal bilgisi)
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
@@ -1183,6 +1186,15 @@ const IZIN_TANIMLARI = {
   // 28.10.2026: Organizasyon şeması / saha ekipleri — firma ve ekip kartı, personel ekip üyeliği, ekip şefi, aktif/pasif.
   // Maaş, bordro, finans ya da kullanıcı yetkisi vermez. Silme ayrı izindir (yalnız hiç kullanılmamış kayıt).
   org_yonet: "Organizasyon şeması ve saha ekipleri yönetimi", org_sil: "Kullanılmamış ekip / firma kaydını silme",
+  // 31.10.2026 (Orhan): operasyon ekranları — görüntüleme, plan düzenleme, iş atama ve depo hareketi AYRI izinler.
+  // Varsayılan: İş Ata rollerinde görüntüleme + plan + atama açık (mevcut yöneticilerin erişimi kalmaz değil, aynen sürer);
+  // HW malzeme depo hareketi yalnız admin rolünde açık, diğer kişilere (ör. envanter sorumlusu) kişiye özel ayarla verilir.
+  // Fiyat / maaş vermez.
+  operasyon_goruntule: "Operasyon ekranları (saha haritası, haftalık plan, depodaki sahalar, ekipler nerede) — görüntüleme",
+  hw_malzeme_goruntule: "HW Malzeme Durumu (Huawei saha malzemesi) — görüntüleme",
+  hw_malzeme_hareket: "HW malzeme depo hareketi (kabul, ekibe teslim, devir, kullanım, iade, düzeltme)",
+  plan_duzenle: "Ekip planı yapma / değiştirme (Plan Yap)",
+  is_atama_yap: "İş atama (ekip / personele iş atama, iptal)",
 };
 const _yetkiOnbellek = new Map(); // anahtar: e-posta → { t, ayar }
 const YETKI_TTL_MS = 60 * 1000;
@@ -1284,6 +1296,8 @@ const ercMaasYetkilisi = (u) => { const y = maliYetkiKaydi(u); return y?.kapsam 
 // 26.10.2026 (Orhan): alt marka (Teknocenter) YÖNETİM hesabı kendi firma kapsamında Rollout'u görüntüler ve Excel alır;
 // düzenleme AYRI izindir (rollout_duzenle, varsayılan kapalı). Kapsam "MARKA ROLLOUT KAPSAMI" katmanında zorlanır.
 const MARKA_ROLLOUT_ROLLER = ["admin", "direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur"];
+// 31.10.2026: operasyon ekranlarını varsayılan gören roller (İş Ata rolleriyle aynı küme)
+const OPERASYON_YONETIM_ROLLERI = ["admin", "platform_admin", "direktor", "pm", "rollout_mudur", "genel_mudur", "bolge_mudur"];
 function etkinIzinHesapla(u, ayar) {
   const o = { ...(ROL_IZINLERI[_rol(u)] || {}) };
   const rol = _rol(u) || String(kayitliRol(u) || "").toLowerCase();
@@ -1302,6 +1316,13 @@ function etkinIzinHesapla(u, ayar) {
   // 30.10.2026: personel banka bilgisi (IBAN / banka / hesap no) ayrı izin — varsayılanı mevcut İK okuma yetkisi; ayarla
   // kapatılabilir, açılsa da İK okuma yetkisi olmayana veri gelmez (ikHassasGorur ayrıca ister)
   if (!("banka_goruntule" in o)) o.banka_goruntule = ikOkumaYetkili(u);
+  // 31.10.2026: operasyon izinleri varsayılanı (yetki ayarı açabilir / kapatabilir; taşeron hesabına hiçbir zaman açılmaz —
+  // operasyonYetki() ayrıca taşeronu reddeder). Alt marka yönetimi: Rollout görüntüleme izni varsa kendi kapsamında görür.
+  { const yonetim = OPERASYON_YONETIM_ROLLERI.includes(rol);
+    const altGorur = !altMarkaKullanicisi(u) || o.rollout_goruntule === true;
+    if (!("operasyon_goruntule" in o)) o.operasyon_goruntule = yonetim && altGorur;
+    if (!("hw_malzeme_goruntule" in o)) o.hw_malzeme_goruntule = yonetim && altGorur;
+    if (!("hw_malzeme_hareket" in o)) o.hw_malzeme_hareket = ["admin", "platform_admin"].includes(rol) && !altMarkaKullanicisi(u); }
   if (ayar && typeof ayar === "object") for (const [k, v] of Object.entries(ayar)) if (k in IZIN_TANIMLARI && typeof v === "boolean") o[k] = v;
   // ERC maaş kuralı en son uygulanır: yetki ayarı / rol / profil ERC'de maaşı açamaz (yalnız kapatabilir)
   if (ercMaasKapsami(u)) o.maas_goruntule = ercMaasYetkilisi(u) && !(ayar && ayar.maas_goruntule === false);
@@ -3161,7 +3182,7 @@ app.use((req, res, next) => {
 
   res.header("Vary", "Origin");
   res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, x-istemci"); // 31.10.2026: x-istemci (web / mobil kanal bilgisi)
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") {
@@ -13619,6 +13640,7 @@ function haritaKonumKaynagi(k) {
 }
 // Konumu olmayan sahanın nedeni (kayıtlar sessizce kaybolmaz)
 function haritaKonumEksikNedeni(k, tssrDurum, belgeVar) {
+  if (k && k.lat === null && k.kaynak === "MANUEL_IL") return "Yalnız il bilgisi elle girildi — koordinat yok";
   if (k && k.lat === null) return "Yalnız adres var — koordinat yok (adres çözümleme kapalı)";
   if (k && k.dogruluk === "TERS_OLABILIR") return "TSSR koordinatı ters görünüyor — kontrol gerekli";
   if (k && k.dogruluk === "GECERSIZ") return "TSSR koordinatı geçersiz — kontrol gerekli";
@@ -13633,6 +13655,8 @@ async function haritaVerisi(req, { firma } = {}) {
     const fs = await haritaFirmaSuzgeci(req, K, firma);
     if (fs.hata) throw { durum: fs.hata[0], mesaj: fs.hata[1] };
     const FM = fs.FM;
+    // 31.10.2026: iş yılı seçimi (sabit 2026 değil) — 2020…gelecek yıl; geçersizse içinde bulunulan yıl
+    const yilSec = /^20\d{2}$/.test(String(req.query?.yil || "")) && Number(req.query.yil) <= new Date().getFullYear() + 1 ? String(req.query.yil) : String(new Date(Date.now() + 3 * 3600e3).getUTCFullYear());
     const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, FM);
     await sahaKonum.tabloHazirla(pool);
     const gruplar = {}; let fizikselOlmayan = 0;
@@ -13682,7 +13706,8 @@ async function haritaVerisi(req, { firma } = {}) {
       const isler = g.isler.map(({ kod, r }) => {
         const kalemler = kalemMap.get(kod) || [];
         const kollar = FM && r && !K ? haritaIsDurumu.firmaKollari(r, ROLLOUT_IS_KOLU_ALANLARI, (v) => FM.esle(v)) : null;
-        const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar, kalemler, atamalar: atamaMap.get(kod) || [] });
+        const d = haritaIsDurumu.isDurumu({ row: r, alanlar: ROLLOUT_IS_KOLU_ALANLARI, kollar, kalemler, atamalar: atamaMap.get(kod) || [], yil: yilSec });
+        if (d.durum === "KAYITLI") d.durum_ad = `${yilSec} işi (BoQ ${yilSec})`; else if (d.durum === "DIGER_YIL") d.durum_ad = `${yilSec} dışı`;
         // Montaj / QC / Clean Up filtreleri — ana montaj (RF iş kolu) başka firmadaysa montaj filtresine girmez, planlanamaz.
         // 29.10.2026: ERC yöneticisinin firma görünümünde (?firma=TEKNO) de aynı kural (başka firmanın montajı firmanın durumu sayılmaz)
         const rfAd = r ? rolloutFirmaAdi(r.rf_subcon) : null;
@@ -13730,14 +13755,43 @@ async function haritaVerisi(req, { firma } = {}) {
         kus_ucusu_km: depo.dogrulandi && kullanilabilir ? Math.round(sahaKonum.kusUcusuKm(depo, konum) * 10) / 10 : null };
     });
     const kullan = (s) => s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
-    return ({ ok: true, kapsam: K ? K.ad : null, firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
+    // 31.10.2026: HW malzeme durumu + fiilî çalışma durumu + atanan ekip (iş kodu bazında — aynı sahadaki işler birleştirilmez)
+    const rowMapH = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
+    const fiiliMap = await fiiliDurum.durumHaritasi(pool, tumKodlar, { rows: rowMapH });
+    const ekipAd = await hwMalzeme.ekipAdlari(pool);
+    const malzMap = await hwMalzeme.durumHaritasi(pool, tumKodlar, { rows: rowMapH, montajMap: fiiliMap, ekipAd });
+    const ekipKayit = new Map((await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma FROM ekipler`).catch(() => ({ rows: [] }))).rows.map((e) => [Number(e.ekip_no), e]));
+    const ekipBilgi = (no) => { const e = ekipKayit.get(Number(no)); return e ? { ekip_no: Number(no), ad: e.ad || `Ekip ${no}`, bolge: e.bolge || null, tip: hwMalzeme.ekipTipi(e).kod,
+      firma: String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "SIMSEK").toUpperCase() : null } : { ekip_no: Number(no), ad: `Ekip ${no}`, tip: "TANIMSIZ" }; };
+    // Alt marka: başka firmanın ekibi adıyla verilmez (yalnız "başka firma ekibi")
+    const ekipGoster = (no) => { const b = ekipBilgi(no); return K && !(b.tip === "INHOUSE" && b.firma === K.kod) ? { ekip_no: null, ad: "Başka firma ekibi", tip: b.tip, baska_firma: true } : b; };
+    for (const sh of sahalar) {
+      for (const x of sh.isler) {
+        const kod = String(x.site_code || "").replace(/\s+/g, "").toUpperCase();
+        const fd = fiiliMap.get(kod), md = malzMap.get(kod);
+        x.fiili = fd ? { kod: fd.kod, ad: fd.ad, renk: fd.renk, kaynak: fd.kaynak, baslama: fd.baslama, bitis: fd.bitis, issue: fd.issue, plan_tarihi: fd.plan_tarihi,
+          son_bildirim: fd.son_bildirim, son_bildirim_eski: fd.son_bildirim_eski, uyarilar: fd.uyarilar, qc: fd.qc } : null;
+        x.atanan_ekip = fd?.ekip_no ? ekipGoster(fd.ekip_no) : null;
+        x.malzeme = md ? { etiket: md.etiket, teslim: md.teslim, teslim_ad: md.teslim_ad, konum: md.konum, konum_ad: md.konum_ad, ilk_gelis: md.ilk_gelis,
+          eksik_aciklama: md.eksik_aciklama, depoda: md.depoda, ekipte: md.ekipte.map((e) => ({ ...ekipGoster(e.ekip_no), miktar: e.miktar })), montaj_bekliyor: md.montaj_bekliyor, montaj_basladi: md.montaj_basladi, eski_kayit: md.eski_kayit } : null;
+      }
+      // Konum yoksa: koddaki il sözlüğünden YALNIZ il (koordinat üretilmez; rota / mesafe hesabına girmez)
+      if (!kullan(sh)) {
+        const il = sh.il || getCityFromSiteCode(sh.fiziksel_id) || null;
+        sh.yaklasik = il ? { il, kaynak: sh.il ? "Kayıttaki il" : "Site ID önekinden il (mevcut sözlük)", etiket: "Yaklaşık konum · yalnız il bilgisi" } : null;
+        sh.bilgi_bekliyor = !il; // il de yok → kullanıcıdan bilgi bekleyen
+      }
+      sh.operasyon_bolgesi = sh.bolge || getRegionFromSiteCode(sh.fiziksel_id) || null;
+    }
+    return ({ ok: true, kapsam: K ? K.ad : null, yil: yilSec, yillar_mevcut: [...new Set(sahalar.flatMap((s) => s.isler.flatMap((x) => x.yillar || [])))].sort(), firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
       hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
       rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
       kmz_yetkili: !K && ["admin", "platform_admin"].includes(req.user?.role), // KMZ konum içe alma düğmesi (yalnız ERC yöneticisi)
       ozet: { saha: sahalar.length, is_kaydi: sahalar.reduce((a, s) => a + s.isler.length, 0), konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
         konum_kmz: sahalar.filter((s) => kullan(s) && s.konum.kaynak === "KMZ").length,
         is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
-        tarih_eksik: sahalar.filter((x) => x.yil_dogrulanamadi).length } });
+        tarih_eksik: sahalar.filter((x) => x.yil_dogrulanamadi).length,
+        yaklasik_il: sahalar.filter((x) => x.yaklasik).length, bilgi_bekliyor: sahalar.filter((x) => x.bilgi_bekliyor).length } });
 }
 app.get("/rollout/harita", authMiddleware, async (req, res) => {
   try { res.json(await haritaVerisi(req)); }
@@ -14033,6 +14087,18 @@ app.get("/saha-konum/kmz/:id/rapor", authMiddleware, async (req, res) => {
 const PLAN_SAHASIZ_KATEGORI = ["MALZEME", "ARAC_BAKIM", "ISG_EGITIM", "DIGER"];
 const PLAN_DOLU_DURUM = "a.durum NOT IN ('TAMAMLANDI','IPTAL')";
 const planHata = (durum, mesaj, ek) => Object.assign(new Error(mesaj), { durum, ek });
+// 31.10.2026: plan yetkisi = İş Ata yetkisi ya da kişiye özel plan_duzenle (ERC hesabı); plan_duzenle=false her zaman kapatır.
+// Planı ONAYLAMAK (kalıcı atama) ayrıca İş Ata yetkisi ister.
+const planYetkiliMi = (req) => !taseronMu(req.user) && req.izinler?.plan_duzenle !== false
+  && (isAtamaYetkiliMi(req) || (req.izinler?.plan_duzenle === true && !altMarkaKullanicisi(req.user)));
+// İşin aktif (kapanmamış) montaj atamaları — çift atama kontrolü
+async function planAktifAtamalar(db, kodlar, haricPlanId = null) {
+  if (!kodlar.length) return [];
+  return (await db.query(`SELECT a.id, a.kategori, a.durum, a.site_codes, to_char(a.plan_tarihi,'YYYY-MM-DD') AS plan_tarihi, a.plan_id, a.ekip_no, e.ad AS ekip_ad,
+      a.baslama_ts FROM is_atama a LEFT JOIN ekipler e ON e.ekip_no = a.ekip_no
+    WHERE ${PLAN_DOLU_DURUM} AND a.durum <> 'QC_BEKLE' AND a.site_codes && $1::text[] AND a.kategori = ANY($2::text[]) ${haricPlanId ? "AND COALESCE(a.plan_id,0) <> $3" : ""}`,
+    haricPlanId ? [kodlar, fiiliDurum.MONTAJ_KATEGORI, haricPlanId] : [kodlar, fiiliDurum.MONTAJ_KATEGORI]).catch(() => ({ rows: [] }))).rows;
+}
 const plTarih = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null;
 const plSaat = (v) => /^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v).padStart(5, "0") : null;
 // timestamptz → Istanbul yerel tarih + saat
@@ -14098,7 +14164,7 @@ async function planNoktalari() {
 }
 // Önizleme / onay ortak hazırlığı
 async function planHazirla(req, b) {
-  if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) throw planHata(403, "Plan yapma (İş Ata) yetkiniz yok");
+  if (!planYetkiliMi(req)) throw planHata(403, "Plan yapma yetkiniz yok");
   await planTablolar();
   const ekip = (await planEkipleri(req, b?.ekip_no))[0];
   if (!ekip) throw planHata(403, "Ekip bulunamadı ya da kapsamınızda değil");
@@ -14136,6 +14202,22 @@ async function planHazirla(req, b) {
     const f = sahaKimlik.fizikselSaha(kod);
     const k = f ? (await pool.query(`SELECT lat, lng, dogruluk, saha_adi, il, ilce FROM saha_konum WHERE fiziksel_id = $1`, [f.fiziksel_id])).rows[0] : null;
     const konum = k && k.lat != null && ["KESIN", "CELISKILI"].includes(k.dogruluk) ? { lat: Number(k.lat), lng: Number(k.lng) } : null;
+    // 31.10.2026: mevcut atama (çift atama engeli) ve malzemenin yeri — plan malzemeyi TAŞIMAZ, stoğu düşürmez
+    const aktif = (await planAktifAtamalar(pool, [kod])).filter((a) => (a.site_codes || []).some((s2) => isAtamaSiteTemizle(s2) === kod));
+    const yenidenAta = Array.isArray(b?.yeniden_ata) && b.yeniden_ata.map(isAtamaSiteTemizle).includes(kod);
+    for (const a of aktif) {
+      const kim = a.ekip_ad || (a.ekip_no ? `Ekip ${a.ekip_no}` : "kişi bazlı atama");
+      if (a.baslama_ts || ["BASLADI", "DEVAM", "ARA_VERILDI"].includes(a.durum)) engeller.push(`${kod}: ${kim} bu işte çalışmaya başlamış (atama #${a.id}) — önce o atamayı kapatın`);
+      else if (!yenidenAta) engeller.push(`${kod}: zaten ${kim} ekibine atanmış (#${a.id}${a.plan_tarihi ? `, ${a.plan_tarihi}` : ""}) — yeniden atamak için "Mevcut atamayı iptal edip yeniden planla" onayını verin`);
+      else uyarilar.push(`${kod}: ${kim} ataması (#${a.id}) onayda iptal edilip bu ekibe planlanacak`);
+    }
+    const hwD = (await hwMalzeme.durumHaritasi(pool, [kod], { rows: new Map(r ? [[kod, r]] : []) })).get(kod);
+    if (hwD) {
+      const baska = hwD.ekipte.filter((e) => Number(e.ekip_no) !== Number(ekip.ekip_no));
+      if (baska.length) uyarilar.push(`${kod}: malzeme ${baska.map((e) => e.ad).join(", ")} üzerinde — plan malzemeyi taşımaz; ekipler arası DEVİR kaydı gerekir`);
+      if (hwD.teslim === "KISMI") uyarilar.push(`${kod}: malzeme kısmi teslim (eksik: ${hwD.eksik_aciklama || "belirtilmedi"})`);
+      if (!hwD.teslim && !hwD.eski_kayit) uyarilar.push(`${kod}: HW malzeme kabul kaydı yok`);
+    }
     const montaj = sahaFiltre.montajDurumu(r);
     const otomatik = sahaFiltre.isSuresi({ row: r, kod, kalemler, montaj });
     let sureGun = otomatik.gun, sureKaynak = otomatik.gun != null ? `Kural: ${otomatik.gerekce}` : null;
@@ -14152,7 +14234,8 @@ async function planHazirla(req, b) {
     if (/ENH/.test(String(x.kategori || "")) && !ekip.yetkinlik.elektrik_isi) uyarilar.push(`${kod}: ENH işi — ekipte elektrik işi yetkinliği kayıtlı üye yok`);
     const par = x.par && typeof x.par === "object" ? { par_id: String(x.par.par_id || "").trim().slice(0, 60) || null, kesinti: ["VAR", "YOK"].includes(x.par.kesinti) ? x.par.kesinti : null,
       kesinti_dk: Number(x.par.kesinti_dk) > 0 ? Number(x.par.kesinti_dk) : null, bas: plSaat(x.par.bas), bit: plSaat(x.par.bit) } : null;
-    isler.push({ kod, ad: f?.fiziksel_id || kod, fiziksel_id: f?.fiziksel_id || kod, konum, sureGun, sureKaynak, sureGerekce: otomatik.gerekce, otomatik_sure: otomatik,
+    isler.push({ kod, ad: f?.fiziksel_id || kod, fiziksel_id: f?.fiziksel_id || kod, konum, sureGun, mevcut_atamalar: aktif, yeniden_ata: yenidenAta,
+      malzeme: hwD ? { etiket: hwD.etiket, teslim: hwD.teslim, konum: hwD.konum, ekipte: hwD.ekipte, eksik_aciklama: hwD.eksik_aciklama } : null, sureKaynak, sureGerekce: otomatik.gerekce, otomatik_sure: otomatik,
       kategori: x.kategori || "NEW_SITE", isAd: { STANDALONE_POLE: "Standalone montaj (pole)", STANDALONE_KABIN_ANTEN: "Standalone montaj (kabinet + anten)", LTE_ANTEN: "Antenli montaj / değişim", RRU: "RRU montaj / söküm" }[otomatik.kural] || "Montaj", kapsam: kap, montaj, par,
       erisim: par?.bas && par?.bit ? { bas: par.bas, bit: par.bit } : null,
       enErken: b?.mod === "MANUEL" && plTarih(x.baslangic_tarih) ? { tarih: x.baslangic_tarih, saat: plSaat(x.baslangic_saat) } : null, il: k?.il || r?.il || "", ilce: k?.ilce || "", saha_adi: k?.saha_adi || "", bolge: r?.bolge || null });
@@ -14227,7 +14310,7 @@ const planCevap = (H) => ({ ok: true, ekip: H.ekip, isler: H.isler.map(({ otomat
   plan: H.plan, engeller: H.engeller, uyarilar: [...H.uyarilar, ...(H.plan?.uyarilar || [])], rota: H.rota, nokta_adlari: H.nokta_adlari, imza: H.imza, mesgul: H.mesgul, onceki_konum: H.onceki_konum });
 app.get("/plan/ekipler", authMiddleware, async (req, res) => {
   try {
-    if (taseronMu(req.user) || !isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Plan yapma (İş Ata) yetkiniz yok" });
+    if (!planYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Plan yapma yetkiniz yok" });
     await planTablolar();
     const bugun = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
     const ekipler = await planEkipleri(req);
@@ -14252,6 +14335,7 @@ app.post("/plan/onayla", authMiddleware, async (req, res) => {
     if (H.engeller.length) return res.status(400).json({ ok: false, error: "Plan kaydedilemez — engeller var", engeller: H.engeller });
     if (!H.plan || H.plan.hata) return res.status(400).json({ ok: false, error: H.plan?.hata || "Plan oluşturulamadı" });
     if (H.plan.eksik_yollar.length) return res.status(400).json({ ok: false, error: "Yol süresi doğrulanamayan bacaklar var — tahmini süre girin", eksik_yollar: H.plan.eksik_yollar });
+    if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Planı onaylamak (kalıcı iş ataması) için İş Ata yetkisi gerekir — taslağı yetkiliye iletin" });
     if (b.imza && b.imza !== H.imza) return res.status(409).json({ ok: false, error: "Güncel atamalar / yol süreleri değişti; plan farklı çıktı. Yeniden önizleyip onaylayın.", yeni: planCevap(H) });
     const segs = H.plan.gunler.flatMap((g) => g.segmentler);
     if (!segs.length) return res.status(400).json({ ok: false, error: "Planda kaydedilecek iş yok" });
@@ -14266,6 +14350,20 @@ app.post("/plan/onayla", authMiddleware, async (req, res) => {
         JSON.stringify({ ...b, istek_anahtari: undefined }), JSON.stringify({ kalanlar: H.plan.kalanlar, uyarilar: H.plan.uyarilar, varsayimlar: H.plan.varsayimlar }), ben]);
       if (!pk.rows[0]) { await db.query("ROLLBACK"); const o = (await pool.query(`SELECT id, ozet FROM plan_kayit WHERE istek_anahtari = $1`, [anahtar])).rows[0]; return res.json({ ok: true, tekrar: true, plan_id: o?.id, ozet: o?.ozet }); }
       const planId = pk.rows[0].id;
+      // 31.10.2026: aynı işe eş zamanlı iki plan onayı → iş kodu kilidi; kilitten sonra aktif atama yeniden okunur
+      const montajKodlar = [...new Set(segs.filter((s) => s.tur === "MONTAJ").map((s) => s.kod))].sort();
+      for (const kod of montajKodlar) await db.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`plan-is:${kod}`]);
+      const yenidenAta = new Set((Array.isArray(b.yeniden_ata) ? b.yeniden_ata : []).map(isAtamaSiteTemizle));
+      for (const a of await planAktifAtamalar(db, montajKodlar, planId)) {
+        const kodlar = (a.site_codes || []).map(isAtamaSiteTemizle).filter((x) => montajKodlar.includes(x));
+        if (a.baslama_ts || ["BASLADI", "DEVAM", "ARA_VERILDI"].includes(a.durum) || !kodlar.every((x) => yenidenAta.has(x))) {
+          await db.query("ROLLBACK");
+          return res.status(409).json({ ok: false, error: `Çift atama engellendi: ${kodlar.join(", ")} bu arada ${a.ekip_ad || `atama #${a.id}`} ekibine atanmış. Yeniden önizleyin.` });
+        }
+        await db.query(`UPDATE is_atama SET durum = 'IPTAL', kapanis_not = CONCAT_WS(E'\n', NULLIF(kapanis_not,''), $2::text), updated_at = NOW() WHERE id = $1`,
+          [a.id, `${new Date().toLocaleDateString("tr-TR")} Plan #${planId} ile başka ekibe yeniden planlandı (${req.user?.name || ben})`]);
+        await islemGecmisiYaz(req, "is_atama", a.id, "IPTAL", { durum: a.durum }, { durum: "IPTAL", neden: `Plan #${planId} yeniden atama` });
+      }
       // Onay anında çakışma son kontrolü (kilitli): ekip / araç / kişi için dönemde başka plan bloğu oluştu mu
       const cak = await db.query(`SELECT s.id, s.ad, s.bas, s.bit FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
         WHERE s.plan_id <> $1 AND (a.id IS NULL OR ${PLAN_DOLU_DURUM}) AND (s.ekip_no = $2 OR (s.arac_plaka IS NOT NULL AND s.arac_plaka = $3) OR s.personeller && $4::text[])
@@ -14404,6 +14502,76 @@ app.get("/plan/musteri-excel", authMiddleware, async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="haftalik_plan_${bas}_${bit}.xlsx"`);
     await wb.xlsx.write(res); res.end();
   } catch (e) { console.error("PLAN EXCEL ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+});
+/* ═══ HW MALZEME + OPERASYON EKRANLARI (31.10.2026, Orhan) ═══════════════════════════════════════════════════════
+   hwMalzeme: Huawei saha malzemesi kabul / ekibe teslim / devir / kullanım / iade (iş kodu bazında, idempotent, geçmişli).
+   operasyon: Rollout Weekly Plan (+ müşteri Excel'i), ekipler nerede, fiilî çalışma bildirimi. Yetkiler ayrı izinlerle
+   (operasyon_goruntule, hw_malzeme_goruntule, hw_malzeme_hareket, plan_duzenle, is_atama_yap); kapsam alt markada sunucuda. */
+const opIzin = (req, k) => !taseronMu(req.user) && req.user?.kullanici_tipi !== "TASERON" && req.izinler?.[k] === true;
+async function opKapsamIsKodlari(req) {
+  if (req._hwKapsam) return req._hwKapsam;
+  const K = await rolloutKapsam(req);
+  const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, null);
+  const rowMap = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
+  return (req._hwKapsam = { K, rows: rowMap, kodlar: new Set([...rowMap.keys(), ...yalnizGunluk]) });
+}
+const opEkipKapsamda = async (req, e) => { const K = await rolloutKapsam(req); return !K || (String(e?.ekip_turu || "").toUpperCase() === "IC" && String(e?.bagli_firma || "").toUpperCase() === K.kod); };
+async function opMontajFiili(kodlar) {
+  const rows = new Map((await pool.query(`SELECT * FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [kodlar.map((k) => String(k).toUpperCase())]).catch(() => ({ rows: [] })))
+    .rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
+  return fiiliDurum.durumHaritasi(pool, kodlar, { rows });
+}
+hwMalzeme.kur(app, { pool, authMiddleware, upload: multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 } }), uploadToStorage,
+  kapsamIsKodlari: opKapsamIsKodlari, ekipKapsamda: opEkipKapsamda, montajFiili: opMontajFiili, fizikselSaha: (k) => sahaKimlik.fizikselSaha(k),
+  yetki: { goruntule: (req) => opIzin(req, "hw_malzeme_goruntule") || opIzin(req, "hw_malzeme_hareket"), hareket: (req) => opIzin(req, "hw_malzeme_hareket") } });
+operasyon.kur(app, { pool, authMiddleware, ExcelJS, sahaKimlik, hwMalzeme, fiiliDurum,
+  planEkipleri: (...a) => planEkipleri(...a), planTablolar: (...a) => planTablolar(...a), rolloutKapsam: (...a) => rolloutKapsam(...a),
+  haritaKapsamSatirlari: (...a) => haritaKapsamSatirlari(...a), taseronMu: (...a) => taseronMu(...a), isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a),
+  isAtamaPersonelIcinde: (...a) => isAtamaPersonelIcinde(...a), taseronunIsiMi: (...a) => taseronunIsiMi(...a) });
+// ── Konum eksik sahaya elle il / koordinat (31.10.2026): yetkili kullanıcı; kaynak MANUEL, eski değer geçmişe yazılır.
+// Doğrulanmış (TSSR / KMZ / önceki MANUEL) koordinat bu uçla sessizce değiştirilmez: üzerine yazmak için degistir_onay + gerekçe.
+// İlden koordinat ÜRETİLMEZ: yalnız il girilirse saha "yaklaşık konum · yalnız il" olarak kalır (pin / rota yok).
+app.post("/saha-konum/:id/manuel", authMiddleware, async (req, res) => {
+  try {
+    const K = await rolloutKapsam(req);
+    const rol = String(req.user?.role || "").toLowerCase();
+    const yetkili = !taseronMu(req.user) && (K ? K.duzenle : (["admin", "platform_admin"].includes(rol) || req.izinler?.rollout_duzenle === true || isAtamaYetkiliMi(req)));
+    if (!yetkili) return res.status(403).json({ ok: false, error: "Konum düzenleme yetkiniz yok" });
+    const id = String(req.params.id || "").trim().toUpperCase();
+    const kap = await haritaSahaKapsami(req, id);
+    if (kap.hata) return res.status(kap.hata[0]).json({ ok: false, error: kap.hata[1] });
+    const b = req.body || {};
+    const gerekce = String(b.gerekce || "").trim();
+    if (gerekce.length < 3) return res.status(400).json({ ok: false, error: "Kaynağı / gerekçeyi yazın (ör. 'saha ziyareti GPS', 'Huawei e-postası 30.10')" });
+    const num = (v) => (v === "" || v == null ? null : Number(String(v).replace(",", ".")));
+    const lat = num(b.lat), lng = num(b.lng);
+    if ((lat == null) !== (lng == null)) return res.status(400).json({ ok: false, error: "Enlem ve boylamı birlikte girin" });
+    if (lat != null && !(lat >= 35.5 && lat <= 42.6 && lng >= 25.4 && lng <= 45)) return res.status(400).json({ ok: false, error: "Koordinat Türkiye sınırları dışında — enlem/boylam yer değiştirmiş olabilir" });
+    const il = String(b.il || "").trim().toLocaleUpperCase("tr-TR").slice(0, 40) || null, ilce = String(b.ilce || "").trim().slice(0, 60) || null;
+    if (lat == null && !il) return res.status(400).json({ ok: false, error: "Koordinat ya da il girin" });
+    await sahaKonum.tabloHazirla(pool); await kmzTablolar();
+    const m = (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = $1`, [id])).rows[0];
+    const dogrulanmis = m && m.lat != null && ["KESIN", "CELISKILI"].includes(m.dogruluk);
+    if (lat != null && dogrulanmis && b.degistir_onay !== true)
+      return res.status(409).json({ ok: false, error: `Bu sahanın ${m.kaynak} kaynaklı doğrulanmış koordinatı var — değiştirmek için açıkça onaylayın`, mevcut: { lat: Number(m.lat), lng: Number(m.lng), kaynak: m.kaynak } });
+    const ben = String(req.user?.email || "").toLowerCase();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (lat != null) await client.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, ham, il, ilce, kaynak_site_code, updated_at)
+          VALUES ($1,$2,$3,'MANUEL','KESIN',$4,$5,$6,$7,NULL,NOW())
+        ON CONFLICT (fiziksel_id) DO UPDATE SET lat=EXCLUDED.lat, lng=EXCLUDED.lng, kaynak='MANUEL', dogruluk='KESIN', uyarilar=EXCLUDED.uyarilar, ham=EXCLUDED.ham,
+          il=COALESCE(EXCLUDED.il, saha_konum.il), ilce=COALESCE(EXCLUDED.ilce, saha_konum.ilce), updated_at=NOW()`,
+        [id, lat, lng, JSON.stringify([`Elle girildi: ${gerekce} (${req.user?.name || ben}, ${new Date().toLocaleDateString("tr-TR")})`]), `${lat}, ${lng}`, il, ilce]);
+      else await client.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, il, ilce, updated_at) VALUES ($1,NULL,NULL,'MANUEL_IL','YALNIZ_IL',$2,$3,$4,NOW())
+        ON CONFLICT (fiziksel_id) DO UPDATE SET il=EXCLUDED.il, ilce=COALESCE(EXCLUDED.ilce, saha_konum.ilce), updated_at=NOW()`,
+        [id, JSON.stringify([`İl elle girildi: ${gerekce}`]), il, ilce]);
+      await client.query(`INSERT INTO saha_konum_gecmis (fiziksel_id, onceki, yeni, degistiren) VALUES ($1,$2,$3,$4)`,
+        [id, m ? JSON.stringify(m) : null, JSON.stringify({ lat, lng, il, ilce, kaynak: lat != null ? "MANUEL" : "MANUEL_IL", gerekce }), ben]);
+      await client.query("COMMIT");
+    } catch (e) { await client.query("ROLLBACK").catch(() => {}); throw e; } finally { client.release(); }
+    res.json({ ok: true, fiziksel_id: id, kaynak: lat != null ? "MANUEL" : "MANUEL_IL" });
+  } catch (e) { console.error("MANUEL KONUM ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 // ── Filtrelenen sahaları Excel indir: haritayla AYNI kaynak (haritaVerisi) + istemcinin gösterdiği saha listesi ──
 app.post("/rollout/harita/excel", authMiddleware, async (req, res) => {
@@ -14897,6 +15065,9 @@ function isAtamaYetkiliMi(req) {
   const e = String(req.user?.email || "").toLowerCase().trim();
   const rol = String(req.user?.role || "").toLowerCase();
   if (req.user?.kullanici_tipi === "TASERON" || rol === "subcon") return false;
+  // 31.10.2026: kişiye özel "is_atama_yap" ayarı — false her zaman kapatır; true yalnız ERC (alt marka olmayan) hesapta açar
+  if (req.izinler?.is_atama_yap === false) return false;
+  if (req.izinler?.is_atama_yap === true && !altMarkaKullanicisi(req.user)) return true;
   // 28.10.2026: alt marka (Teknocenter) hesabında iş atama = yönetim rolü + Rollout düzenleme izni (salt okunur kullanıcı
   // atama yapamaz). Saha / iş kolu kapsamı MARKA İŞ ATAMA kapısında ayrıca doğrulanır.
   if (altMarkaKullanicisi(req.user) && altMarkaMi(req.user?.marka))
@@ -15290,6 +15461,7 @@ app.post("/is-atama/:id/basla", authMiddleware, async (req, res) => {
        VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $2)
        ON CONFLICT (is_atama_id, tarih, personel_email) DO UPDATE SET baslama = COALESCE(is_atama_gun.baslama, NOW())`, [id, email, ad]);
     await isAtamaRolloutTarihYaz(row.site_codes || [], row.baslangic_kolonu);
+    if (fiiliDurum.MONTAJ_KATEGORI.includes(row.kategori)) await operasyon.atamaOlayYaz(pool, row, "BASLADI", req);
     if (row.kategori === "CLEANUP") {
       await pool.query(`UPDATE rollout_cleanup SET visit_date = COALESCE(visit_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
     }
@@ -15340,6 +15512,11 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
     if (yeniDurum === "ARA_VERILDI" || (bitti && String(notu || "").trim())) {
       await isAtamaRolloutNotYaz(row.site_codes || [], `${new Date().toLocaleDateString("tr-TR")} ${row.kategori_ad || row.kategori} ${yeniDurum === "ARA_VERILDI" ? "ARA VERİLDİ" : "tamamlandı"}${sebepTxt ? ` — ${sebepTxt}` : ""}${String(notu || "").trim() ? `: ${String(notu).trim()}` : ""} (${req.user?.name || email})`);
     }
+    // 31.10.2026: fiilî durum (QC'den bağımsız) — tamamlandı ise QC sonucu ne olursa olsun fiziksel montaj tamamlandı
+    if (fiiliDurum.MONTAJ_KATEGORI.includes(row.kategori)) {
+      if (bitti) await operasyon.atamaOlayYaz(pool, row, "TAMAMLANDI", req, { aciklama: String(notu || "").trim() || null });
+      else if (yeniDurum === "ARA_VERILDI") await operasyon.atamaOlayYaz(pool, row, "ISSUE", req, { issue_turu: sebepTxt, aciklama: String(notu || "").trim() || null });
+    }
     if (bitti) {
       await isAtamaRolloutTarihYaz(row.site_codes || [], row.bitis_kolonu);
       if (row.qc_yazar && qcOk) {
@@ -15369,6 +15546,8 @@ app.post("/is-atama/:id/ara-ver", authMiddleware, async (req, res) => {
     const satir = `${new Date().toLocaleDateString("tr-TR")} ${req.user?.name || req.user?.email} (panel)${sebep ? ` [${sebep}]` : " [Devam]"}: ${notu}`.trim();
     await pool.query(`UPDATE is_atama SET durum = $2, durdurma_sebebi = $3, kapanis_not = $4, updated_at = NOW() WHERE id = $1`,
       [id, yeniDurum, devamEt ? null : sebep, `${eskiNot ? eskiNot + "\n" : ""}${satir}`]);
+    if (yeniDurum === "ARA_VERILDI" && fiiliDurum.MONTAJ_KATEGORI.includes(row.kategori)) await operasyon.atamaOlayYaz(pool, row, "ISSUE", req, { issue_turu: sebep, aciklama: notu || null });
+    if (devamEt && fiiliDurum.MONTAJ_KATEGORI.includes(row.kategori)) await operasyon.atamaOlayYaz(pool, row, "ISSUE_KAPANDI", req, { aciklama: notu || null });
     if (yeniDurum === "ARA_VERILDI") await isAtamaRolloutNotYaz(row.site_codes || [], `${new Date().toLocaleDateString("tr-TR")} ${row.kategori_ad || row.kategori} ARA VERİLDİ — ${sebep}${notu ? `: ${notu}` : ""} (${req.user?.name || req.user?.email}, panel)`);
     res.json({ ok: true, row: await isAtamaDetay(id), durum: yeniDurum });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
