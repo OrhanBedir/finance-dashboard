@@ -455,6 +455,18 @@ const AUTH_H = () => ({ Authorization: `Bearer ${localStorage.getItem("token") |
 // eski kayıtlarda "kullanıcı bilgisi bulunmuyor" görünür (mevcut kullanıcı atanmaz). Saatler Türkiye saati; geçmiş değiştirilemez.
 function IslemGecmisiPanel({ modul, id, onClose }) {
   const [g, setG] = useState({ yukleniyor: true, olaylar: [], kayit: null, hata: null });
+  // 02.11.2026: iş avansında gönderim turları (1. talep, red, düzeltme, yeniden gönderimler) tek kimlik altında
+  const [turlar, setTurlar] = useState(null);
+  useEffect(() => {
+    if (modul !== "avans") { setTurlar(null); return; }
+    let iptal = false;
+    fetch(`${API_BASE}/hr/is-avans/${id}/detay`, { headers: AUTH_H() }).then(r => r.json()).then(d => { if (!iptal) setTurlar(d && d.ok ? (d.turlar || []) : []); }).catch(() => { if (!iptal) setTurlar([]); });
+    return () => { iptal = true; };
+  }, [modul, id]);
+  const TUR_SONUC = { REDDEDILDI: ["Reddedildi", "#fee2e2", "#991b1b"], ONAYLANDI: ["Onaylandı · ödendi", "#dcfce7", "#166534"], ACIK: ["Onay sürecinde", "#dbeafe", "#1e40af"] };
+  const turZaman = (z) => z ? new Date(z).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  const alanAd = { tutar: "Tutar", tarih: "Tarih", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka", arac_km: "Araç KM", aciklama: "Açıklama", not_aciklama: "Not", son_odeme_tarihi: "Son ödeme günü", firma: "Firma" };
+  const alanDeger = (k, v) => v == null || v === "" ? "—" : k === "tutar" ? `₺${Number(v).toLocaleString("tr-TR")}` : String(v);
   useEffect(() => {
     let iptal = false;
     setG({ yukleniyor: true, olaylar: [], kayit: null, hata: null });
@@ -472,6 +484,7 @@ function IslemGecmisiPanel({ modul, id, onClose }) {
     OLUSTURMA: ["Oluşturma", "#dbeafe", "#1e40af"], DUZENLEME: ["Düzenleme", "#fef3c7", "#92400e"], KALEM_DUZENLE: ["Düzenleme", "#fef3c7", "#92400e"], DUZELTME: ["Düzeltme", "#fef3c7", "#92400e"],
     ONAY: ["Onay", "#dcfce7", "#166534"], ODEME: ["Ödeme", "#ccfbf1", "#0f766e"], GONDERIM: ["Gönderim", "#e0f2fe", "#0369a1"],
     RED: ["Red", "#fee2e2", "#991b1b"], GERI_GONDER: ["İade", "#ffedd5", "#9a3412"], SILME: ["Silme", "#fee2e2", "#991b1b"], KALEM_SIL: ["Silme", "#fee2e2", "#991b1b"], BELGE_SIL: ["Belge", "#fff7ed", "#9a3412"],
+    YENIDEN_GONDERIM: ["Yeniden gönderim", "#ede9fe", "#5b21b6"], YONLENDIRME: ["Yönlendirme", "#e0f2fe", "#0369a1"],
     ARSIV: ["Arşiv", "#ede9fe", "#5b21b6"], KALEM_EKLE: ["Kalem", "#ecfdf5", "#065f46"], BELGE_EKLE: ["Belge", "#ecfdf5", "#065f46"], NOT: ["Açıklama", "#f1f5f9", "#475569"],
     ROL: ["Rol", "#fef3c7", "#92400e"], MARKA: ["Firma", "#eff6ff", "#1d4ed8"], DURUM: ["Erişim", "#e0f2fe", "#0369a1"], SIFRE: ["Şifre", "#f1f5f9", "#475569"], IK: ["İK", "#ecfdf5", "#065f46"],
   };
@@ -491,6 +504,23 @@ function IslemGecmisiPanel({ modul, id, onClose }) {
           <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", padding: "6px 12px", cursor: "pointer", fontWeight: 700 }}>Kapat</button>
         </div>
         <div style={{ overflowY: "auto", padding: "10px 18px 16px" }}>
+          {modul === "avans" && turlar && turlar.length > 0 && (
+            <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "12px", padding: "10px 14px", marginBottom: "12px" }}>
+              <div style={{ fontWeight: 800, fontSize: "13px", color: "#3b0764", marginBottom: "6px" }}>🔁 Gönderimler ({turlar.length}) — her gönderim ayrı onay turudur; eski turların onay / red kayıtları değişmez</div>
+              {turlar.map(tr => { const s = TUR_SONUC[tr.sonuc] || [tr.sonuc || "—", "#f1f5f9", "#475569"]; const d = tr.degisen || {}; return (
+                <div key={tr.tur_no} style={{ padding: "7px 0", borderTop: tr.tur_no > 1 ? "1px solid #ede9fe" : "none", fontSize: "12.5px", color: "#1e1b4b" }}>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <b>{tr.tur_no}. gönderim</b><span style={{ color: "#64748b" }}>{tr.gonderen_ad || tr.gonderen_email || ""} · {turZaman(tr.gonderim_zamani)}</span>
+                    <span style={{ background: s[1], color: s[2], padding: "1px 8px", borderRadius: "999px", fontSize: "10.5px", fontWeight: 800, marginLeft: "auto" }}>{s[0]}{tr.aktif ? " · aktif" : ""}</span>
+                  </div>
+                  {tr.gonderim_aciklama && <div><b>Düzeltme açıklaması:</b> {tr.gonderim_aciklama}</div>}
+                  {Object.keys(d).length > 0 && <div><b>Değişen:</b> {Object.entries(d).map(([k, v]) => `${alanAd[k] || k}: ${alanDeger(k, v.eski)} → ${alanDeger(k, v.yeni)}`).join(" · ")}</div>}
+                  {tr.alanlar && <div style={{ color: "#64748b" }}>{[["tutar", tr.alanlar.tutar], ["tarih", tr.alanlar.tarih], ["gider_turu", tr.alanlar.gider_turu], ["bolge", tr.alanlar.bolge], ["proje", tr.alanlar.proje]].filter(([, v]) => v != null && v !== "").map(([k, v]) => `${alanAd[k]}: ${alanDeger(k, v)}`).join(" · ")}{tr.alanlar.aciklama ? ` · Açıklama: ${tr.alanlar.aciklama}` : ""}</div>}
+                  {tr.red && <div style={{ color: "#991b1b" }}><b>Red:</b> {tr.red.aciklama || <i>eski kayıtta red gerekçesi bulunmuyor</i>} — {tr.red.reddeden_ad || tr.red.reddeden_email || "bilinmiyor"} · {tr.red.zaman ? turZaman(tr.red.zaman) : "tarih yok"} · {tr.red.asama_tr || "aşama bilgisi yok"}</div>}
+                </div>
+              ); })}
+            </div>
+          )}
           {g.yukleniyor && <div style={{ color: "#94a3b8", padding: "16px", textAlign: "center" }}>Yükleniyor…</div>}
           {g.hata && <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: "8px", padding: "8px 12px", fontSize: "12.5px", fontWeight: 700 }}>{g.hata}</div>}
           {!g.yukleniyor && !g.hata && g.olaylar.length === 0 && <div style={{ color: "#94a3b8", padding: "16px", textAlign: "center" }}>Kayıtlı işlem yok</div>}
@@ -27809,6 +27839,66 @@ function TeknoZincirSatiri({ tk }) {
   );
 }
 
+// ═══ 02.11.2026 (Orhan): iş avansı red → düzelt → yeniden gönder. Web ve mobil aynı sunucu alanlarını okur:
+// t.red {aciklama, reddeden_ad, zaman, asama_tr, not}, t.tur_no, t.gonderim {aciklama, degisen}, t.onceki_red, t.duzeltilebilir (yalnız sahibi + REDDEDILDI)
+const avansZaman = (z) => z ? new Date(z).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : null;
+const AVANS_ALAN_AD = { tutar: "Tutar", tarih: "Tarih", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka", arac_km: "Araç KM", aciklama: "Açıklama", not_aciklama: "Not", son_odeme_tarihi: "Son ödeme günü", firma: "Firma" };
+const avansAlanDeger = (k, v) => v == null || v === "" ? "—" : k === "tutar" ? `₺${Number(v).toLocaleString("tr-TR")}` : String(v);
+function AvansGonderimRozeti({ t, kucuk }) {
+  if (!t || !(Number(t.tur_no) > 1)) return null;
+  return <span title={t.gonderim?.aciklama ? `Düzeltme açıklaması: ${t.gonderim.aciklama}` : ""} style={{ display: "inline-block", background: "#ede9fe", color: "#5b21b6", borderRadius: "999px", padding: kucuk ? "1px 7px" : "3px 9px", fontSize: kucuk ? "10.5px" : "11.5px", fontWeight: 800, whiteSpace: "nowrap" }}>🔁 Yeniden gönderildi · {t.tur_no}. gönderim</span>;
+}
+// Reddedilen talep: gerekçe, reddeden, zaman, aşama — eski kayıtta eksik bilgi açıkça yazılır, gerekçe uydurulmaz
+function AvansRedKutusu({ t, kompakt }) {
+  const r = t?.red; if (!r) return null;
+  return (
+    <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "10px", padding: kompakt ? "8px 10px" : "10px 14px", fontSize: kompakt ? "12px" : "13px", color: "#7f1d1d", lineHeight: 1.5 }}>
+      <div style={{ fontWeight: 800 }}>❌ Reddedildi{r.tur_no > 1 ? ` (${r.tur_no}. gönderim)` : ""}{t.duzeltilebilir ? " · Düzeltmeniz bekleniyor" : ""}</div>
+      <div><b>Gerekçe:</b> {r.aciklama || <i style={{ color: "#b45309" }}>{r.not || "Eski kayıtta red gerekçesi bulunmuyor"}</i>}</div>
+      <div style={{ fontSize: kompakt ? "11px" : "12px", color: "#991b1b" }}>Reddeden: {r.reddeden_ad || r.reddeden_email || "bilinmiyor"} · {r.zaman ? avansZaman(r.zaman) : "eski kayıtta tarih bilgisi yok"} · Aşama: {r.asama_tr || "eski kayıtta aşama bilgisi yok"}</div>
+    </div>
+  );
+}
+// Onaycı detayı: önceki red gerekçesi + personelin düzeltme açıklaması + değişen alanların önceki / yeni değerleri
+function AvansGonderimDetayi({ t, kompakt }) {
+  if (!t || !(Number(t.tur_no) > 1)) return null;
+  const d = t.gonderim?.degisen || {};
+  return (
+    <div style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: "10px", padding: kompakt ? "8px 10px" : "10px 14px", fontSize: kompakt ? "12px" : "13px", color: "#3b0764", lineHeight: 1.5 }}>
+      <div style={{ fontWeight: 800 }}>🔁 {t.tur_no}. gönderim{t.gonderim?.gonderen_ad ? ` · ${t.gonderim.gonderen_ad}` : ""}{t.gonderim?.zaman ? ` · ${avansZaman(t.gonderim.zaman)}` : ""}</div>
+      {t.onceki_red && <div><b>Önceki red ({t.onceki_red.tur_no}. gönderim):</b> {t.onceki_red.aciklama || "gerekçe kayıtlı değil"} <span style={{ color: "#6b21a8" }}>— {t.onceki_red.reddeden_ad || t.onceki_red.reddeden_email || ""}{t.onceki_red.asama_tr ? `, ${t.onceki_red.asama_tr}` : ""}</span></div>}
+      <div><b>Personelin düzeltme açıklaması:</b> {t.gonderim?.aciklama || "—"}</div>
+      {Object.keys(d).length > 0 ? <div><b>Değişen alanlar:</b> {Object.entries(d).map(([k, v]) => `${AVANS_ALAN_AD[k] || k}: ${avansAlanDeger(k, v.eski)} → ${avansAlanDeger(k, v.yeni)}`).join(" · ")}</div>
+        : <div style={{ color: "#6b21a8" }}>Alanlarda değişiklik yok (yalnız açıklama eklendi)</div>}
+    </div>
+  );
+}
+// Personelin "Reddedildi · Düzeltmeniz bekleniyor" bölümü (İş Avanslarım ve Benim İşlemlerim'de aynı)
+function AvansDuzeltmeBekleyenler({ rows, onDuzelt, onGecmis }) {
+  if (!rows?.length) return null;
+  const gun = (d) => d ? String(d).slice(0, 10).split("-").reverse().join(".") : "";
+  return (
+    <div style={{ background: "#fff7f7", border: "2px solid #fca5a5", borderRadius: "14px", padding: "14px 16px", marginBottom: "16px" }}>
+      <div style={{ fontWeight: 800, color: "#991b1b", fontSize: "14px", marginBottom: "10px" }}>❌ Reddedildi · Düzeltmeniz bekleniyor ({rows.length})</div>
+      <div style={{ display: "grid", gap: "10px" }}>
+        {rows.map((t) => (
+          <div key={t.id} style={{ background: "#fff", borderRadius: "12px", padding: "12px 14px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: "14px" }}>AV-{t.id} · {t.gider_turu || "—"} · ₺{Number(t.tutar).toLocaleString("tr-TR")} <span style={{ color: "#6b7280", fontWeight: 500, fontSize: "12px" }}>{gun(t.tarih)}{t.bolge ? ` · ${t.bolge}` : ""}{t.proje ? ` · ${t.proje}` : ""}{Number(t.tur_no) > 1 ? ` · ${t.tur_no}. gönderim` : ""}</span></div>
+              {t.aciklama && <div style={{ fontSize: "12.5px", color: "#6b7280", margin: "2px 0 6px" }}>{t.aciklama}</div>}
+              <AvansRedKutusu t={t} kompakt />
+            </div>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {onGecmis && <button onClick={() => onGecmis(t)} style={{ padding: "8px 12px", background: "#f1f5f9", color: "#334155", border: "1px solid #e2e8f0", borderRadius: "8px", fontSize: "13px", fontWeight: 700, cursor: "pointer" }}>🕘 Geçmiş</button>}
+              <button onClick={() => onDuzelt(t)} style={{ padding: "8px 14px", background: "#b91c1c", color: "#fff", border: "none", borderRadius: "8px", fontSize: "13px", fontWeight: 800, cursor: "pointer" }}>🔁 Düzelt ve yeniden gönder</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPendingAvans, onPendingMasraf }) {
   const [tab, setTab] = useState(initialTab);
   useEffect(() => { setTab(initialTab); }, [initialTab]);
@@ -27944,7 +28034,11 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
   const benimFormlar = formlar.filter(f => _benimMi(f.talep_eden_email, f.talep_eden_ad));
   const benimAvanslar = avanslar.filter(t => _benimMi(t.personel_email || (t.personel_ad ? "" : t.talep_eden_email), t.personel_ad || t.talep_eden_ad));
   const iadeMi = (f) => f.durum === "TASLAK" && String(f.red_aciklama || "").startsWith("↩");
-  const benimAksiyon = benimFormlar.filter(f => f.durum === "TASLAK").length;
+  const duzeltmeBekleyenAvans = benimAvanslar.filter(t => t.duzeltilebilir); // 02.11.2026: reddedilen, sahibi düzeltecek
+  const benimAksiyon = benimFormlar.filter(f => f.durum === "TASLAK").length + duzeltmeBekleyenAvans.length;
+  const [duzeltTetik, setDuzeltTetik] = useState({ id: null, n: 0 }); // İş Avansları sekmesinde "düzelt ve yeniden gönder" penceresini açar
+  const [gecmisAvans, setGecmisAvans] = useState(null);
+  const avansDuzelt = (t) => { setTab("avans"); setDuzeltTetik(p => ({ id: t.id, n: p.n + 1 })); };
   const yeniMasraf = () => { setTab("masraf"); setYeniTetik(p => ({ tip: "masraf", n: p.n + 1 })); };
   const yeniAvans = () => { setTab("avans"); setYeniTetik(p => ({ tip: "avans", n: p.n + 1 })); };
   const masrafOnayaGonder = async (f) => {
@@ -27988,14 +28082,15 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
     await avansGonder(t.id, path, _altMarka ? _marka : undefined);
   };
   const avansGonder = async (id, path, firma) => {
-    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json", ..._auth }, body: JSON.stringify(firma ? { firma } : {}) });
+    const t0 = avanslar.find(x => String(x.id) === String(id)); // 02.11.2026: görülen tur ve aşama gönderilir — eski ekran yeni turu onaylayamaz
+    const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json", ..._auth }, body: JSON.stringify({ ...(firma ? { firma } : {}), ...(t0 ? { tur_no: t0.tur_no || 1, beklenen_durum: t0.durum } : {}) }) });
     if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onay yapılamadı"); }
     setFirmaSec(null); setTazele(x => x + 1);
   };
   const avansReddet = async (t) => {
     const sebep = window.prompt(`${t.personel_ad || t.talep_eden_ad} · ₺${fmt(t.tutar)} — red açıklaması:`);
     if (!sebep || !sebep.trim()) return;
-    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email }) });
+    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/reddet`, { method:"PUT", headers:{ ...AUTH_H(),  "Content-Type":"application/json" }, body: JSON.stringify({ red_aciklama: sebep, reddeden_email: _email, tur_no: t.tur_no || 1, beklenen_durum: t.durum }) });
     if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Reddedilemedi"); }
     setTazele(x => x + 1);
   };
@@ -28130,8 +28225,8 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                     {(isRequester ? digerleri : kuyruk).map(r => (
                       <tr key={r.tip + r.id + (r.durum || "")}>
                         <td style={td}>{r.tip === "AVANS" ? <span style={pill("#fef3c7", "#b45309")}>İş avansı</span> : <span style={pill("#ede9fe", "#6d28d9")}>Masraf formu</span>}</td>
-                        <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"28px", height:"28px", borderRadius:"50%", background:navy, color:"#fff", fontWeight:800, fontSize:"11px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:700 }}>{r.ad}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt || DURUM_AD[r.durum] || ""}</div></div></div></td>
-                        <td style={{ ...td, maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={r.ne}>{r.ne || "—"}</td>
+                        <td style={td}><div style={{ display:"flex", alignItems:"center", gap:"8px" }}><span style={{ width:"28px", height:"28px", borderRadius:"50%", background:navy, color:"#fff", fontWeight:800, fontSize:"11px", display:"grid", placeItems:"center", flex:"none" }}>{initials(r.ad)}</span><div><div style={{ fontWeight:700 }}>{r.ad}</div><div style={{ fontSize:"11.5px", color:"#6b7a90" }}>{r.alt || DURUM_AD[r.durum] || ""}</div>{r.tip === "AVANS" && Number(r.obj?.tur_no) > 1 && <div style={{ marginTop:"3px" }}><AvansGonderimRozeti t={r.obj} kucuk /></div>}</div></div></td>
+                        <td style={{ ...td, maxWidth: r.tip === "AVANS" && Number(r.obj?.tur_no) > 1 ? "420px" : "260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace: r.tip === "AVANS" && Number(r.obj?.tur_no) > 1 ? "normal" : "nowrap" }} title={r.ne}>{r.ne || "—"}{r.tip === "AVANS" && Number(r.obj?.tur_no) > 1 && <div style={{ marginTop:"6px" }}><AvansGonderimDetayi t={r.obj} kompakt /></div>}</td>
                         <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{fmt(r.tutar)}</td>
                         <td style={td}><Adimlar idx={r.adim} etiketler={r.et} /></td>
                         <td style={td}>{(() => { const g = gun(r.tarih); return <span style={pill(g >= 5 ? "#fee2e2" : g >= 3 ? "#fef3c7" : "#f3f5f8", g >= 5 ? "#b91c1c" : g >= 3 ? "#b45309" : "#6b7a90")}>{g === 0 ? "bugün" : `${g} gün`}</span>; })()}</td>
@@ -28315,6 +28410,9 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
               )}
             </div>
 
+            {/* 02.11.2026: reddedilen iş avanslarım — kaybolmaz, ayrı bölümde; düzelt ve yeniden gönder */}
+            <div style={{ marginTop:"14px" }}><AvansDuzeltmeBekleyenler rows={duzeltmeBekleyenAvans} onDuzelt={avansDuzelt} onGecmis={(t) => setGecmisAvans(t.id)} /></div>
+            {gecmisAvans && <IslemGecmisiPanel modul="avans" id={gecmisAvans} onClose={() => setGecmisAvans(null)} />}
             {/* İş Avanslarım */}
             <div style={{ ...panel, marginTop:"14px" }}>
               <div style={panelH}>
@@ -28332,9 +28430,9 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
                         <td style={td}>{t.gider_turu || "—"}{t.plaka ? <div style={{ fontSize:"11px", color:"#6b7a90" }}>🚗 {t.plaka}</div> : null}</td>
                         <td style={{ ...td, maxWidth:"260px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={[t.aciklama, t.not_aciklama].filter(Boolean).join(" · ")}>{[t.bolge, t.proje].filter(Boolean).join(" · ")}{t.aciklama ? <div style={{ fontSize:"11.5px", color:"#6b7a90", overflow:"hidden", textOverflow:"ellipsis" }}>{t.aciklama}</div> : null}</td>
                         <td style={{ ...td, textAlign:"right", fontWeight:800, fontVariantNumeric:"tabular-nums" }}>₺{fmt(t.tutar)}</td>
-                        <td style={td}>{avDurum(t)}{t.durum === "REDDEDILDI" && t.red_aciklama && <div style={{ fontSize:"11.5px", color:"#b91c1c", marginTop:"4px" }}>{t.red_aciklama}</div>}</td>
-                        <td style={td}>{AV_BEKLEYEN.includes(t.durum) ? <><div style={{ fontSize:"12.5px", fontWeight:600 }}>{t.tekno ? teknoBekleyenMetni(t.tekno) : (KIMDE_AVANS[t.durum] || "—")}</div><div style={{ marginTop:"4px" }}><Adimlar idx={t.tekno ? teknoAdimNo(t.tekno) : (AV_ADIM[t.durum] ?? 0)} etiketler={t.tekno ? teknoEtiketler(t.tekno) : AV_ET} /></div></> : "—"}</td>
-                        <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}><button onClick={() => setTab("avans")} style={bG}>Listede Gör</button></td>
+                        <td style={td}>{avDurum(t)}{Number(t.tur_no) > 1 && <div style={{ marginTop:"4px" }}><AvansGonderimRozeti t={t} kucuk /></div>}{t.red && <div style={{ marginTop:"6px", maxWidth:"380px" }}><AvansRedKutusu t={t} kompakt /></div>}</td>
+                        <td style={td}>{AV_BEKLEYEN.includes(t.durum) ? <><div style={{ fontSize:"12.5px", fontWeight:600 }}>{t.tekno ? teknoBekleyenMetni(t.tekno) : (KIMDE_AVANS[t.durum] || "—")}</div><div style={{ marginTop:"4px" }}><Adimlar idx={t.tekno ? teknoAdimNo(t.tekno) : (AV_ADIM[t.durum] ?? 0)} etiketler={t.tekno ? teknoEtiketler(t.tekno) : AV_ET} /></div></> : t.duzeltilebilir ? <span style={pill("#fee2e2", "#b91c1c")}>Sizde — düzeltme bekleniyor</span> : "—"}</td>
+                        <td style={{ ...td, whiteSpace:"nowrap", textAlign:"right" }}><div style={{ display:"inline-flex", gap:"6px", flexWrap:"wrap", justifyContent:"flex-end" }}><button onClick={() => setGecmisAvans(t.id)} style={bG}>🕘</button><button onClick={() => setTab("avans")} style={bG}>Listede Gör</button>{t.duzeltilebilir && <button onClick={() => avansDuzelt(t)} style={{ ...bS, background:"#b91c1c", color:"#fff" }}>🔁 Düzelt ve yeniden gönder</button>}</div></td>
                       </tr>
                     ))}
                   </tbody>
@@ -28394,7 +28492,7 @@ function PersonelHarcamalariPanel({ currentUser, initialTab = "benim", onPending
           </div>
         );
       })()}
-      {tab === "avans" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={onPendingAvans} embedded mode="liste" yeniTetik={yeniTetik.tip === "avans" ? yeniTetik.n : 0} /></div>}
+      {tab === "avans" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={onPendingAvans} embedded mode="liste" yeniTetik={yeniTetik.tip === "avans" ? yeniTetik.n : 0} duzeltTetik={duzeltTetik} onDegisti={() => setTazele(x => x + 1)} /></div>}
       {tab === "masraf" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={onPendingMasraf} embedded initialFormId={inceleFormId} initialEditId={duzenleFormId} yeniTetik={yeniTetik.tip === "masraf" ? yeniTetik.n : 0} /></div>}
       {tab === "odemeler" && <div className="ph-embed" style={{ marginTop:"14px" }}><IsAvansPanel currentUser={currentUser} onPendingCount={() => {}} embedded mode="odemeler" initialKapsam="TUM" /></div>}
       {tab === "arsiv" && <div className="ph-embed" style={{ marginTop:"14px" }}><MasrafFormuPanel currentUser={currentUser} onPendingCount={() => {}} embedded initialDurum="ARSIVLENDI" initialKapsam="TUM" /></div>}
@@ -28704,7 +28802,7 @@ function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnayland
     try {
       const r = await fetch(`${API_BASE}/hr/is-avans/${x.id}/onayla`, {
         method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" },
-        body: JSON.stringify({ beklenen_durum: x.durum, tek_asama: true, ...(f ? { firma: f } : {}) }),
+        body: JSON.stringify({ beklenen_durum: x.durum, tek_asama: true, tur_no: x.tur_no || 1, ...(f ? { firma: f } : {}) }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -28781,6 +28879,7 @@ function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnayland
                   <div className="avm-k" style={{ marginTop: "3px" }}>Onay: {(x.onaycilar || []).map((o) => o.ad + (o.devir ? " (devir)" : "")).join(", ") || "—"}</div>
                 )}
                 {x.benim_onaylayabilir && <div className="avm-k" style={{ marginTop: "3px", color: "#047857", fontWeight: 700 }}>Onayınızı bekliyor</div>}
+                {Number(x.tur_no) > 1 && <div style={{ marginTop: "4px" }}><AvansGonderimRozeti t={x} kucuk /></div>}
               </div>
               <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 {x.benim_onaylayabilir && (
@@ -28828,6 +28927,7 @@ function AvansListeModal({ baslik, aciklama, sekmeler, byId, onKapat, onOnayland
                   </div>
                   <div style={{ marginTop: "10px", fontSize: "13.5px", whiteSpace: "pre-wrap", lineHeight: 1.55 }}><span className="avm-k">Açıklama</span><div>{x.aciklama || "—"}</div></div>
                   {x.not_aciklama && <div style={{ marginTop: "8px", fontSize: "13.5px", whiteSpace: "pre-wrap" }}><span className="avm-k">Not</span><div>{x.not_aciklama}</div></div>}
+                  {Number(x.tur_no) > 1 && <div style={{ marginTop: "10px" }}><AvansGonderimDetayi t={x} /></div>}
                   <button type="button" className="avm-btn" style={{ marginTop: "10px", background: "#fff", color: "#1e3a5f", border: "1px solid #cbd5e1" }}
                     onClick={() => setGecmis(gecmis === x.id ? null : x.id)}>🕘 Talep geçmişi</button>
                   {gecmis === x.id && <IslemGecmisPanelSarmal id={x.id} onClose={() => setGecmis(null)} />}
@@ -28918,8 +29018,12 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
   );
 }
 
-function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "", initialKapsam = "", yeniTetik = 0 }) {
+function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "", initialKapsam = "", yeniTetik = 0, duzeltTetik = null, onDegisti = null }) {
   const [list, setList] = useState([]);
+  // 02.11.2026: düzelt ve yeniden gönder (reddedilen, sahibi) — aynı talep kimliği, yeni onay turu; açıklama zorunlu
+  const [duzelt, setDuzelt] = useState(null);
+  const [duzeltAciklama, setDuzeltAciklama] = useState("");
+  const istekAnahtari = useRef(null); // çift tıklama / bağlantı kopması sonrası tekrar aynı anahtarla gider (sunucu ikinci talep / tur açmaz)
   const [gecmis, setGecmis] = useState(null); // 20.10.2026: kayıt bazında işlem geçmişi (ortak IslemGecmisiPanel)
   const [personelList, setPersonelList] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -29152,7 +29256,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   });
 
   const openNew = () => {
-    setEditingId(null);
+    setEditingId(null); setDuzelt(null); setDuzeltAciklama("");
+    istekAnahtari.current = (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     setFarkliArac(false);
     const _bugunT = new Date().toISOString().split("T")[0];
     setForm({ personel_id: "", tutar: "", tarih: _bugunT, son_odeme_tarihi: _bugunT, aciklama: "", not_aciklama: "", gider_turu: "", bolge: "", proje: "", plaka: "", firma: _altMarka ? _marka : "" });
@@ -29161,8 +29266,33 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
 
   useEffect(() => { if (yeniTetik) openNew(); }, [yeniTetik]);
 
+  const openDuzelt = (t) => {
+    setEditingId(null); setDuzelt(t); setDuzeltAciklama("");
+    istekAnahtari.current = (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    setFarkliArac(true);
+    setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, son_odeme_tarihi: t.son_odeme_tarihi ? (String(t.son_odeme_tarihi).split("T")[0]) : "", aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || "" });
+    setShowModal(true);
+  };
+  useEffect(() => { if (duzeltTetik?.n && duzeltTetik.id) { const t = list.find(x => String(x.id) === String(duzeltTetik.id)); if (t && t.duzeltilebilir) openDuzelt(t); } }, [duzeltTetik?.n, list]);
+  const duzeltGonder = async () => {
+    const t = duzelt; if (!t) return;
+    if (duzeltAciklama.trim().length < 3) { alert("Düzeltme / yeniden talep açıklaması zorunlu — neyi düzelttiğinizi yazın."); return; }
+    if (!form.tutar || Number(form.tutar) <= 0) { alert("Geçerli tutar girin."); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/yeniden-gonder`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" },
+        body: JSON.stringify({ gonderim_aciklama: duzeltAciklama.trim(), tutar: form.tutar, tarih: form.tarih, son_odeme_tarihi: form.son_odeme_tarihi || null, gider_turu: form.gider_turu, bolge: form.bolge, proje: form.proje,
+          plaka: form.plaka || null, aciklama: form.aciklama, not_aciklama: form.not_aciklama, surum: t.surum, istek_anahtari: istekAnahtari.current }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || `Sunucu hatası (${r.status})`);
+      setShowModal(false); setDuzelt(null); setDuzeltAciklama("");
+      alert(d.tekrar ? "Bu gönderim zaten alınmıştı; talep onay sürecinde." : `Talep ${d.tur_no}. gönderim olarak yeniden onaya gönderildi.`);
+      load(); loadBakiye(); if (onDegisti) onDegisti();
+    } catch (e) { alert("Yeniden gönderilemedi: " + e.message); load(); }
+    setSaving(false);
+  };
   const openEdit = (t) => {
-    setEditingId(t.id);
+    setEditingId(t.id); setDuzelt(null);
     setFarkliArac(true); // düzenlemede mevcut plaka korunur, otomatik doldurma devreye girmez
     setForm({ personel_id: t.personel_id || "", tutar: t.tutar, tarih: t.tarih?.split("T")[0] || t.tarih, son_odeme_tarihi: t.son_odeme_tarihi ? (String(t.son_odeme_tarihi).split("T")[0]) : "", aciklama: t.aciklama || "", not_aciklama: t.not_aciklama || "", gider_turu: t.gider_turu || "", bolge: t.bolge || "", proje: t.proje || "", plaka: t.plaka || "", firma: t.firma || (_altMarka ? _marka : "") });
     setShowModal(true);
@@ -29170,6 +29300,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (duzelt) return duzeltGonder();
     if (!_altMarka && !form.firma) { alert("Lütfen önce firma seçin (ŞİMŞEK / AHY)"); return; }
     setSaving(true);
     try {
@@ -29179,6 +29310,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         firma: _altMarka ? _marka : form.firma,
         talep_eden_email: currentUser?.email,
         talep_eden_ad: currentUser?.name || currentUser?.email,
+        ...(editingId ? {} : { istek_anahtari: istekAnahtari.current }), // yeni talep: tekrar gönderim ikinci kayıt açmaz
       };
       if (editingId) {
         await fetch(`${API_BASE}/hr/is-avans/${editingId}`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type":"application/json"}, body: JSON.stringify(body) });
@@ -29207,13 +29339,14 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
 
   const _approve = async (id, action, firma) => {
     const path = action === "pm" ? "pm-onayla" : action === "direktor" ? "direktor-onayla" : "onayla";
+    const t0 = list.find(x => String(x.id) === String(id)); // 02.11.2026: görülen tur ve aşama — eski ekran yeni turu onaylayamaz (sunucu 409)
     const r = await fetch(`${API_BASE}/hr/is-avans/${id}/${path}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${localStorage.getItem("token") || ""}`,
       },
-      body: JSON.stringify(firma ? { firma } : {}),
+      body: JSON.stringify({ ...(firma ? { firma } : {}), ...(t0 ? { tur_no: t0.tur_no || 1, beklenen_durum: t0.durum } : {}) }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -29227,7 +29360,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     const tk = t.tekno;
     if (tk.asama === "ODE" && !window.confirm(`${t.personel_ad || t.talep_eden_ad} · ₺${Number(t.tutar).toLocaleString("tr-TR")} Teknocenter hesabından ÖDENDİ olarak işaretlensin mi? Personelin iş avansı hareketi bir kez yazılır.`)) return;
     if (tk.vekalet && !window.confirm(`Bu talep İlhami Şahin onayında. Onayınız "İlhami onay aşaması muhasebe yetkisiyle tamamlandı" olarak sizin adınıza kaydedilecek. Devam edilsin mi?`)) return;
-    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/onayla`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" }, body: JSON.stringify({ beklenen_durum: t.durum }) });
+    const r = await fetch(`${API_BASE}/hr/is-avans/${t.id}/onayla`, { method: "PUT", headers: { ...AUTH_H(), "Content-Type": "application/json" }, body: JSON.stringify({ beklenen_durum: t.durum, tur_no: t.tur_no || 1 }) });
     if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || "Onay yapılamadı"); }
     load(); loadBakiye();
   };
@@ -29251,10 +29384,11 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   const handleReddet = async () => {
     if (!redText.trim()) { alert("Red açıklaması girilmeden reddedilemez!"); return; }
     try {
+      const t0 = list.find(x => String(x.id) === String(redModal));
       const r = await fetch(`${API_BASE}/hr/is-avans/${redModal}/reddet`, {
         method: "PUT",
         headers: { ...AUTH_H(), "Content-Type":"application/json"},
-        body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email })
+        body: JSON.stringify({ red_aciklama: redText, reddeden_email: currentUser?.email, ...(t0 ? { tur_no: t0.tur_no || 1, beklenen_durum: t0.durum } : {}) })
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
@@ -29754,6 +29888,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
         );
       })()}
 
+      {/* 02.11.2026: reddedilen taleplerim kaybolmaz — ayrı, belirgin bölüm; gerekçe, reddeden, zaman, aşama; düzelt ve yeniden gönder */}
+      <AvansDuzeltmeBekleyenler rows={list.filter(t => t.duzeltilebilir)} onDuzelt={openDuzelt} onGecmis={(t) => setGecmis({ modul: "avans", id: t.id })} />
       {/* List — kart (mobile) veya tablo (desktop) */}
       {isMobile ? (
         <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
@@ -29793,15 +29929,16 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                   {t.firma && <span style={{ background: altMarkaMi(t.firma) ? "#fffbeb" : "#f0f9ff", color: altMarkaMi(t.firma) ? "#92400e" : "#0369a1", padding:"2px 10px", borderRadius:"20px", fontSize:"12px", fontWeight:700 }}>{altMarkaMi(t.firma) ? `${altMarkaBilgi(t.firma).ikon} ${altMarkaKisa(t.firma)}` : "🏢 ŞİMŞEK"}</span>}
                 </div>
                 {t.aciklama && <div style={{ fontSize:"13px", color:"#6b7280", marginBottom:"8px" }}>{t.aciklama}</div>}
-                {t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
+                {t.red ? <div style={{ marginBottom:"8px" }}><AvansRedKutusu t={t} kompakt /></div> : t.red_aciklama && <div style={{ fontSize:"12px", color:"#dc2626", marginBottom:"8px" }}>Red: {t.red_aciklama}</div>}
+                {Number(t.tur_no) > 1 && <div style={{ marginBottom:"8px" }}><AvansGonderimDetayi t={t} kompakt /></div>}
                 {needsMyAction && <div style={{ fontSize:"12px", fontWeight:700, color:"#92400e", marginBottom:"8px" }}>⏳ Onayınızı bekliyor</div>}
                 <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
                   <button onClick={()=>setGecmis({ modul:"avans", id:t.id })} title="İşlem geçmişi" style={{ padding:"6px 10px", background:"#f1f5f9", color:"#334155", border:"1px solid #e2e8f0", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🕘</button>
                   {t.talep_eden_email===currentUser?.email && t.durum==="TALEP" && (
                     <button onClick={()=>openEdit(t)} style={{ padding:"6px 14px", background:"#e0f2fe", color:"#0369a1", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Düzenle</button>
                   )}
-                  {t.talep_eden_email===currentUser?.email && t.durum==="REDDEDILDI" && (
-                    <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
+                  {t.duzeltilebilir && (
+                    <button onClick={()=>openDuzelt(t)} style={{ padding:"6px 14px", background:"#b91c1c", color:"#fff", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:700, cursor:"pointer" }}>🔁 Düzelt ve yeniden gönder</button>
                   )}
                   {isPM && t.durum!=="DIREKTOR_ONAY" && t.durum!=="TAMAMLANDI" && (
                     <button onClick={()=>handleDelete(t.id)} style={{ padding:"6px 14px", background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:"8px", fontSize:"13px", fontWeight:600, cursor:"pointer" }}>Sil</button>
@@ -29892,10 +30029,14 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                         📝 {t.not_aciklama.split(/\s+/)[0]}…
                       </div>
                     )}
-                    {t.red_aciklama && <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Red: {t.red_aciklama}</div>}
+                    {t.red ? <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={`Gerekçe: ${t.red.aciklama || t.red.not || "—"}\nReddeden: ${t.red.reddeden_ad || t.red.reddeden_email || "bilinmiyor"}\nZaman: ${t.red.zaman ? avansZaman(t.red.zaman) : "eski kayıtta yok"}\nAşama: ${t.red.asama_tr || "eski kayıtta yok"}`}>❌ {t.red.aciklama || t.red.not} — {t.red.reddeden_ad || t.red.reddeden_email || "bilinmiyor"}{t.red.asama_tr ? ` · ${t.red.asama_tr}` : ""}</div>
+                      : t.red_aciklama && <div style={{ color:"#dc2626", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>Red: {t.red_aciklama}</div>}
+                    {Number(t.tur_no) > 1 && <div style={{ color:"#5b21b6", fontSize:"11px", marginTop:"2px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={`Önceki red: ${t.onceki_red?.aciklama || "—"} (${t.onceki_red?.reddeden_ad || ""})\nDüzeltme açıklaması: ${t.gonderim?.aciklama || "—"}\nDeğişen: ${Object.entries(t.gonderim?.degisen || {}).map(([k, v]) => `${AVANS_ALAN_AD[k] || k}: ${avansAlanDeger(k, v.eski)} → ${avansAlanDeger(k, v.yeni)}`).join(", ") || "yok"}`}>🔁 {t.tur_no}. gönderim · {t.gonderim?.aciklama || ""}</div>}
                   </td>
                   <td style={{ padding: "8px 9px" }}>
                     {t.tekno ? <TeknoDurumRozeti tk={t.tekno} /> : durumBadge(t.durum)}
+                    {Number(t.tur_no) > 1 && <div style={{ marginTop:"4px" }}><AvansGonderimRozeti t={t} kucuk /></div>}
+                    {t.duzeltilebilir && <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>Sizde — düzeltme bekleniyor</div>}
                     {needsMyAction && <div style={{ fontSize:"10px", fontWeight:700, color:"#92400e", marginTop:"4px" }}>⏳ Onayınızı bekliyor</div>}
                     {myPendingRequest && !needsMyAction && (
                       <div style={{ fontSize:"10px", fontWeight:700, color:"#b91c1c", marginTop:"4px" }}>
@@ -29909,8 +30050,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                       {t.talep_eden_email === currentUser?.email && t.durum === "TALEP" && (
                         <button onClick={() => openEdit(t)} style={{ padding: "4px 10px", background: "#e0f2fe", color: "#0369a1", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Düzenle</button>
                       )}
-                      {t.talep_eden_email === currentUser?.email && t.durum === "REDDEDILDI" && (
-                        <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
+                      {t.duzeltilebilir && (
+                        <button onClick={() => openDuzelt(t)} style={{ padding: "4px 10px", background: "#b91c1c", color: "#fff", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>🔁 Düzelt ve yeniden gönder</button>
                       )}
                       {isPM && t.durum !== "DIREKTOR_ONAY" && t.durum !== "TAMAMLANDI" && (
                         <button onClick={() => handleDelete(t.id)} style={{ padding: "4px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: "6px", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>Sil</button>
@@ -29964,14 +30105,23 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
           <div style={{ background: "#fff", borderRadius: isMobile?"16px 16px 0 0":"16px", padding: isMobile?"20px 16px 32px":"28px", width: "100%", maxWidth: isMobile?"100%":"480px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight:"90vh", overflowY:"auto" }}
             onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{editingId ? "Talebi Düzenle" : "Yeni İş Avansı Talebi"}</h3>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{duzelt ? `🔁 Düzelt ve yeniden gönder (${Number(duzelt.tur_no || 1) + 1}. gönderim)` : editingId ? "Talebi Düzenle" : "Yeni İş Avansı Talebi"}</h3>
               <button onClick={() => setShowModal(false)} style={{ background: "none", border: "none", fontSize: "20px", cursor: "pointer", color: "#6b7280" }}>✕</button>
             </div>
             <form onSubmit={handleSave}>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {duzelt && (<>
+                  <AvansRedKutusu t={duzelt} />
+                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Talep <b>AV-{duzelt.id}</b> aynı kimlikle devam eder; önceki açıklama ve red gerekçesi geçmişte korunur. Alanları düzeltin ve ne değiştirdiğinizi yazın — talep ilk onay adımından yeniden başlar.</div>
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#7f1d1d" }}>
+                    Düzeltme / yeniden talep açıklaması <span style={{ color: "#dc2626" }}>*</span>
+                    <textarea value={duzeltAciklama} onChange={e => setDuzeltAciklama(e.target.value)} rows={3} required placeholder="Örn. Tutarı 800 TL'ye düşürdüm, konaklama fişini ekledim" autoFocus
+                      style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: "10px", border: "1.5px solid #fca5a5", fontSize: "14px", marginTop: "4px", boxSizing: "border-box", resize: "vertical", background: "#fff", color: "#1f2937" }} />
+                  </label>
+                </>)}
                 {/* Firma seçimi EN BAŞTA: avans hangi firmanın kasasından çıkacak?
-                    AHY oturumunda sorulmaz (otomatik AHY). */}
-                {!_altMarka && (
+                    AHY oturumunda sorulmaz (otomatik AHY). Düzeltmede sorulmaz (onayda zincir / PM belirler). */}
+                {!_altMarka && !duzelt && (
                   <div>
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>
                       Hangi firma ödeyecek? <span style={{ color: "#dc2626" }}>*</span>
@@ -29990,8 +30140,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                     {!form.firma && <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>Kaydetmeden önce firma seçin</div>}
                   </div>
                 )}
-                {/* Personel seçimi: sadece yöneticiler ve Nurcan görebilir */}
-                {(isPM || isDirektor || isMuhasebe || isNurcan) && (
+                {/* Personel seçimi: sadece yöneticiler ve Nurcan görebilir (düzeltmede kişi değişmez) */}
+                {(isPM || isDirektor || isMuhasebe || isNurcan) && !duzelt && (
                   <label style={{ fontSize: "13px", fontWeight: 600, color: "#374151" }}>
                     Personel
                     <select value={form.personel_id} onChange={e => setForm(f => ({...f, personel_id: e.target.value}))}
@@ -30085,8 +30235,8 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
                     İptal
                   </button>
                   <button type="submit" disabled={saving}
-                    style={{ flex: 2, padding: "11px", background: "#1f2937", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
-                    {saving ? "Kaydediliyor..." : "Kaydet"}
+                    style={{ flex: 2, padding: "11px", background: duzelt ? "#b91c1c" : "#1f2937", color: "#fff", border: "none", borderRadius: "10px", fontWeight: 700, cursor: "pointer" }}>
+                    {saving ? "Gönderiliyor..." : duzelt ? "🔁 Yeniden Onaya Gönder" : "Kaydet"}
                   </button>
                 </div>
               </div>

@@ -123,6 +123,8 @@ function kur(app, c) {
   const hata = (res, kod, mesaj, ek) => res.status(kod).json({ ok: false, error: mesaj, ...(ek || {}) });
   const devir = () => c.markaProfil(FIRMA).devir; // TR günü, YYYY-MM-DD
   const bugun = () => c.istanbulBugun();
+  // 02.11.2026: iş avansı onay turları (avansTur.js) — eski turun ekranı yeni turu onaylayamaz; red kaydı aşama / zaman ile
+  let avansTur = null; const avansTurBagla = (x) => { avansTur = x; };
 
   // ── Kişiler (kısa önbellek): Orhan, bölge müdürleri, Teknocenter direktörü / muhasebesi ──
   let _k = { t: 0, v: null };
@@ -155,7 +157,7 @@ function kur(app, c) {
 
   // ── Bağlam sorguları (toplu): zincir için gereken personel / ekip bölgesi + dönem + Orhan PM onayı ──
   const BAGLAM_SQL = {
-    avans: (ids) => [`SELECT t.id, t.durum, t.tarih, t.tutar, t.firma, t.personel_id, t.talep_eden_email, t.talep_eden_ad,
+    avans: (ids) => [`SELECT t.id, t.durum, t.tarih, t.tutar, t.firma, t.personel_id, t.talep_eden_email, t.talep_eden_ad, t.aktif_tur_no, t.created_at,
         t.pm_onay_tarihi, t.pm_onaylayan, t.direktor_onay_kaynagi, t.direktor_onaylayan,
         ${c.avansFirmaSql("t", "p")} AS akis_firma, p.ad_soyad AS personel_ad,
         LOWER(TRIM(COALESCE(p.email,''))) AS p_email, p.user_id AS p_uid, p.bolge AS p_bolge, e.bolge AS e_bolge,
@@ -277,6 +279,7 @@ function kur(app, c) {
     const { b, bilgi } = t;
     const beklenen = req.body?.beklenen_durum;
     if (beklenen && String(beklenen) !== String(b.durum)) { hata(res, 409, "Talep bu arada başka bir onaycı tarafından ilerletildi; güncel aşama ekranda gösteriliyor.", { guncel_durum: b.durum }); return true; }
+    if (modul === "avans" && avansTur && avansTur.turKontrol(req, res, b)) return true;
     const k = bilgi.asama;
     if (!k) { hata(res, 409, "Bu kayıt onay aşamasında değil (zaten işlenmiş olabilir)."); return true; }
     if (izinli && !izinli.includes(k)) { hata(res, 403, `Bu kayıt şu an "${bilgi.asama_tr}" aşamasında; bu uçtan yapılamaz.`); return true; }
@@ -326,6 +329,7 @@ function kur(app, c) {
         [b.personel_id, b.tarih, b.tutar, (await pool.query(`SELECT aciklama FROM is_avans_talep WHERE id=$1`, [id])).rows[0]?.aciklama || "İş Avansı", yeni.odeme_tarihi]);
     }
     if (modul === "masraf" && yeniDurum === "TAMAMLANDI") await c.masrafCezaAvansOlustur(id);
+    if (modul === "avans" && k === "ODE" && avansTur) await avansTur.turKapat(yeni, "ONAYLANDI");
     const atlanan = z.filter((s) => s.atlandi && ASAMALAR.indexOf(s.k) > ASAMALAR.indexOf(k) && (!sonraki || ASAMALAR.indexOf(s.k) < ASAMALAR.indexOf(sonraki.k)))
       .map((s) => `${s.k}: ${s.atlandi}`).join("; ") || null;
     await islemGecmisiYaz(req, modul, id, k === "ODE" ? "ODEME" : "ONAY", { durum: b.durum, firma: b.firma || null },
@@ -353,11 +357,15 @@ function kur(app, c) {
     if (!t) return false;
     const r = await redYetkisi(req, t);
     if (r) { hata(res, 403, r); return true; }
+    if (avansTur && avansTur.turKontrol(req, res, t.b)) return true;
+    const redMetni = String(req.body?.red_aciklama || "").trim();
+    if (!redMetni) { hata(res, 400, "Red gerekçesi zorunlu — personel neyi düzelteceğini bilmeli"); return true; }
     const u = await pool.query(`UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 AND durum=$4 RETURNING *`,
-      [req.body?.red_aciklama || null, _e(req.user?.email), id, t.b.durum]);
+      [redMetni, _e(req.user?.email), id, t.b.durum]);
     if (!u.rows[0]) { hata(res, 409, "Bu kayıt az önce başka bir onaycı tarafından işlendi. Liste yenilendi."); return true; }
-    await islemGecmisiYaz(req, "avans", id, "RED", { durum: t.b.durum }, { durum: "REDDEDILDI", adim: t.bilgi.asama, akis: "TEKNO" }, req.body?.red_aciklama || null);
-    res.json(u.rows[0]);
+    const redBilgi = avansTur ? await avansTur.reddiKaydet(req, t.b, { asama: t.bilgi.asama, akis: "TEKNO", aciklama: redMetni }) : { tur_no: Number(t.b.aktif_tur_no || 1) };
+    await islemGecmisiYaz(req, "avans", id, "RED", { durum: t.b.durum }, { durum: "REDDEDILDI", adim: t.bilgi.asama, akis: "TEKNO", tur_no: redBilgi.tur_no }, redMetni);
+    res.json({ ...u.rows[0], red_asama: t.bilgi.asama, tur_no: redBilgi.tur_no });
     return true;
   }
   async function masrafReddet(req, res, id, iade) {
@@ -448,7 +456,7 @@ function kur(app, c) {
     } catch (e) { hata(res, 500, e.message); }
   });
 
-  return { bilgiEkle, bekleyenler, normalize, zincirKimlikleri, tekBilgi, FIRMA, VEKALET_NOTU };
+  return { bilgiEkle, bekleyenler, normalize, zincirKimlikleri, tekBilgi, avansTurBagla, FIRMA, VEKALET_NOTU };
 }
 
 // ═══ FİRMA KAPSAM KAPISI (31.10.2026): alt marka (Teknocenter / AHY) kullanıcısı kayıt kimliği ya da sorgu parametresiyle
@@ -528,7 +536,7 @@ function kapsamKapisi(c) {
 // masraf formu, personel ödemesi ve bunlara bağlı nakit avans hareketlerinde çalışır. Genel 'muhasebe' rolünün geniş
 // yetkilerini (finans, fatura, maaş, kasa, HW, Rollout, İK düzenleme…) DEVRALMAZ: izinli yol listesi dışı her istek 403.
 // Firma kapsamı yine kapsam kapısında ve uçların kendi alt marka süzgecinde uygulanır.
-const FM_OKUMA = [/^\/auth\/me$/, /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(ozet|bakiye|bakiyeler|hesap|excel)$/, /^\/hr\/personel-odeme$/,
+const FM_OKUMA = [/^\/auth\/me$/, /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(ozet|bakiye|bakiyeler|hesap|excel)$/, /^\/hr\/is-avans\/\d+\/detay$/, /^\/hr\/personel-odeme$/,
   /^\/hr\/masraf-form$/, /^\/hr\/masraf-form\/\d+$/, /^\/hr\/masraf-form\/\d+\/(excel|pdf)$/, /^\/hr\/masraf-form\/bakiye\/\d+$/, /^\/hr\/masraf-form\/donem\/[^/]+\/excel$/,
   /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/hr\/masraf-belge\/\d+\/orijinal$/, /^\/hr\/masraf-kalem\/\d+\/(odeme-belge|ceza-belge)$/,
   /^\/islem-gecmisi\/(avans|masraf)\/\d+$/, /^\/tekno-onay\/(avans|masraf)\/\d+$/, /^\/onay\/bekleyen$/, /^\/hr\/mobile-dashboard$/, /^\/hr\/personel$/, /^\/hr\/araclar$/, /^\/hr\/personel-secim$/];
@@ -538,7 +546,7 @@ const FM_YAZMA = [
   ["PUT", /^\/hr\/is-avans\/\d+\/(onayla|direktor-onayla|reddet)$/], ["PUT", /^\/hr\/masraf-form\/\d+\/(onayla|direktor-onayla|arsivle)$/],
   ["POST", /^\/hr\/personel-odeme$/], ["DELETE", /^\/hr\/personel-odeme\/\d+$/], ["POST", /^\/hr\/masraf-kalem\/\d+\/odeme-belge$/],
   // Kendi iş avansı / masrafı (personel akışı; sahiplik uçların kendi kapılarında)
-  ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/],
+  ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/], ["PUT", /^\/hr\/is-avans\/\d+\/yeniden-gonder$/],
   ["POST", /^\/hr\/masraf-form$/], ["DELETE", /^\/hr\/masraf-form\/\d+$/], ["PUT", /^\/hr\/masraf-form\/\d+\/submit$/],
   ["POST", /^\/hr\/masraf-kalem$/], ["PUT", /^\/hr\/masraf-kalem\/\d+$/], ["DELETE", /^\/hr\/masraf-kalem\/\d+$/], ["POST", /^\/hr\/masraf-kalem\/\d+\/not$/],
   ["POST", /^\/hr\/masraf-belge\/\d+$/], ["DELETE", /^\/hr\/masraf-belge\/\d+$/], ["POST", /^\/hr\/masraf-belge\/\d+\/isle$/],

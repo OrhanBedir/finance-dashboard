@@ -571,6 +571,7 @@ const tedarikciCari = require("./tedarikciCari"); // tedarikçi cari: fatura bor
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const teknoOnay = require("./teknoOnay"); // Teknocenter avans / masraf onay zinciri + firma kapsam kapıları (31.10.2026)
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
+const avansTur = require("./avansTur"); // iş avansı red → düzelt → yeniden gönder, sürümlü onay turları (02.11.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
 // 27.10.2026 (Orhan): sürümlü BoQ kataloğu (2025 / 2026), yapay zekâ TSSR incelemesi, TSSR+BoQ PR kontrolü, Tekno_2KX hakediş referansı
 const boqKatalog = require("./boqKatalog");
@@ -1119,7 +1120,7 @@ const _isgYol = (rx) => rx;
 const ISG_OKUMA = [
   _isgYol(/^\/auth\/me$/),
   // Kendi iş avansı / masraf (personel akışı)
-  /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(bakiye|hesap|excel)$/, /^\/hr\/personel-odeme$/, /^\/hr\/personel-secim$/,
+  /^\/hr\/is-avans$/, /^\/hr\/is-avans\/(bakiye|hesap|excel)$/, /^\/hr\/is-avans\/\d+\/detay$/, /^\/hr\/personel-odeme$/, /^\/hr\/personel-secim$/,
   /^\/hr\/masraf-form$/, /^\/hr\/masraf-form\/\d+$/, /^\/hr\/masraf-form\/\d+\/(excel|pdf)$/, /^\/hr\/masraf-form\/bakiye\/\d+$/,
   /^\/hr\/masraf-formlari$/, /^\/hr\/masraf-belge\/file\/[^/]+$/, /^\/hr\/masraf-belge\/\d+\/orijinal$/, /^\/islem-gecmisi\/(avans|masraf)\/\d+$/,
   /^\/hr\/mobile-dashboard$/, /^\/hr\/atanan-arac$/, /^\/hr\/araclar$/, /^\/is-atama\/benim$/,
@@ -1131,7 +1132,7 @@ const ISG_EXCEL = [/^\/export\/excel$/]; // Rollout Excel'i: ayrı izin (rollout
 // Yazma: yalnız kendi avans / masraf akışı (sahiplik kontrolleri uçların kendi kapılarında da var)
 const ISG_YAZMA = [
   ["POST", /^\/auth\/(login|reset-password-request|reset-password)$/],
-  ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/],
+  ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/], ["PUT", /^\/hr\/is-avans\/\d+\/yeniden-gonder$/],
   ["POST", /^\/hr\/masraf-form$/], ["DELETE", /^\/hr\/masraf-form\/\d+$/], ["PUT", /^\/hr\/masraf-form\/\d+\/submit$/],
   ["POST", /^\/hr\/masraf-kalem$/], ["PUT", /^\/hr\/masraf-kalem\/\d+$/], ["DELETE", /^\/hr\/masraf-kalem\/\d+$/],
   ["POST", /^\/hr\/masraf-kalem\/\d+\/not$/], ["POST", /^\/hr\/masraf-belge\/\d+$/], ["DELETE", /^\/hr\/masraf-belge\/\d+$/],
@@ -15258,6 +15259,17 @@ const teknoPanel = teknoOnay.kur(app, {
   masrafCezaAvansOlustur: (id) => masrafCezaAvansOlustur(id),
 });
 onayPanel.teknoBagla(teknoPanel);
+// 02.11.2026 (Orhan): reddedilen iş avansı personelde görünür kalır; "düzelt ve yeniden gönder" aynı talep kimliği altında yeni onay turu
+// açar (is_avans_tur). Red kaydı aşama / reddeden / zaman ile tutulur; eski turun ekranı yeni turu onaylayamaz (tur_no). Ayrıntı: avansTur.js
+avansTur.semaKur(pool).catch((e) => console.error("[avans-tur şema]", e.message));
+const avansTurPanel = avansTur.kur(app, {
+  pool, authMiddleware, islemGecmisiYaz, istanbulBugun: () => istanbulBugun(), avansVadeGirdisi: (v) => avansVadeGirdisi(v), normalizeAvansFirma: (v) => normalizeAvansFirma(v),
+  taseronMu: (u) => taseronMu(u), altMarkaKapsam: (req) => altMarkaKapsam(req), avansKapsamda: (k, t) => avansKapsamda(k, t),
+  avansTamGorus: (req) => avansTamGorus(req), avansOnayciMi: (u, req) => avansOnayciMi(u, req), pmKisiselGorur: (req) => pmKisiselGorur(req), pmAvansSahibiMi: (t) => pmAvansSahibiMi(t),
+});
+avansTurPanel.teknoBagla(teknoPanel);
+teknoPanel.avansTurBagla(avansTurPanel);
+onayPanel.avansTurBagla(avansTurPanel);
 app.get("/is-atama/kategoriler", authMiddleware, async (req, res) => {
   try {
     await isAtamaTablolar();
@@ -23606,6 +23618,7 @@ const maasOzet = (m) => m ? ({ donem: m.donem, bankadan: m.bankadan, elden: m.el
 const kalemOzet = (k) => k ? ({ kalem_id: k.id, kategori: k.kategori, tarih: ymdYerel(k.tarih), tutar: k.tutar, aciklama: k.aciklama, belge_no: k.belge_no, belge_aciklama: k.belge_aciklama, plaka: k.plaka, fis_var: k.fis_var }) : null;
 async function avansOnayBitir(req, res, onceki, yeni, ek) {
   const tip = yeni.durum === "TAMAMLANDI" ? "ODEME" : "ONAY";
+  if (tip === "ODEME") await avansTurPanel.turKapat(yeni, "ONAYLANDI"); // 02.11.2026: aktif onay turu "ödendi" ile kapanır
   // ek: adım (ROLLOUT/PM/DIREKTOR/ODEME) ve onayın kaynağı (eski liste / tarihli devir) — denetim izi (25.10.2026)
   await islemGecmisiYaz(req, "avans", yeni.id, tip, { durum: onceki.durum, firma: onceki.firma || null }, { durum: yeni.durum, firma: yeni.firma || null, ...(ek || {}) }, null);
   res.json(yeni);
@@ -23615,11 +23628,12 @@ const GECMIS_DURUM_TR = { TALEP: "Talep", ROLLOUT_MUDUR_ONAY: "Rollout müdürü
 const GECMIS_ETIKET = { tutar: "Tutar", tarih: "Tarih", durum: "Durum", firma: "Firma", aciklama: "Açıklama", not_aciklama: "Not", gider_turu: "Gider türü", bolge: "Bölge", proje: "Proje", plaka: "Plaka",
   donem: "Dönem", bankadan: "Bankadan", elden: "Elden", odeyen: "Ödeyen", kategori: "Kategori", belge_no: "Belge no", belge_aciklama: "Belge açıklaması", dosya: "Dosya",
   form_no: "Form no", talep_eden: "Talep eden", kalem_sayisi: "Kalem sayısı", fis_var: "Fiş var", adim: "Adım", onay_kaynagi: "Onay yetkisi", talep_firma: "Talebin firması", kalem: "Kalem",
-  akis: "Onay akışı", atlanan: "Atlanan aşama",
+  akis: "Onay akışı", atlanan: "Atlanan aşama", tur_no: "Gönderim", son_odeme_tarihi: "Son ödeme günü", arac_km: "Araç KM",
   name: "Ad soyad", email: "E-posta / kullanıcı adı", role: "Rol", subcon_name: "Taşeron / bağlı firma", marka: "Firma", is_active: "Durum", not: "Not",
   ekip_turu: "Ekip türü", bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", ad: "Ad" };
 const GECMIS_ROL_TR = { firma_muhasebe: "Firma Muhasebesi", isg: "İSG Sorumlusu", user: "Personel", subcon: "Taşeron", admin: "Admin", platform_admin: "Platform Admin", rollout_mudur: "Rollout Müdürü", genel_mudur: "Genel Müdür", pm: "Proje Müdürü", direktor: "Direktör", muhasebe: "Muhasebe" };
 const GECMIS_BASLIK = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", ONAY: "Onaylandı", ODEME: "Ödendi / tamamlandı", RED: "Reddedildi", SILME: "Silindi", GONDERIM: "Onaya gönderildi",
+  YENIDEN_GONDERIM: "Düzeltilip yeniden onaya gönderildi",
   GERI_GONDER: "Geri gönderildi (iade)", YONLENDIRME: "Onay zincirine yönlendirildi", ARSIV: "Arşivlendi", KALEM_EKLE: "Kalem eklendi", KALEM_DUZENLE: "Kalem düzenlendi", KALEM_SIL: "Kalem silindi", BELGE_EKLE: "Fiş / belge eklendi", BELGE_SIL: "Fiş / belge kaldırıldı", NOT: "Ek açıklama", DUZELTME: "Düzeltme",
   ROL: "Rol değiştirildi", MARKA: "Firma değiştirildi", DURUM: "Erişim durumu değiştirildi", SIFRE: "Şifre yenilendi", IK: "İK kaydı",
   SINIFLANDIRMA: "Ekip türü / bağlı firma" };
@@ -23634,7 +23648,7 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
     const kap = altMarkaKapsam(req);
     const tr = (d) => d ? ymdYerel(d).split("-").reverse().join(".") : "—";
     const para = (v) => "₺" + Number(v || 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout / bölge müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi", direktor: "Teknocenter direktörü", muhasebe_vekalet: "İlhami aşaması Teknocenter muhasebe yetkisiyle (vekâleten)", orhan: "Orhan Bedir (kendi kimliğiyle, aşamanın asıl onaycısı yerine)" })[v] || v : k === "akis" ? ({ TEKNO: "Teknocenter onay zinciri" })[v] || v : String(v);
+    const fmt = (k, v) => v === null || v === undefined || v === "" ? "—" : ["tutar", "bankadan", "elden"].includes(k) ? para(v) : k === "tarih" ? tr(v) : k === "durum" ? (GECMIS_DURUM_TR[v] || v) : k === "is_active" ? (v ? "Aktif" : "Pasif") : k === "ekip_turu" ? ({ IC: "Kendi ekibimiz (in-house)", DIS: "Dış taşeron" })[v] || v : k === "role" ? (GECMIS_ROL_TR[v] || v) : typeof v === "boolean" ? (v ? "Evet" : "Hayır") : k === "adim" ? ({ ROLLOUT: "Rollout / bölge müdürü", MUHASEBE: "Muhasebe", PM: "PM", DIREKTOR: "Direktör", ODEME: "Ödeme" })[v] || v : k === "onay_kaynagi" ? ({ devir: "tarihli onay devri", eski: "onay listesi", direktor: "Teknocenter direktörü", muhasebe_vekalet: "İlhami aşaması Teknocenter muhasebe yetkisiyle (vekâleten)", orhan: "Orhan Bedir (kendi kimliğiyle, aşamanın asıl onaycısı yerine)" })[v] || v : k === "akis" ? ({ TEKNO: "Teknocenter onay zinciri" })[v] || v : k === "tur_no" ? `${v}. gönderim` : k === "son_odeme_tarihi" ? tr(v) : String(v);
     const fark = (eski, yeni) => {
       const out = []; const y = yeni || {}; const e = eski || {};
       for (const k of Object.keys(GECMIS_ETIKET)) {
@@ -23653,7 +23667,8 @@ app.get("/islem-gecmisi/:modul/:id", authMiddleware, async (req, res) => {
     if (modul === "avans") {
       const t = (await pool.query(`SELECT t.*, p.ad_soyad, COALESCE(p.marka,'ERC') AS personel_marka FROM is_avans_talep t LEFT JOIN personel p ON p.id=t.personel_id WHERE t.id=$1`, [id])).rows[0];
       if (!t) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
-      const sahip = !!email && String(t.talep_eden_email || "").toLowerCase().trim() === email;
+      // 02.11.2026: sahiplik kimlikle — talep eden hesap ya da avansın üzerindeki personelin hesabı (başkası adına açılan talepte personel de görür)
+      const sahip = (!!email && String(t.talep_eden_email || "").toLowerCase().trim() === email) || (await avansTurPanel.sahipMi(req.user, t));
       const yetkili = sahip || avansTamGorus(req) || ["RM", "PM", "PD", "ODE"].some(a => avansYetkiliEski(req, a)) || devirOnaycisi(req, "AVANS_PD") || ["admin", "platform_admin", "direktor", "muhasebe", "pm", "rollout_mudur", "bolge_mudur", "genel_mudur"].includes(rol);
       if (!yetkili || !avansKapsamda(kap, t)) return res.status(403).json({ ok: false, error: "Bu kaydın geçmişini görüntüleme yetkiniz yok" });
       kayit = { id: t.id, baslik: `Avans talebi #${t.id}`, alt: `${t.talep_eden_ad || t.ad_soyad || t.talep_eden_email || "—"} · ${para(t.tutar)} · ${tr(t.tarih)} · ${GECMIS_DURUM_TR[t.durum] || t.durum}` };
@@ -24083,7 +24098,8 @@ async function isAvansGorunurSatirlar(req, sorgu = {}) {
       rows = rows.filter((t) => avansKapsamda(kapsam, t));
     }
     // 31.10.2026 Teknocenter onay zinciri: açık satırlara zincir bilgisi (aşama, onaycı, oturumdaki kişinin onaylayıp onaylayamayacağı)
-    return teknoPanel.bilgiEkle(req, "avans", rows);
+    // 02.11.2026: tur / red bilgisi (tur_no, gonderim, onceki_red, red, sahibi, duzeltilebilir) — web ve mobil aynı veriyi okur
+    return avansTurPanel.turBilgisiEkle(req, await teknoPanel.bilgiEkle(req, "avans", rows));
 }
 app.get("/hr/is-avans", authMiddleware, async (req, res) => {
   try { res.json(await isAvansGorunurSatirlar(req, req.query)); }
@@ -24146,6 +24162,8 @@ app.get("/hr/is-avans/ozet", authMiddleware, async (req, res) => {
         benim_onaylayabilir: benim, firma_secim_gerekli: !tk && benim && (adim === "PM" || (adim === "PD" && !t.firma)), // mevcut panel kuralı
         ...(tk ? { akis: "TEKNO", vekalet: !!tk.vekalet, kilit: tk.kilit || null } : {}),
         odeme_tarihi: gun(t.odeme_tarihi || t.muhasebe_onay_tarihi || t.direktor_onay_tarihi),
+        // 02.11.2026: yeniden gönderim bilgisi (onaycı listesinde "Yeniden gönderildi · N. gönderim", detayda önceki red + düzeltme açıklaması)
+        tur_no: t.tur_no || 1, gonderim_sayisi: t.gonderim_sayisi || 1, gonderim: t.gonderim || null, onceki_red: t.onceki_red || null,
       };
     };
     const bekleyenHam = rows.filter((t) => ["TALEP", "ROLLOUT_MUDUR_ONAY", "PM_ONAY"].includes(t.durum));
@@ -24219,6 +24237,9 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
     if (!adFinal)           return res.status(400).json({ error: "talep_eden_ad zorunlu" });
     if (!talep_eden_email)  return res.status(400).json({ error: "talep_eden_email zorunlu" });
     if (!tutar)             return res.status(400).json({ error: "tutar zorunlu" });
+    // 02.11.2026: istemci istek anahtarı gönderirse (çift dokunma / bağlantı kopması sonrası tekrar) ikinci talep açılmaz
+    const istekAnahtari = req.body?.istek_anahtari ? String(req.body.istek_anahtari).slice(0, 120) : null;
+    if (istekAnahtari) { const var_ = await avansTurPanel.anahtarlaTalep(istekAnahtari); if (var_) return res.json({ ...var_, tekrar: true }); }
 
     // Herkes Rollout Manager'dan başlar.
     // İSTİSNA: Talep sahibi Rollout onaycısının kendisi (Orhan) ise, kendi talebi
@@ -24288,6 +24309,13 @@ app.post("/hr/is-avans", taseronDegil, async (req, res) => {
       ]
     );
     let yeniAvans = r.rows[0];
+    // 1. gönderim kaydı (istek anahtarıyla). Aynı anahtar eş zamanlı ikinci istekte önce yazılmışsa bu satır mükerrerdir: silinir, ilk talep döner
+    const ilk = await avansTurPanel.ilkTur(req, yeniAvans, istekAnahtari);
+    if (ilk && ilk.mukerrer) {
+      await pool.query("DELETE FROM is_avans_talep WHERE id=$1", [yeniAvans.id]).catch(() => {});
+      const var_ = await avansTurPanel.anahtarlaTalep(istekAnahtari);
+      if (var_) return res.json({ ...var_, tekrar: true });
+    }
     await islemGecmisiYaz(req, "avans", yeniAvans.id, "OLUSTURMA", null, { ...avansOzet(yeniAvans), durum: yeniAvans.durum, talep_eden: yeniAvans.talep_eden_ad || yeniAvans.talep_eden_email || null }, null);
     // 31.10.2026 Teknocenter onay zinciri: Orhan'ın kendi açtığı talep (mevcut kural: PM aşaması geçilmiş başlar) PM onayı
     // olarak kimliğiyle kaydedilir (yalnız oturum Orhan'sa); ardından atlanan aşamalar bekletilmeden ilk açık aşamaya yönlenir
@@ -24327,6 +24355,8 @@ app.delete("/hr/is-avans/:id", avansSahibiVeyaTam, async (req, res) => {
     const eskiA = (await pool.query("SELECT * FROM is_avans_talep WHERE id=$1", [id])).rows[0];
     // 28.10.2026: ödenmiş avans silinmez (avans tablosundaki ödeme kaydı ve geçmiş korunur)
     if (eskiA?.durum === "TAMAMLANDI") return res.status(409).json({ error: "Ödenmiş avans silinemez" });
+    // 02.11.2026: reddedilen talebi sahibi silemez (red geçmişi kaybolmasın) — "Düzelt ve yeniden gönder" kullanılır; yönetim (tam görüş) silebilir
+    if (eskiA?.durum === "REDDEDILDI" && !avansTamGorus(req)) return res.status(409).json({ error: "Reddedilen talep silinmez; 'Düzelt ve yeniden gönder' ile aynı talep üzerinden devam edin" });
     await pool.query("DELETE FROM is_avans_talep WHERE id=$1", [id]);
     if (eskiA) await islemGecmisiYaz(req, "avans", id, "SILME", { ...avansOzet(eskiA), durum: eskiA.durum }, null, req.body?.gerekce || null);
     res.json({ ok: true });
@@ -24429,6 +24459,8 @@ async function avansOnayOnKontrol(req, res, talep) {
     res.status(409).json({ error: "Talep bu arada başka bir onaycı tarafından ilerletildi; güncel aşama ekranda gösteriliyor.", guncel_durum: talep.durum });
     return true;
   }
+  // 02.11.2026: eski turun (yeniden gönderim öncesi) açık ekranı yeni turu onaylayamaz / reddedemez
+  if (avansTurPanel.turKontrol(req, res, talep)) return true;
   return false;
 }
 
@@ -24615,13 +24647,17 @@ app.put("/hr/is-avans/:id/reddet", avansOnayKapisi, async (req, res) => {
       if (pd.devir && onceki.durum === "PM_ONAY" && !devralan && !avansYetkiliEski(req, "RM") && !avansYetkiliEski(req, "PM") && _rol(req.user) !== "muhasebe")
         return res.status(403).json({ error: pd.hata || "Bu firmanın direktör adımı başka bir kullanıcıya devredildi" });
     }
+    // 02.11.2026: red gerekçesi zorunlu; reddeden hesap oturumdan (istemcinin gönderdiği e-posta kullanılmaz); aşama / zaman kaydedilir
+    const redMetni = String(red_aciklama || "").trim();
+    if (!redMetni) return res.status(400).json({ error: "Red gerekçesi zorunlu — personel neyi düzelteceğini bilmeli" });
     const r = await pool.query(
       "UPDATE is_avans_talep SET durum='REDDEDILDI', red_aciklama=$1, reddeden_email=$2 WHERE id=$3 AND durum=$4 RETURNING *",
-      [red_aciklama, reddeden_email || _eposta(req.user), id, onceki.durum]
+      [redMetni, _eposta(req.user) || reddeden_email || null, id, onceki.durum]
     );
     if (!r.rows[0]) return onayCakismasi(res);
-    if (r.rows[0]) await islemGecmisiYaz(req, "avans", id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI" }, red_aciklama || null);
-    res.json(r.rows[0]);
+    const redBilgi = await avansTurPanel.reddiKaydet(req, onceki, { asama: AVANS_ASAMA[onceki.durum] || null, akis: "ERC", aciklama: redMetni });
+    await islemGecmisiYaz(req, "avans", id, "RED", { durum: onceki?.durum || null }, { durum: "REDDEDILDI", adim: { RM: "ROLLOUT", PM: "PM", PD: "DIREKTOR", ODE: "ODEME" }[redBilgi.asama] || redBilgi.asama || undefined, tur_no: redBilgi.tur_no }, redMetni);
+    res.json({ ...r.rows[0], red_asama: redBilgi.asama, tur_no: redBilgi.tur_no });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -24984,8 +25020,17 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
        ORDER BY t.created_at DESC LIMIT 5`,
       [queryEmail, personelId]
     );
-    const avanslar = avansRes.rows;
+    // 02.11.2026: tur / red bilgisi (gerekçe, reddeden, aşama, zaman) + reddedilen talepler ayrı liste (son 5 ile sınırlı değil)
+    const avanslar = await avansTurPanel.turBilgisiEkle(req, avansRes.rows);
     const bekleyenAvans = avanslar.filter(a => !['TAMAMLANDI','REDDEDILDI'].includes(a.durum)).length;
+    const redRes = await pool.query(
+      `SELECT t.id, t.tutar, t.aciklama, t.not_aciklama, t.gider_turu, t.bolge, t.proje, t.plaka, t.arac_km, t.durum, t.tarih, t.son_odeme_tarihi, t.created_at,
+              t.talep_eden_ad, t.talep_eden_email, t.personel_id, t.firma, t.red_aciklama, t.reddeden_email, p.ad_soyad as personel_ad
+       FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
+       WHERE t.durum = 'REDDEDILDI' AND (LOWER(t.talep_eden_email)=LOWER($1) OR (t.personel_id IS NOT NULL AND t.personel_id = $2))
+       ORDER BY t.created_at DESC LIMIT 50`, [queryEmail, personelId]);
+    const reddedilenAvanslar = (await avansTurPanel.turBilgisiEkle(req, redRes.rows)).filter(a => a.sahibi !== false);
+    const duzeltmeBekleyen = reddedilenAvanslar.filter(a => a.duzeltilebilir).length;
 
     // 4. Masraf formları (son 5)
     const masrafRes = await pool.query(
@@ -25148,7 +25193,7 @@ app.get("/hr/mobile-dashboard", async (req, res) => {
     res.json({
       personel, personelBulundu: !!personelId, ay, yil,
       puantaj,
-      avanslar, bekleyenAvans,
+      avanslar, bekleyenAvans, reddedilenAvanslar, duzeltmeBekleyen,
       masraflar, bekleyenMasraf: bekleyenMasrafCount, bekleyenMasrafTutar,
       taslakMasrafTutar, taslakMasrafCount,
       cezalar, toplamCeza, cezaKalemler,

@@ -111,6 +111,7 @@ function kur(app, c) {
   // listelerden yalnız kendi firmasının kayıtlarını görür (ör. ortak 'teknocenter' hesabı Şimşek talebini görmez).
   let tekno = null;
   const teknoBagla = (t) => { tekno = t; };
+  let avansTur = null; const avansTurBagla = (x) => { avansTur = x; }; // 02.11.2026: bekleyen satırlara tur / yeniden gönderim bilgisi
   const kendiFirmasi = (u, firma) => !c.altMarkaKullanicisi(u) || firmaKodu(u.marka) === firma;
   async function avansBekleyenler(req) {
     const u = req.user || {};
@@ -146,7 +147,7 @@ function kur(app, c) {
       rows.push({ ...x, tutar: Number(x.tutar), talep_firma: firma, adim, uc, onay_kaynagi: adim === "PD" ? pd.kaynak : "eski" });
       if (rows.length >= 100) break;
     }
-    return { rows, yetkili: true, hatalar };
+    return { rows: avansTur ? await avansTur.turBilgisiEkle(req, rows) : rows, yetkili: true, hatalar };
   }
   async function masrafBekleyenler(req) {
     const u = req.user || {};
@@ -274,7 +275,7 @@ function kur(app, c) {
   });
 
   return { ADIMLAR, firmaKodu, devirAktifMi, satirlar, sifirla, adimOnaycisi, kullaniciDevirleri, kullaniciPlanli, adimYetkisi, avansPdYetkisi, masrafPdYetkisi,
-    talepFirmasiAvans, talepFirmasiMasraf, avansBekleyenler, masrafBekleyenler, malzemeBekleyenler, onayOzeti, teknoBagla };
+    talepFirmasiAvans, talepFirmasiMasraf, avansBekleyenler, masrafBekleyenler, malzemeBekleyenler, onayOzeti, teknoBagla, avansTurBagla };
 }
 
 module.exports = { ADIMLAR, firmaKodu, devirAktifMi, devirPlanliMi, semaKur, kur, avansFirmaSql, masrafFirmaSql };
