@@ -4,9 +4,10 @@
 //   ekip        ekipler + personel (planEkipleri: şef, telefon, plaka, üyeler) — ekip tipi YALNIZ ekipler.ekip_turu'ndan
 //   fiilî       fiiliDurum (is_fiili_bildirim + is_atama başla/bitir + Rollout tarihleri) — QC'den bağımsız
 //   malzeme     hwMalzeme.durumHaritasi (HW malzeme kabul / teslim hareketleri)
-// Kapsam: alt marka (Teknocenter) yalnız kendi iç ekiplerini ve kendi Rollout kapsamındaki iş kodlarını görür (planEkipleri +
-// haritaKapsamSatirlari); başka firmanın iş kodu kartta "kapsam dışı iş" olarak bile adıyla dönmez. Fiyat / maaş hiçbir
-// yanıtta ve Excel'de yok; iç notlar (atayan notu, kapanış notu) Excel'e yazılmaz.
+// Kapsam (02.11.2026, Orhan): Weekly Plan ve "Ekipler nerede?" ERC yöneticisi dahil herkes için YALNIZ Teknocenter kapsamıdır —
+// iş kodları haritayla aynı zorunlu firma süzgecinden (haritaFirmaSuzgeci → haritaKapsamSatirlari), ekipler Teknocenter iç ekipleri ve
+// doğrulanmış Tekno taşeron ekipleri (planEkipleri). Başka firmanın işi, sahasız faaliyeti ya da ekibi kartta, sayıda ve Excel'de yer
+// almaz. Fiyat / maaş hiçbir yanıtta ve Excel'de yok; iç notlar (atayan notu, kapanış notu) Excel'e yazılmaz.
 "use strict";
 
 const GUN_AD = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
@@ -21,22 +22,26 @@ const liste = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Bool
 const tr = (s) => String(s || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I");
 
 function kur(app, deps) {
-  const { pool, authMiddleware, planEkipleri, planTablolar, rolloutKapsam, haritaKapsamSatirlari, sahaKimlik, hwMalzeme, fiiliDurum, ExcelJS } = deps;
+  const { pool, authMiddleware, planEkipleri, planTablolar, rolloutKapsam, haritaKapsamSatirlari, haritaFirmaSuzgeci, zorunluFirma, sahaKimlik, hwMalzeme, fiiliDurum, ExcelJS } = deps;
   fiiliDurum.semaKur(pool).catch(() => {});
   const gorKapi = (req, res) => {
     if (deps.taseronMu(req.user) || req.user?.kullanici_tipi === "TASERON") { res.status(403).json({ ok: false, error: "Yetkiniz yok" }); return false; }
     if (req.izinler?.operasyon_goruntule !== true) { res.status(403).json({ ok: false, error: "Operasyon ekranları görüntüleme yetkiniz yok" }); return false; }
     return true;
   };
-  // İstekteki kapsam (aynı istekte bir kez): alt markada iş kodu kümesi; ERC'de null (hepsi)
+  // İstekteki kapsam (aynı istekte bir kez): her hesapta zorunlu Teknocenter iş kodu kümesi (haritayla aynı süzgeç)
   async function kapsam(req) {
     if (req._opKapsam) return req._opKapsam;
     const K = await rolloutKapsam(req);
-    const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, null);
+    const fs = await haritaFirmaSuzgeci(req, K);
+    if (fs.hata) { const e = new Error(fs.hata[1]); e.durum = fs.hata[0]; throw e; }
+    const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM);
     const rowMap = new Map(rows.map((r) => [kodT(r.site_code), r]));
     const kodlar = new Set([...rowMap.keys(), ...yalnizGunluk]);
-    return (req._opKapsam = { K, rowMap, kodlar });
+    return (req._opKapsam = { K, FM: fs.FM, rowMap, kodlar });
   }
+  // Ekip Teknocenter'ın mı: iç ekip (bagli_firma TEKNO) ya da firma adı doğrulanmış eşleşme veren dış ekip (planEkipleri.firma)
+  const teknoEkip = (e) => String(e.firma || "").toUpperCase() === String(zorunluFirma || "TEKNO").toUpperCase();
   const ekipFiltre = (q) => {
     const bolgeler = liste(q.bolge).map(tr), firmalar = liste(q.firma).map((x) => x.toUpperCase()), tipler = liste(q.tip).map((x) => x.toUpperCase()), ekipNo = liste(q.ekip).map(Number);
     return (e) => (!bolgeler.length || bolgeler.includes(tr(e.bolge))) && (!firmalar.length || firmalar.includes(String(e.firma || "").toUpperCase()))
@@ -55,7 +60,7 @@ function kur(app, deps) {
     const ekipler0 = await planEkipleri(req);
     const eTur = new Map((await pool.query(`SELECT ekip_no, ekip_turu FROM ekipler`).catch(() => ({ rows: [] }))).rows.map((x) => [Number(x.ekip_no), x.ekip_turu]));
     for (const e of ekipler0) e.ekip_turu = eTur.get(Number(e.ekip_no)) ?? e.ekip_turu ?? null;
-    const ekipler = ekipler0.filter(ekipFiltre(req.query));
+    const ekipler = ekipler0.filter(teknoEkip).filter(ekipFiltre(req.query));
     const eMap = new Map(ekipler.map((e) => [Number(e.ekip_no), e]));
     const seg = (await pool.query(`SELECT s.*, a.durum AS atama_durum, a.kategori AS atama_kategori, a.plan_detay, k.ad AS kategori_ad, k.ikon
         FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id LEFT JOIN is_kategori k ON k.kod = COALESCE(s.kategori, a.kategori)
@@ -70,7 +75,7 @@ function kur(app, deps) {
     // Kartlar
     const kartlar = [];
     const isKodlari = new Set();
-    const kapsamda = (kod) => !kod || !kp.K || kp.kodlar.has(kod);
+    const kapsamda = (kod) => !kod || kp.kodlar.has(kod); // 02.11.2026: her hesapta zorunlu Tekno kapsamı (sahasız faaliyet yalnız Tekno ekibinde)
     // Aynı atamanın blokları: çok günlük devamlılık (gün x / toplam)
     const atamaGunleri = new Map();
     for (const s of seg) if (s.is_atama_id && ["MONTAJ", "FAALIYET"].includes(s.tur)) { const g = yerel(s.bas).tarih; const m = atamaGunleri.get(s.is_atama_id) || new Set(); m.add(g); atamaGunleri.set(s.is_atama_id, m); }
@@ -126,14 +131,15 @@ function kur(app, deps) {
     return { hafta_bas: bas, hafta_bit: bit, bugun: bugun(), gunler: Array.from({ length: 7 }, (_, i) => { const t = gunEkle(bas, i); return { tarih: t, ad: GUN_AD[haftaGunu(t)], tatil: haftaGunu(t) === 0 }; }),
       ekipler: ekipler.map((e) => ({ ...ekipKart(e, telefon), son_bildirim: son.get(Number(e.ekip_no)) || null,
         kartlar: kartlar.filter((k) => Number(k.ekip_no) === Number(e.ekip_no)).sort((a, b) => (a.tarih + (a.bas || "00:00")).localeCompare(b.tarih + (b.bas || "00:00"))) })),
-      secenekler: { bolgeler: [...new Set(ekipler0.map((e) => e.bolge).filter(Boolean))].sort(), firmalar: [...new Set(ekipler0.map((e) => e.firma).filter(Boolean))].sort(),
-        ekipler: ekipler0.map((e) => ({ ekip_no: e.ekip_no, ad: e.ad, bolge: e.bolge, tip: hwMalzeme.ekipTipi(e).kod })) },
+      kapsam_firma: zorunluFirma || "TEKNO",
+      secenekler: { bolgeler: [...new Set(ekipler0.filter(teknoEkip).map((e) => e.bolge).filter(Boolean))].sort(), firmalar: [...new Set(ekipler0.filter(teknoEkip).map((e) => e.firma).filter(Boolean))].sort(),
+        ekipler: ekipler0.filter(teknoEkip).map((e) => ({ ekip_no: e.ekip_no, ad: e.ad, bolge: e.bolge, tip: hwMalzeme.ekipTipi(e).kod })) },
       renk_aciklama: { MAVI: "Planlandı / başlamadı", SARI: "Devam ediyor", YESIL: "Fiziksel montaj tamamlandı", GRI: "Doğrulanmadı" } };
   }
 
   app.get("/operasyon/haftalik", authMiddleware, async (req, res) => {
     try { if (!gorKapi(req, res)) return; res.json({ ok: true, ...(await haftalikVeri(req)) }); }
-    catch (e) { console.error("HAFTALIK PLAN ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+    catch (e) { if (!e.durum) console.error("HAFTALIK PLAN ERROR:", e.message); res.status(e.durum || 500).json({ ok: false, error: e.message }); }
   });
 
   // ── Müşteriye gönderilebilir haftalık Excel: fiyat / maaş / iç not YOK; gridlines kapalı ──
@@ -150,7 +156,7 @@ function kur(app, deps) {
         ["Yapılacak iş", 26], ["Planlanan zaman", 15], ["Çok günlük iş", 12], ["PAR / kesinti", 24]];
       ws.columns = KOL.map(([, w]) => ({ width: w }));
       ws.mergeCells(1, 1, 1, KOL.length);
-      ws.getCell(1, 1).value = `Rollout Weekly Plan · ${fmt(v.hafta_bas)} – ${fmt(v.hafta_bit)}`;
+      ws.getCell(1, 1).value = `Teknocenter Weekly Plan · ${fmt(v.hafta_bas)} – ${fmt(v.hafta_bit)}`;
       ws.getCell(1, 1).font = { bold: true, size: 15, color: { argb: "FF1E3A5F" } };
       ws.mergeCells(2, 1, 2, KOL.length);
       const f = [liste(req.query.bolge).length ? `Bölge: ${liste(req.query.bolge).join(", ")}` : null, liste(req.query.firma).length ? `Firma: ${liste(req.query.firma).join(", ")}` : null,
@@ -178,9 +184,9 @@ function kur(app, deps) {
       if (!satirlar.length) ws.getCell(5, 1).value = "Bu hafta ve filtrede planlı çalışma yok.";
       ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: KOL.length } };
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="rollout_weekly_plan_${v.hafta_bas}.xlsx"`);
+      res.setHeader("Content-Disposition", `attachment; filename="teknocenter_weekly_plan_${v.hafta_bas}.xlsx"`);
       await wb.xlsx.write(res); res.end();
-    } catch (e) { console.error("HAFTALIK EXCEL ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+    } catch (e) { if (!e.durum) console.error("HAFTALIK EXCEL ERROR:", e.message); res.status(e.durum || 500).json({ ok: false, error: e.message }); }
   });
 
   // ── Ekipler nerede? (bildirilen son çalışma sahası; canlı GPS değil) ──
@@ -192,7 +198,7 @@ function kur(app, deps) {
       const ekipler0 = await planEkipleri(req);
       const eTur = new Map((await pool.query(`SELECT ekip_no, ekip_turu FROM ekipler`).catch(() => ({ rows: [] }))).rows.map((x) => [Number(x.ekip_no), x.ekip_turu]));
       for (const e of ekipler0) e.ekip_turu = eTur.get(Number(e.ekip_no)) ?? e.ekip_turu ?? null;
-      const ekipler = ekipler0.filter(ekipFiltre(req.query));
+      const ekipler = ekipler0.filter(teknoEkip).filter(ekipFiltre(req.query));
       const son = await fiiliDurum.ekipSonBildirim(pool, ekipler.map((e) => Number(e.ekip_no)));
       const g = bugun();
       const plan = (await pool.query(`SELECT ekip_no, site_code, bas, bit FROM is_atama_plan_segment s LEFT JOIN is_atama a ON a.id = s.is_atama_id
@@ -201,8 +207,8 @@ function kur(app, deps) {
       const fizIds = new Set();
       const out = ekipler.map((e) => {
         const s = son.get(Number(e.ekip_no)) || null;
-        const sonKodlar = s ? s.site_code.split(",").map(kodT).filter((k) => !kp.K || kp.kodlar.has(k)) : [];
-        const planKod = [...new Set(plan.filter((p) => Number(p.ekip_no) === Number(e.ekip_no) && p.site_code).map((p) => kodT(p.site_code)).filter((k) => !kp.K || kp.kodlar.has(k)))];
+        const sonKodlar = s ? s.site_code.split(",").map(kodT).filter((k) => kp.kodlar.has(k)) : [];
+        const planKod = [...new Set(plan.filter((p) => Number(p.ekip_no) === Number(e.ekip_no) && p.site_code).map((p) => kodT(p.site_code)).filter((k) => kp.kodlar.has(k)))];
         const sonFiz = sonKodlar.map((k) => sahaKimlik.fizikselSaha(k)?.fiziksel_id || k), planFiz = planKod.map((k) => sahaKimlik.fizikselSaha(k)?.fiziksel_id || k);
         [...sonFiz, ...planFiz].forEach((x) => fizIds.add(x));
         return { ...ekipKart(e), son_bildirim: s && sonKodlar.length ? { site_codes: sonKodlar, fiziksel_idler: [...new Set(sonFiz)], olay: s.olay, zaman: s.zaman, eski: s.eski, kim: s.kim } : null,
@@ -212,7 +218,7 @@ function kur(app, deps) {
       const kon = fizIds.size ? (await pool.query(`SELECT fiziksel_id, lat, lng, dogruluk, il FROM saha_konum WHERE fiziksel_id = ANY($1)`, [[...fizIds]]).catch(() => ({ rows: [] }))).rows : [];
       const kMap = Object.fromEntries(kon.filter((k) => k.lat != null && ["KESIN", "CELISKILI"].includes(k.dogruluk)).map((k) => [k.fiziksel_id, { lat: Number(k.lat), lng: Number(k.lng), il: k.il }]));
       res.json({ ok: true, ekipler: out, konumlar: kMap, bugun: g, not: "Konum, ekibin bildirdiği son çalışma sahasıdır — canlı GPS izlemesi değildir. 24 saatten eski bildirimler \"eski\" işaretlidir." });
-    } catch (e) { console.error("EKIPLER NEREDE ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
+    } catch (e) { if (!e.durum) console.error("EKIPLER NEREDE ERROR:", e.message); res.status(e.durum || 500).json({ ok: false, error: e.message }); }
   });
 
   // ── Fiilî çalışma bildirimi (mobil + panel): BASLADI / TAMAMLANDI / ISSUE / ISSUE_KAPANDI / GERI_AL ──

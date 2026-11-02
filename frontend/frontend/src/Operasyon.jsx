@@ -85,15 +85,15 @@ export function RolloutHaftalikModal({ onClose }) {
   };
   const filtreler = v && <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", padding: "8px 14px", borderBottom: "1px solid #e2e8f0", background: "#fff" }}>
     <Cipler etiket="Bölge" secenekler={(v.secenekler.bolgeler.length ? v.secenekler.bolgeler : ["Ankara", "Bursa", "İzmir"]).map((b) => [b, b])} secili={bolge} setSecili={setBolge} />
-    {v.secenekler.firmalar.length > 1 && <Cipler etiket="Firma" secenekler={v.secenekler.firmalar.map((f) => [f, f === "SIMSEK" ? "Şimşek" : f === "TEKNO" ? "Teknocenter" : f])} secili={firma} setSecili={setFirma} />}
+    {/* 02.11.2026: firma çipi kaldırıldı — kapsam her zaman Teknocenter (sunucuda zorunlu) */}
     <Cipler etiket="Ekip tipi" secenekler={[["INHOUSE", "Inhouse"], ["TASERON", "Taşeron"], ["TANIMSIZ", "Tanımsız"]]} secili={tip} setSecili={setTip} />
     <select value={ekip} onChange={(e) => setEkip(e.target.value)} aria-label="Ekip" style={{ padding: "6px 8px", borderRadius: 8, border: "1.5px solid #cbd5e1" }}>
       <option value="">Tüm ekipler</option>{v.secenekler.ekipler.map((e) => <option key={e.ekip_no} value={e.ekip_no}>{e.ad}</option>)}</select>
   </div>;
   return <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.6)", zIndex: 1300, display: "flex", alignItems: "center", justifyContent: "center", padding: mobil ? 0 : 10 }}>
-    <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Rollout Weekly Plan" style={{ background: "#f8fafc", borderRadius: mobil ? 0 : 14, width: "min(1500px,100%)", height: mobil ? "100%" : "min(940px,100%)", display: "flex", flexDirection: "column", overflow: "hidden", textAlign: "left", color: "#0f172a" }}>
+    <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Teknocenter Weekly Plan" style={{ background: "#f8fafc", borderRadius: mobil ? 0 : 14, width: "min(1500px,100%)", height: mobil ? "100%" : "min(940px,100%)", display: "flex", flexDirection: "column", overflow: "hidden", textAlign: "left", color: "#0f172a" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", background: LAC, color: "#fff" }}>
-        <b style={{ fontSize: 17 }}>📅 Rollout Weekly Plan</b>
+        <b style={{ fontSize: 17 }}>📅 Teknocenter Weekly Plan</b><span style={{ fontSize: 12.5, opacity: .85 }} title="Yalnız Teknocenter kapsamı; sunucuda zorunlu">🏢 Teknocenter kapsamı</span>
         <div style={{ display: "flex", gap: 4 }}>
           {[["PLAN", "Haftalık plan"], ["NEREDE", "Ekipler nerede?"]].map(([k, ad]) => <button key={k} type="button" aria-pressed={sekme === k} onClick={() => setSekme(k)}
             style={{ background: sekme === k ? "#fff" : "transparent", color: sekme === k ? LAC : "#fff", border: "1px solid rgba(255,255,255,.6)", borderRadius: 8, padding: "4px 10px", fontWeight: 800, cursor: "pointer" }}>{ad}</button>)}
@@ -103,7 +103,7 @@ export function RolloutHaftalikModal({ onClose }) {
           <button type="button" onClick={() => setHafta(pazartesi(ISTANBUL_BUGUN()))} style={opBtn}>Bu hafta</button>
           <button type="button" onClick={() => setHafta(gunEkle(hafta, 7))} aria-label="Sonraki hafta" style={opBtn}>Sonraki ›</button>
           <span style={{ fontWeight: 700 }}>{tarihTR(hafta)} – {tarihTR(gunEkle(hafta, 6))}</span></div>}
-        {sekme === "PLAN" && <button type="button" style={{ ...opBtn, background: "#fff", color: LAC }} onClick={() => dosyaIndir(`/operasyon/haftalik/excel?${qs()}`, `rollout_weekly_plan_${hafta}.xlsx`).catch((e) => setHata(e.message))}>⬇ Müşteri Excel'i</button>}
+        {sekme === "PLAN" && <button type="button" style={{ ...opBtn, background: "#fff", color: LAC }} onClick={() => dosyaIndir(`/operasyon/haftalik/excel?${qs()}`, `teknocenter_weekly_plan_${hafta}.xlsx`).catch((e) => setHata(e.message))}>⬇ Müşteri Excel'i</button>}
         <button type="button" onClick={onClose} style={{ ...opBtn, marginLeft: "auto" }} aria-label="Kapat (Esc)">✕</button>
       </div>
       {filtreler}

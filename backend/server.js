@@ -13582,14 +13582,19 @@ app.get("/export/excel", async (req, res) => {
      • ERC yöneticisi: Rollout kaydı olmayan, yalnız Günlük İş Girişi'nde Teknocenter kalemi olan iş kodları da gelir;
      • alt marka hesabı: yalnız kendi kapsamı içinde süzülür (düğme yetkiyi genişletmez); başka firma bu filtreyi isteyemez. */
 const HARITA_FIRMA_IZINLI = ["TEKNO"];
+// 02.11.2026 (Orhan): Rollout Saha Haritası, Rollout Weekly Plan, bunlara bağlı rota / saha bilgisi / Excel / Plan Yap adayları YALNIZ
+// Teknocenter kapsamındaki iş kayıtlarını gösterir — ERC yöneticisi dahil. İsteğe bağlı filtre değil, sunucuda zorunlu kapsam;
+// istemcinin gönderdiği firma parametresi dikkate alınmaz. Kapsam = mevcut doğrulanmış firma eşleştirmesi (rolloutFirmaEsleyicileri:
+// TEKNO / TEKNOCENTER / TEKNO_xxx; öneksiz 2KX sayılmaz) — iş kodu (satır) düzeyinde: aynı fiziksel sahadaki başka firma işi gelmez.
+// Teknocenter alt marka hesabı: kendi kapsamı (zaten Tekno). Başka alt marka (AHY): bu ekranlar kapalı (403). Diğer ERC ekranları değişmez.
+const HARITA_ZORUNLU_FIRMA = "TEKNO";
 const _gun = haritaIsDurumu.gun;
 // Firma süzgeci: K (alt marka) + istenen firma → { FM (eşleştirici), hata }
 async function haritaFirmaSuzgeci(req, K, firmaOzel) {
-  // 29.10.2026: POST (Excel) gövdesindeki firma doğrudan verilir — Express 5'te req.query'ye atama yapılamaz (sessizce yok sayılıyordu)
-  const firma = String((firmaOzel ?? req.query.firma) || "").toUpperCase().trim();
-  if (!firma) return { firma: null, FM: null };
+  // 02.11.2026: istemci parametresi yok sayılır — kapsam her zaman Teknocenter (HARITA_ZORUNLU_FIRMA)
+  const firma = HARITA_ZORUNLU_FIRMA;
   if (!HARITA_FIRMA_IZINLI.includes(firma)) return { hata: [400, "Geçersiz firma filtresi"] };
-  if (K && K.kod !== firma) return { hata: [403, "Bu firma filtresi yetkinizde değil"] };
+  if (K && K.kod !== firma) return { hata: [403, "Bu ekran yalnız Teknocenter kapsamını gösterir; firmanız kapsam dışında"] };
   const FM = (await rolloutFirmaEsleyicileri()).find((m) => m.kod === firma);
   if (!FM) return { hata: [400, "Firma tanımı bulunamadı"] };
   return { firma, FM };
@@ -13762,11 +13767,13 @@ async function haritaVerisi(req, { firma } = {}) {
     const fiiliMap = await fiiliDurum.durumHaritasi(pool, tumKodlar, { rows: rowMapH });
     const ekipAd = await hwMalzeme.ekipAdlari(pool);
     const malzMap = await hwMalzeme.durumHaritasi(pool, tumKodlar, { rows: rowMapH, montajMap: fiiliMap, ekipAd });
-    const ekipKayit = new Map((await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma FROM ekipler`).catch(() => ({ rows: [] }))).rows.map((e) => [Number(e.ekip_no), e]));
+    const ekipKayit = new Map((await pool.query(`SELECT e.ekip_no, e.ad, e.bolge, e.ekip_turu, e.bagli_firma, s.subcon_name AS firma_adi FROM ekipler e LEFT JOIN subcons s ON s.id = e.firma_id`).catch(() => ({ rows: [] }))).rows.map((e) => [Number(e.ekip_no), e]));
     const ekipBilgi = (no) => { const e = ekipKayit.get(Number(no)); return e ? { ekip_no: Number(no), ad: e.ad || `Ekip ${no}`, bolge: e.bolge || null, tip: hwMalzeme.ekipTipi(e).kod,
-      firma: String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "SIMSEK").toUpperCase() : null } : { ekip_no: Number(no), ad: `Ekip ${no}`, tip: "TANIMSIZ" }; };
-    // Alt marka: başka firmanın ekibi adıyla verilmez (yalnız "başka firma ekibi")
-    const ekipGoster = (no) => { const b = ekipBilgi(no); return K && !(b.tip === "INHOUSE" && b.firma === K.kod) ? { ekip_no: null, ad: "Başka firma ekibi", tip: b.tip, baska_firma: true } : b; };
+      firma: String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "SIMSEK").toUpperCase() : null, firma_adi: e.firma_adi || null } : { ekip_no: Number(no), ad: `Ekip ${no}`, tip: "TANIMSIZ" }; };
+    // Alt marka: başka firmanın ekibi adıyla verilmez (yalnız "başka firma ekibi"). 02.11.2026: firma adı doğrulanmış eşleşme veren
+    // dış (taşeron) ekip de firmanın ekibidir (ör. Teknocenter → TEKNO_EMRAH)
+    const ekipGoster = (no) => { const b = ekipBilgi(no); const bizim = !K || (b.tip === "INHOUSE" && b.firma === K.kod) || (b.tip === "TASERON" && !!b.firma_adi && K.esle(b.firma_adi));
+      return bizim ? b : { ekip_no: null, ad: "Başka firma ekibi", tip: b.tip, baska_firma: true }; };
     for (const sh of sahalar) {
       for (const x of sh.isler) {
         const kod = String(x.site_code || "").replace(/\s+/g, "").toUpperCase();
@@ -14125,13 +14132,21 @@ async function planEkipleri(req, ekipNo = null) {
   const r = await pool.query(`SELECT e.ekip_no, e.ad, e.bolge, e.plaka, e.ekip_turu, e.bagli_firma, e.firma_id, e.sef_personel_id, s.subcon_name AS firma_adi
     FROM ekipler e LEFT JOIN subcons s ON s.id = e.firma_id WHERE COALESCE(e.aktif,true) ${ekipNo != null ? "AND e.ekip_no = $1" : ""} ORDER BY e.ekip_no`,
     ekipNo != null ? [Number(ekipNo)] : []);
-  const ekipler = r.rows.filter((e) => !K || (String(e.ekip_turu || "").toUpperCase() === "IC" && String(e.bagli_firma || "").toUpperCase() === K.kod));
+  // 02.11.2026: alt marka hesabı kendi iç ekiplerine ek olarak firma adı doğrulanmış eşleşme veren dış (taşeron) ekiplerini de görür
+  // (ör. Teknocenter → TEKNO_EMRAH); taşeron olmak tek başına dışlama nedeni değildir. İsim benzerliğiyle yeni eşleşme üretilmez.
+  const ekipler = r.rows.filter((e) => !K || (String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "").toUpperCase() === K.kod : !!(e.firma_adi && K.esle(e.firma_adi))));
   if (!ekipler.length) return [];
+  // 02.11.2026: ERC görünümünde de yalnız Teknocenter ekipleri — iç ekip (bagli_firma TEKNO) ya da firma adı doğrulanmış Tekno eşleşmesi
+  // veren dış ekip (ör. TEKNO_EMRAH). Taşeron olmak tek başına dışlama nedeni değildir; isim benzerliğiyle yeni eşleşme üretilmez.
+  const teknoEs = (await rolloutFirmaEsleyicileri()).find((m) => m.kod === HARITA_ZORUNLU_FIRMA);
+  const teknoEkip = (e) => (String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "").toUpperCase() === HARITA_ZORUNLU_FIRMA : !!(teknoEs && e.firma_adi && teknoEs.esle(e.firma_adi)));
+  const ekiplerTekno = ekipler.filter(teknoEkip);
+  if (!ekiplerTekno.length) return [];
   const p = await pool.query(`SELECT id, ad_soyad, LOWER(TRIM(email)) AS email, telefon, unvan, ekip_arac_plaka, TRIM(ekip_bilgisi) AS ekip,
       COALESCE(yuksekte_calisma,false) AS yuksekte_calisma, COALESCE(elektrik_isi,false) AS elektrik_isi
-    FROM personel WHERE COALESCE(aktif,true) AND TRIM(COALESCE(ekip_bilgisi,'')) = ANY($1::text[])`, [ekipler.map((e) => String(e.ekip_no))]).catch(() => ({ rows: [] }));
+    FROM personel WHERE COALESCE(aktif,true) AND TRIM(COALESCE(ekip_bilgisi,'')) = ANY($1::text[])`, [ekiplerTekno.map((e) => String(e.ekip_no))]).catch(() => ({ rows: [] }));
   const es = await rolloutFirmaEsleyicileri();
-  return ekipler.map((e) => {
+  return ekiplerTekno.map((e) => {
     const uyeler = p.rows.filter((x) => x.ekip === String(e.ekip_no));
     const sef = uyeler.find((x) => x.id === e.sef_personel_id) || uyeler.find((x) => /şef|sef/i.test(String(x.unvan || ""))) || null;
     const ic = String(e.ekip_turu || "").toUpperCase() === "IC";
@@ -14176,7 +14191,10 @@ async function planHazirla(req, b) {
   const es = await rolloutFirmaEsleyicileri();
   const grup = (ad) => (ad ? es.find((m) => m.esle(ad))?.kod || null : null);
   const altMi = (kod) => ALT_MARKALAR.some((m) => m.kod === kod);
-  const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, null);
+  // 02.11.2026: Plan Yap adayları haritayla aynı zorunlu Teknocenter kapsamı — kapsam dışı iş kodu "erişim kapsamınızda değil" engeli alır
+  const fsPlan = await haritaFirmaSuzgeci(req, K);
+  if (fsPlan.hata) throw planHata(fsPlan.hata[0], fsPlan.hata[1]);
+  const { rows, kalemMap, yalnizGunluk } = await haritaKapsamSatirlari(K, fsPlan.FM);
   const rowMap = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
   const engeller = [], uyarilar = [];
   if (!ekip.uyeler.some((u) => u.email)) engeller.push(`${ekip.ad}: ekipte e-postası kayıtlı personel yok — İş Ata kaydı kişiye bağlanamaz`);
@@ -14195,7 +14213,7 @@ async function planHazirla(req, b) {
     if (!kod || gorulen.has(kod)) continue;
     gorulen.add(kod);
     const r = rowMap.get(kod) || null;
-    if (!r && !yalnizGunluk.includes(kod)) { engeller.push(`${kod}: erişim kapsamınızda değil`); continue; }
+    if (!r && !yalnizGunluk.includes(kod)) { engeller.push(`${kod}: Teknocenter kapsamında değil ya da erişim kapsamınız dışında`); continue; }
     const kalemler = kalemMap.get(kod) || [];
     if (K && r && r._kol_sahip?.rf === "DIGER") { engeller.push(`${kod}: ana montaj (RF iş kolu) başka firmada — Teknocenter kalemi görünürlük sağlar ama montaj ataması vermez`); continue; }
     const sahip = r ? grup(rolloutFirmaAdi(r.rf_subcon)) : grup(kalemler[0]?.subcon_name);
@@ -14433,7 +14451,9 @@ app.get("/plan/musteri-excel", authMiddleware, async (req, res) => {
       WHERE s.ekip_no = ANY($1::int[]) AND s.bas < ($3::date + 1)::timestamptz AND s.bit > $2::date::timestamptz AND (a.id IS NULL OR a.durum <> 'IPTAL') ORDER BY s.ekip_no, s.bas`,
       [[...eMap.keys()], bas, bit]);
     const K = await rolloutKapsam(req);
-    const kapsamKodlar = K ? new Set((await haritaKapsamSatirlari(K, null)).rows.map((r) => String(r.site_code).replace(/\s+/g, "").toUpperCase())) : null;
+    const fsX = await haritaFirmaSuzgeci(req, K); if (fsX.hata) return res.status(fsX.hata[0]).json({ ok: false, error: fsX.hata[1] });
+    const kx = await haritaKapsamSatirlari(K, fsX.FM);
+    const kapsamKodlar = new Set([...kx.rows.map((r) => String(r.site_code).replace(/\s+/g, "").toUpperCase()), ...kx.yalnizGunluk]); // 02.11.2026: zorunlu Tekno kapsamı
     const konumlar = new Map((await pool.query(`SELECT fiziksel_id, il, ilce FROM saha_konum`).catch(() => ({ rows: [] }))).rows.map((x) => [x.fiziksel_id, x]));
     const rp = new Map((await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc, il FROM rollout_progress`).catch(() => ({ rows: [] }))).rows.map((x) => [x.sc, x]));
     // gün × ekip × iş satırları
@@ -14526,7 +14546,7 @@ async function opMontajFiili(kodlar) {
 hwMalzeme.kur(app, { pool, authMiddleware, upload: multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 } }), uploadToStorage,
   kapsamIsKodlari: opKapsamIsKodlari, ekipKapsamda: opEkipKapsamda, montajFiili: opMontajFiili, fizikselSaha: (k) => sahaKimlik.fizikselSaha(k),
   yetki: { goruntule: (req) => opIzin(req, "hw_malzeme_goruntule") || opIzin(req, "hw_malzeme_hareket"), hareket: (req) => opIzin(req, "hw_malzeme_hareket") } });
-operasyon.kur(app, { pool, authMiddleware, ExcelJS, sahaKimlik, hwMalzeme, fiiliDurum,
+operasyon.kur(app, { pool, authMiddleware, ExcelJS, sahaKimlik, hwMalzeme, fiiliDurum, haritaFirmaSuzgeci: (...a) => haritaFirmaSuzgeci(...a), zorunluFirma: HARITA_ZORUNLU_FIRMA,
   planEkipleri: (...a) => planEkipleri(...a), planTablolar: (...a) => planTablolar(...a), rolloutKapsam: (...a) => rolloutKapsam(...a),
   haritaKapsamSatirlari: (...a) => haritaKapsamSatirlari(...a), taseronMu: (...a) => taseronMu(...a), isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a),
   isAtamaPersonelIcinde: (...a) => isAtamaPersonelIcinde(...a), taseronunIsiMi: (...a) => taseronunIsiMi(...a) });
@@ -14623,8 +14643,7 @@ app.get("/rollout/harita/rota", authMiddleware, async (req, res) => {
     const id = String(req.query.fiziksel_id || "").toUpperCase().trim();
     if (!id) return res.status(400).json({ ok: false, error: "fiziksel_id zorunlu" });
     const K = await rolloutKapsam(req);
-    if (K) {
-      // Harita ile aynı kapsam (Rollout + Günlük İş Girişi kalemleri); firma parametresi kapsamı genişletmez
+    { // 02.11.2026: her hesapta haritayla aynı zorunlu Teknocenter kapsamı (önceden yalnız alt marka denetleniyordu)
       const S = await haritaSahaKapsami(req, id);
       if (S.hata) return res.status(403).json({ ok: false, error: "Bu saha firma kapsamınızda değil" });
     }

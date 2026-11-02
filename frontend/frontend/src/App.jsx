@@ -8278,7 +8278,9 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     return { ad: f.properties?.name || "", d, cx: (Math.min(...xs) + Math.max(...xs)) / 2, cy: (Math.min(...ys) + Math.max(...ys)) / 2 };
   }), [feats]); // eslint-disable-line
   // 28.10.2026 (Orhan): "Teknocenter · 2026" hızlı görünümü — firma süzgeci SUNUCUDA (?firma=TEKNO); düğme yetkiyi genişletmez
-  const [firma, setFirma] = useState(null);
+  // 02.11.2026 (Orhan): harita ZORUNLU Teknocenter kapsamı — sunucu her istekte uygular; buradaki sabit yalnız istek / etiket içindir.
+  // "Tümünü göster", bölge / yıl / ekip filtreleri ve arama bu kapsamı kaldıramaz (sunucu Tekno dışı iş kaydı döndürmez).
+  const firma = "TEKNO"; const setFirma = () => {};
   // 31.10.2026: iş yılı seçimi (sunucuda) + operasyon filtreleri (iş bazında) + pin renk modu
   const [yil, setYil] = useState(String(new Date().getFullYear()));
   const [bolgeSec, setBolgeSec] = useState(() => (bolgeVarsayilan && bolgeVarsayilan !== "ALL" ? [bolgeVarsayilan] : []));
@@ -8437,14 +8439,12 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const tumunuGoster = () => { seciminiTemizle(); setEkranSuz(false); setBolge("ALL"); setFiltre(""); setYalniz2026(false); setTumu(true);
     setBolgeSec([]); setIlF([]); setFirmaF([]); setEkipF(""); setTipF([]); setMalzF([]); setFiiliF([]); setCerceveSayac((n) => n + 1); };
   // "Teknocenter · 2026": önceki arama / seçim temizlenir, 2026 açılır, tüm bölgeler; tekrar basınca bütün pinler yeniden çerçevelenir
-  const hizliFirma = (kod) => { seciminiTemizle(); setFirma(kod); setEkranSuz(false); setBolge("ALL"); setYalniz2026(true); setTumu(false); setCerceveSayac((n) => n + 1); };
   // Pin üzerine gelince kısa bilgi (dokunmatikte pine dokununca sağ panel aynı bilgiyi verir)
   const ipucuAyarla = (s) => (e) => {
     if (!e || !haritaRef.current) { setIpucu(null); return; }
     const r = haritaRef.current.getBoundingClientRect();
     setIpucu({ s, x: e.clientX - r.left, y: e.clientY - r.top });
   };
-  const hizliIzinli = (veri?.hizli_firmalar || veriler[""]?.hizli_firmalar || []).includes("TEKNO");
   const seciliSaha = (veri?.sahalar || []).find((s) => s.fiziksel_id === secili) || null;
   const isKaydi = (liste) => liste.reduce((a, s) => a + s.isler.length, 0);
   const depo = veri?.depo;
@@ -8522,10 +8522,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
         .rhmap-isk dl { display:grid; grid-template-columns:max-content 1fr; gap:3px 10px; margin:8px 0 0; font-size:14px; }
         .rhmap-isk dt { color:#64748b; } .rhmap-isk dd { margin:0; }
       `}</style>
-      <div className="rhmap" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Rollout saha haritası">
+      <div className="rhmap" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Teknocenter saha haritası">
         <div className="rhmap-ust">
-          <b style={{ fontSize: 16 }}>🗺 Rollout Saha Haritası</b>
-          {veri?.kapsam && <span className="rhmap-k">🏢 {veri.kapsam} kapsamı</span>}
+          <b style={{ fontSize: 16 }}>🗺 Teknocenter Saha Haritası</b>
+          <span className="rhmap-k" title="Yalnız Teknocenter kapsamındaki iş kayıtları; sunucuda zorunlu">🏢 Teknocenter kapsamı{veri?.kapsam && veri.kapsam !== "Teknocenter" ? ` · ${veri.kapsam}` : ""}</span>
           <RhCip secenekler={opSecenek.bolge.map((b) => [b, b])} secili={bolgeSec} setSecili={(v) => { setBolgeSec(v); setBolge("ALL"); setTekSaha(false); setTumu(false); }} />
           <select className="rhmap-btn" value={filtre} onChange={(e) => { setFiltre(e.target.value); setSecili(null); setTekSaha(false); setTumu(false); }} aria-label="Saha Filtreleri"
             style={filtre ? { borderColor: "#1e3a5f", background: "#eff6ff" } : undefined}>
@@ -8552,12 +8552,9 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
             )}
           </div>
           <button type="button" className="rhmap-btn" onClick={tumunuGoster} aria-pressed={tumu}
-            title={firma || veri?.kapsam ? "Arama, seçim, bölge, durum ve yıl filtrelerini kaldırır; firma kapsamı korunur" : "Arama, seçim, bölge, durum ve yıl filtrelerini kaldırır"}
+            title="Arama, seçim, bölge, durum ve yıl filtrelerini kaldırır; Teknocenter kapsamı korunur"
             style={tumu ? { borderColor: "#1e3a5f", background: "#eff6ff" } : undefined}>{tumu ? "✓ " : ""}Tümünü göster</button>
-          {hizliIzinli && <button type="button" className="rhmap-btn rhmap-hizli" aria-pressed={firma === "TEKNO" && yalniz2026 && !tumu} onClick={() => hizliFirma("TEKNO")}
-            title="Teknocenter'a atanmış ya da Teknocenter kalemi bulunan 2026 işleri (tüm bölgeler)">{firma === "TEKNO" && yalniz2026 && !tumu ? "✓ " : ""}Teknocenter · 2026</button>}
-          {firma && !veri?.kapsam && <button type="button" className="rhmap-btn" onClick={() => { seciminiTemizle(); setFirma(null); setTumu(false); setCerceveSayac((n) => n + 1); }}
-            title="ERC genel görünümüne dön">✕ Firma görünümünden çık</button>}
+          {/* 02.11.2026: "Teknocenter · 2026" hızlı düğmesi ve "Firma görünümünden çık" kaldırıldı — kapsam her zaman Teknocenter */}
           {veri?.kmz_yetkili && <button type="button" className="rhmap-btn" onClick={() => setKmzAcik(true)} title="Türk Telekom KMZ dosyasından konum önizle / içe al">📥 KMZ konum</button>}
           <button type="button" className="rhmap-btn" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="Haritayı kapat (Esc)">✕</button>
         </div>
@@ -8624,7 +8621,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
               {ipucu.s.isler.length > 6 && <div className="rhmap-k">+{ipucu.s.isler.length - 6} iş daha</div>}
             </div>}
             {veri && <div className={`rhmap-aciklama${seciliSaha ? " rhmap-mobil-gizle" : ""}`} aria-label="Pin renk açıklaması" style={{ position: "absolute", left: 10, bottom: 26, background: "rgba(255,255,255,.95)", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 12.5, lineHeight: 1.7, maxWidth: 300 }}>
-              <div style={{ fontWeight: 800, fontSize: 12 }}>Pin rengi: {renkModu === "FIILI" ? "fiilî çalışma (QC'den bağımsız)" : firma === "TEKNO" || veri?.kapsam ? "Teknocenter'ın kendi işi" : "iş durumu"}</div>
+              <div style={{ fontWeight: 800, fontSize: 12 }}>Pin rengi: {renkModu === "FIILI" ? "fiilî çalışma (QC'den bağımsız)" : "Teknocenter'ın kendi işi"}</div>
               {renkModu === "FIILI" && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, height: 18, borderRadius: 9, background: "#dc2626", color: "#fff", fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>!</span>Issue / eksik malzeme</div>}
               {Object.keys(yaklasikIl).length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, height: 18, borderRadius: 9, border: "2px dashed #64748b", fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>≈</span>Yaklaşık konum · yalnız il bilgisi</div>}
               {Object.entries(pinPalet).map(([k, v]) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -8635,10 +8632,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
           </div>
           <div className={`rhmap-panel${seciliSaha ? " secili" : ""}`}>
             {veri && !seciliSaha && <>
-              {(firma === "TEKNO" || veri?.kapsam) && <div style={{ fontWeight: 800, color: "#0f766e", marginBottom: 6 }}>
-                {veri?.kapsam ? `${veri.kapsam} kapsamı` : "Teknocenter kapsamı"} · {tumu ? "tüm işler (bölge, durum ve yıl filtresi kapalı)" : yalniz2026 ? "2026 işleri" : "tüm yıllar"}</div>}
+              <div style={{ fontWeight: 800, color: "#0f766e", marginBottom: 6 }}>
+                Teknocenter kapsamı (zorunlu) · {tumu ? "tüm işler (bölge, durum ve yıl filtresi kapalı)" : yalniz2026 ? `${yil} işleri` : "tüm yıllar"}</div>
               {tumu && <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "6px 10px", fontSize: 13.5, marginBottom: 8 }}>
-                Tümü gösteriliyor: arama, seçim, bölge, Saha Filtreleri ve <b>2026 filtresi kaldırıldı</b>.{firma || veri?.kapsam ? " Firma kapsamı korunuyor." : ""}</div>}
+                Tümü gösteriliyor: arama, seçim, bölge, Saha Filtreleri ve <b>yıl filtresi kaldırıldı</b>. Teknocenter kapsamı korunuyor — başka firmanın işi bu haritada hiçbir zaman görünmez.</div>}
               <div className="rhmap-sayac">
                 <div><b>{yilaGore.length}</b><span className="rhmap-k">Fiziksel saha (pin)</span></div>
                 <div><b>{isKaydi(yilaGore)}</b><span className="rhmap-k">İş kaydı (iş kodu)</span></div>
@@ -8656,7 +8653,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
               {filtre && <div style={{ fontWeight: 800, color: "#1e3a5f", marginBottom: 6 }}>Saha filtresi: {RH_FILTRE[filtre]}</div>}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 <button type="button" className="rhmap-btn rhmap-btn-l" disabled={!yilaGore.length}
-                  onClick={() => { setExcelHata(""); planDosyaIndir("/rollout/harita/excel", `rollout_sahalar${filtre ? `_${filtre.toLowerCase()}` : ""}.xlsx`, { firma, filtre, fiziksel_idler: yilaGore.map((s) => s.fiziksel_id) }).catch((e) => setExcelHata(e.message)); }}>⬇ Filtrelenen Sahaları Excel İndir</button>
+                  onClick={() => { setExcelHata(""); planDosyaIndir("/rollout/harita/excel", `teknocenter_sahalar${filtre ? `_${filtre.toLowerCase()}` : ""}.xlsx`, { firma, filtre, fiziksel_idler: yilaGore.map((s) => s.fiziksel_id) }).catch((e) => setExcelHata(e.message)); }}>⬇ Filtrelenen Sahaları Excel İndir</button>
                 <button type="button" className="rhmap-btn rhmap-btn-l" style={{ background: "#1e3a5f", color: "#fff" }} onClick={() => { setPlanSaha(null); setPlanAcik(true); }}>🗓 Plan Yap</button>
               </div>
               {excelHata && <div style={{ color: "#b91c1c", fontSize: 13 }}>{excelHata}</div>}
@@ -8720,7 +8717,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                   {seciliSaha.bilgi_bekliyor && <div style={{ fontSize: 14, marginTop: 4, color: "#b91c1c", fontWeight: 700 }}>İl de belirlenemedi — kullanıcıdan bilgi bekleniyor.</div>}</>}
               </div>
               {!konumVar(seciliSaha) && <RhKonumTamamla saha={seciliSaha} onKaydedildi={() => { setVeriler({}); setYenile((n) => n + 1); }} />}
-              {seciliSaha.taseronlar?.length > 0 && <div style={{ marginTop: 8, fontSize: 15 }}><span className="rhmap-k">{firma === "TEKNO" || veri?.kapsam ? "Teknocenter ekip / taşeron: " : "Ekip / taşeron: "}</span><b>{seciliSaha.taseronlar.join(", ")}</b></div>}
+              {seciliSaha.taseronlar?.length > 0 && <div style={{ marginTop: 8, fontSize: 15 }}><span className="rhmap-k">Teknocenter ekip / taşeron: </span><b>{seciliSaha.taseronlar.join(", ")}</b></div>}
               <div style={{ fontWeight: 800, marginTop: 10 }}>İşler ({seciliSaha.isler.length}) — her iş ayrı</div>
               {seciliSaha.isler.map((i) => <div key={i.site_code} className="rhmap-isk">
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><code style={{ fontSize: 15.5, fontWeight: 900, wordBreak: "break-all" }}>{i.site_code}</code><RhPinRozet renk={i.pin?.renk} ad={i.pin?.ad} /></div>
@@ -9507,7 +9504,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
           {/* 31.10.2026: Rollout Weekly Plan — Harita düğmesinin yanında; operasyon görüntüleme izni (sunucu da denetler) */}
           {currentUser?.izinler?.operasyon_goruntule === true && <button type="button" onClick={() => setShowHaftalik(true)} title="Ekip × gün haftalık plan, fiilî durum, müşteri Excel'i"
             style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
-            📅 Rollout Weekly Plan
+            📅 Teknocenter Weekly Plan
           </button>}
           {showHaftalik && <RolloutHaftalikModal onClose={() => setShowHaftalik(false)} />}
         </div>
@@ -40649,7 +40646,7 @@ function App() {
                   // 31.10.2026: Operasyon — HW malzeme kabulü (Emre) + haftalık plan; izinler sunucudan (etkinIzinHesapla)
                   <TopNavMenu id="operasyon" label="Operasyon" open={navOpen} onToggle={setNavOpen} items={[
                     ...((user?.izinler?.hw_malzeme_goruntule === true || user?.izinler?.hw_malzeme_hareket === true) ? [{ ikon:'📦', label:'HW Malzeme Durumu', sub:'Huawei malzeme kabulü, depo / ekip', aktif: page==='hw_malzeme', onClick:()=>setPage('hw_malzeme') }] : []),
-                    ...(user?.izinler?.operasyon_goruntule === true ? [{ ikon:'📅', label:'Rollout Weekly Plan', sub:'Ekip × gün plan, ekipler nerede', aktif: page==='haftalik', onClick:()=>setPage('haftalik') }] : []),
+                    ...(user?.izinler?.operasyon_goruntule === true ? [{ ikon:'📅', label:'Teknocenter Weekly Plan', sub:'Teknocenter ekip × gün plan, ekipler nerede', aktif: page==='haftalik', onClick:()=>setPage('haftalik') }] : []),
                   ]} />
                 )}
 
