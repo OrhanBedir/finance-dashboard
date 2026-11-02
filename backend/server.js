@@ -8232,6 +8232,23 @@ app.get("/finance/supplier-advances", finansOkuma, async (req, res) => {
   }
 });
 
+// 02.11.2026 (Orhan): montaja girilen işte malzeme gelmiştir — fiilî montaj başlangıcı (Rollout "Installation Start Date",
+// installation_actual_start_date) dolu, malzeme geliş tarihi boşsa geliş tarihi montaj başlangıç günü yazılır. Yalnız BOŞ alan
+// doldurulur (elle girilen / HW Malzeme kabulünden gelen tarih ezilmez); ileri tarihli montaj tarihi kullanılmaz.
+// siteCodes verilirse yalnız o işler; boşsa tümü. Döner: güncellenen [{ id, site_code, eski, yeni }].
+async function malzemeTarihiMontajdan(db, siteCodes = null, req = null, kaynak = "Rollout") {
+  const kodlar = Array.isArray(siteCodes) ? siteCodes.map((x) => String(x || "").trim().toUpperCase()).filter(Boolean) : null;
+  if (kodlar && !kodlar.length) return [];
+  const r = await db.query(`UPDATE rollout_progress SET malzeme_gelis_tarihi = installation_actual_start_date::date, updated_at = NOW()
+      WHERE malzeme_gelis_tarihi IS NULL AND installation_actual_start_date IS NOT NULL
+        AND installation_actual_start_date::date <= (NOW() AT TIME ZONE 'Europe/Istanbul')::date
+        ${kodlar ? "AND UPPER(TRIM(site_code)) = ANY($1::text[])" : ""}
+      RETURNING id, site_code, to_char(malzeme_gelis_tarihi,'YYYY-MM-DD') AS yeni`, kodlar ? [kodlar] : []);
+  for (const x of r.rows) await islemGecmisiYaz(req || { user: { email: "sistem" } }, "rollout", x.id, "MALZEME_TARIHI_OTOMATIK",
+    { malzeme_gelis_tarihi: null }, { malzeme_gelis_tarihi: x.yeni }, `${x.site_code} · montaj başlangıcından otomatik (${kaynak})`).catch(() => {});
+  return r.rows;
+}
+
 async function syncRolloutTargets(siteCodesFilter = []) {
   const client = await pool.connect();
 
@@ -12677,7 +12694,9 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
       );
     }
 
-    res.json({ ok: true, count: allRows.length });
+    // 02.11.2026: Excel'le gelen montaj başlangıçları için boş malzeme geliş tarihlerini doldur
+    const malzOto = await malzemeTarihiMontajdan(pool, allRows.map((x) => x.site_code), req, "Rollout Excel yükleme").catch(() => []);
+    res.json({ ok: true, count: allRows.length, malzeme_tarihi_otomatik: malzOto.length });
   } catch (err) {
     console.error("ROLLOUT UPLOAD ERROR:", err);
     res.status(500).json({ error: err.message });
@@ -13188,6 +13207,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
     const fark = rolloutFark(eskiKayit, yeniKayit);
     if (!eskiKayit || fark.degisti)
       await islemGecmisiYaz(req, "rollout", result.rows[0].id, eskiKayit ? "DUZENLEME" : "OLUSTURMA", fark.eski, fark.yeni, data.site_code);
+    // 02.11.2026: montaj başlangıcı girildiyse ve malzeme geliş tarihi boşsa otomatik doldur
+    const malzOto = await malzemeTarihiMontajdan(pool, [data.site_code], req, "Rollout güncelle").catch(() => []);
+    if (malzOto.length) result.rows[0].malzeme_gelis_tarihi = malzOto[0].yeni;
     // Firma hesabı: başka firmanın iş koluna / ortak saha bilgisine ait gönderilen değişiklikler uygulanmadı
     const korunan = req.rolloutKorunan || [];
     res.json({ ok: true, row: req.markaRollout ? markaRolloutMaskele(req.markaRollout, [result.rows[0]])[0] : result.rows[0],
