@@ -1,6 +1,8 @@
 // Saha sekmesi: Rollout işlerim, malzeme taleplerim, üzerimdeki (zimmetli) malzemeler.
 import React, { useState } from "react";
 import { Alert, Pressable, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import Svg, { Path } from "react-native-svg";
 import { aralik, renk } from "../tema";
 import { BolumBasligi, Buton, Kart, Metin, Rozet } from "../bilesenler/temel";
 import { BosDurum, EskiVeriBandi, HataDurum, IskeletKart } from "../bilesenler/durum";
@@ -15,11 +17,14 @@ import { tarih } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
 import { ilerleme } from "../mantik/cleanup";
 import { Malzemelerim } from "./StokEkranlari";
+import { ILLER, SINIR } from "../harita/iller";
 
 export function SahaEkrani({ navigation }) {
   const [sekme, setSekme] = useState("is");
   return (
-    <Ekran baslik="Saha" geri={false}>
+    <Ekran baslik="Saha" geri={false}
+      sag={<Pressable onPress={() => navigation.navigate("SahaHarita")} hitSlop={8} accessibilityRole="button" accessibilityLabel="Saha haritası"
+        style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Ionicons name="map-outline" size={24} color={renk.lacivert} /></Pressable>}>
       <Segment secenekler={[{ id: "is", ad: "İşlerim" }, { id: "zimmet", ad: "Malzemelerim" }, { id: "malzeme", ad: "Taleplerim" }]} deger={sekme} onSec={setSekme} />
       {/* 29.10.2026: Malzemelerim stok defterinden gelir; defter açılana kadar eski zimmet listesi (salt bilgi) gösterilir */}
       {sekme === "is" ? <Islerim navigation={navigation} /> : sekme === "malzeme" ? <MalzemeTaleplerim navigation={navigation} /> : <Malzemelerim navigation={navigation} eski={<Zimmetim />} />}
@@ -36,6 +41,7 @@ function Islerim({ navigation }) {
   return (
     <View>
       <EskiVeriBandi v={v} style={{ marginBottom: aralik.s }} />
+      <HaritaKarti onPress={() => navigation.navigate("SahaHarita")} adet={new Set(bekleyen.flatMap((r) => (r.site_codes || []).map((k) => String(k).split("_")[0].toUpperCase()))).size} />
       {bekleyen.length === 0 ? <Kart><BosDurum ikon="navigate-outline" baslik="Size atanmış açık iş yok" aciklama="Merkezden iş atandığında burada görünür." /></Kart>
         : bekleyen.map((r) => <IsKarti key={r.id} r={r} onPress={() => navigation.navigate("IsDetay", { is: r })} />)}
       <CleanupSahalarim navigation={navigation} />
@@ -46,6 +52,27 @@ function Islerim({ navigation }) {
         </>
       ) : null}
     </View>
+  );
+}
+
+// 02.11.2026: Saha haritası girişi — küçük Türkiye silueti ile (harita ekranı sunucunun verdiği kapsamı gösterir)
+function HaritaKarti({ onPress, adet }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Saha haritasını aç"
+      style={({ pressed }) => [{ backgroundColor: renk.lacivert, borderRadius: 16, padding: aralik.m, marginBottom: aralik.s, flexDirection: "row", alignItems: "center", overflow: "hidden" },
+        pressed && { opacity: 0.9, transform: [{ scale: 0.995 }] }]}>
+      <View style={{ flex: 1, zIndex: 1 }}>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <Ionicons name="map" size={18} color={renk.altinAcik} />
+          <Metin tur="govdeKalin" renk="#FFFFFF" style={{ marginLeft: 8 }}>Saha Haritası</Metin>
+        </View>
+        <Metin tur="kucuk" renk="#C7D3E3" style={{ marginTop: 4 }}>{adet ? `Açık işlerinizin ${adet} sahası haritada` : "Sahaları haritada görün, yol tarifi alın"}</Metin>
+      </View>
+      <Svg width={128} height={56} viewBox={`${SINIR.x} ${SINIR.y} ${SINIR.w} ${SINIR.h}`} style={{ marginRight: 4, opacity: 0.9 }}>
+        {ILLER.map((il) => <Path key={il.ad} d={il.d} fill="#2F5583" stroke="#4A6E99" strokeWidth={3} />)}
+      </Svg>
+      <Ionicons name="chevron-forward" size={20} color="#C7D3E3" />
+    </Pressable>
   );
 }
 

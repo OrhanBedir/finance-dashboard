@@ -13872,6 +13872,99 @@ app.get("/rollout/harita", authMiddleware, async (req, res) => {
   try { res.json(await haritaVerisi(req)); }
   catch (e) { if (e && e.durum) return res.status(e.durum).json({ ok: false, error: e.mesaj }); console.error("ROLLOUT HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
+// ── MOBİL SAHA HARİTASI (02.11.2026, Orhan) ─────────────────────────────────────────────────────────────
+// Omnix mobil → Saha → Harita. Personel yalnız KENDİSİNE ATANMIŞ işlerin sahalarını görür (is_atama; e-posta token'dan).
+// Aşağıdaki hesaplar web Rollout haritasının TÜM sahalarını görür ve filtreler. Kapsam web haritasıyla aynıdır (haritaVerisi:
+// 02.11.2026 itibarıyla zorunlu Teknocenter kapsamı, alt marka kuralları) — mobil ayrı bir kapsam tanımlamaz.
+const MOBIL_HARITA_TUM_SAHA = [
+  { id: 2, ad: "Nurcan Kuş" }, { id: 3, ad: "Serdar Altınova" }, { id: 5, ad: "Orhan Bedir" }, { id: 121, ad: "Orhan Bedir" },
+  { id: 6, ad: "Düzgün Şimşek" }, { id: 200, ad: "Erencan Şimşek" }, { id: 1694, ad: "İlhami Şahin" },
+  { id: 1285, ad: "Teknocenter ortak yönetim hesabı (İlhami Şahin yetkisi)" },
+];
+const mobilHaritaTumSahaMi = (u) => !!u && MOBIL_HARITA_TUM_SAHA.some((x) => x.id === Number(u.user_id));
+const MOBIL_ATAMA_PIN = { TAMAMLANDI: ["YESIL", "Tamamlandı"], BASLADI: ["SARI", "Devam ediyor"], DEVAM: ["SARI", "Devam ediyor"],
+  ARA_VERILDI: ["SARI", "Ara verildi"], QC_BEKLE: ["SARI", "QC bekliyor"], ATANDI: ["MAVI", "Atandı / planlandı"] };
+const mobilKod = (v) => String(v || "").replace(/\s+/g, "").toUpperCase();
+// Kullanıcının atamaları (açık + son 60 günde kapanan): iş kodu → [{ id, durum, kategori_ad, plan_tarihi }]
+async function mobilHaritaAtamalarim(email) {
+  await isAtamaTablolar();
+  const r = await pool.query(`SELECT a.id, a.durum, a.plan_tarihi, a.site_codes, k.ad AS kategori_ad FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
+    WHERE a.personeller @> $1::jsonb AND a.durum <> 'IPTAL' AND (a.durum <> 'TAMAMLANDI' OR a.updated_at > NOW() - INTERVAL '60 days')`,
+    [JSON.stringify([{ email: String(email || "").toLowerCase().trim() }])]);
+  const out = new Map();
+  for (const a of r.rows) for (const s of a.site_codes || []) {
+    const kod = mobilKod(s); if (!kod) continue;
+    (out.get(kod) || out.set(kod, []).get(kod)).push({ id: a.id, durum: a.durum, kategori_ad: a.kategori_ad || null, plan_tarihi: a.plan_tarihi || null });
+  }
+  return out;
+}
+const mobilKonum = (k) => (k && k.lat !== null && k.lng !== null && ["KESIN", "CELISKILI"].includes(k.dogruluk) ? { lat: Number(k.lat), lng: Number(k.lng) } : null);
+// Atanan işlerden saha listesi (web harita kapsamı dışındaki personel için; fiyat / belge / firma bilgisi verilmez)
+async function mobilHaritaBenimSahalar(atamalar) {
+  const kodlar = [...atamalar.keys()];
+  if (!kodlar.length) return [];
+  await sahaKonum.tabloHazirla(pool);
+  const rp = new Map((await pool.query(`SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS sc, site_type, bolge, il, project_code
+    FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [kodlar])).rows.map((x) => [x.sc, x]));
+  const gruplar = {};
+  for (const kod of kodlar) {
+    const f = sahaKimlik.fizikselSaha(kod);
+    const id = f?.fiziksel_id || kod;
+    (gruplar[id] = gruplar[id] || []).push(kod);
+  }
+  const ids = Object.keys(gruplar);
+  const kMap = Object.fromEntries((await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows.map((k) => [k.fiziksel_id, k]));
+  return ids.sort().map((id) => {
+    const k = kMap[id];
+    const isler = gruplar[id].map((kod) => {
+      const r = rp.get(kod) || {};
+      const at = atamalar.get(kod) || [];
+      const acik = at.find((a) => a.durum !== "TAMAMLANDI") || at[0];
+      const [renk, ad] = MOBIL_ATAMA_PIN[acik?.durum] || ["GRI", "Durum bilinmiyor"];
+      return { site_code: kod, site_type: r.site_type || "", project_code: r.project_code || "", pin: { renk, ad }, durum_ad: ad, fiili: null,
+        atanan_ekip: null, taseronlar: [], benim: true, atamalar: at };
+    });
+    const r0 = rp.get(gruplar[id][0]) || {};
+    const konum = mobilKonum(k);
+    const il = k?.il || r0.il || getCityFromSiteCode(id) || null;
+    // Tek iş varsa pin o işin atama durumudur; birden çok işte web haritasının birleştirme kuralı
+    const pin = isler.length === 1 ? isler[0].pin : (({ renk, ad }) => ({ renk, ad }))(haritaPinDurum.pinBirlestir(isler));
+    return { id, il, ilce: k?.ilce || "", bolge: r0.bolge || getRegionFromSiteCode(id) || "", saha_adi: k?.saha_adi || "", adres: k?.adres || "",
+      konum, yaklasik_il: konum ? null : il, pin, isler, benim: true, taseronlar: [] };
+  });
+}
+app.get("/mobil/harita", authMiddleware, async (req, res) => {
+  try {
+    if (taseronMu(req.user)) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const atamalar = await mobilHaritaAtamalarim(req.user?.email);
+    const tum = mobilHaritaTumSahaMi(req.user);
+    let sahalar, kapsam = null;
+    if (tum) {
+      const d = await haritaVerisi(req);
+      kapsam = d.firma?.ad || d.kapsam || null;
+      sahalar = d.sahalar.map((sh) => {
+        const isler = sh.isler.map((x) => {
+          const kod = mobilKod(x.site_code);
+          return { site_code: x.site_code, site_type: x.site_type || "", project_code: x.project_code || "", pin: x.pin ? { renk: x.pin.renk, ad: x.pin.ad } : null,
+            durum_ad: x.fiili?.ad || x.durum_ad || "", fiili: x.fiili ? { ad: x.fiili.ad, renk: x.fiili.renk } : null,
+            atanan_ekip: x.atanan_ekip?.ad || null, taseronlar: x.taseronlar || [], benim: atamalar.has(kod), atamalar: atamalar.get(kod) || [] };
+        });
+        const konum = sh.konum && ["KESIN", "CELISKILI"].includes(sh.konum.dogruluk) ? { lat: sh.konum.lat, lng: sh.konum.lng } : null;
+        return { id: sh.fiziksel_id, il: sh.il || sh.yaklasik?.il || null, ilce: sh.ilce || "", bolge: sh.operasyon_bolgesi || sh.bolge || "", saha_adi: sh.saha_adi || "",
+          adres: sh.adres || "", konum, yaklasik_il: konum ? null : sh.yaklasik?.il || null, pin: { renk: sh.pin?.renk || "GRI", ad: sh.pin?.ad || "" },
+          isler, benim: isler.some((x) => x.benim), taseronlar: sh.taseronlar || [] };
+      });
+    } else {
+      sahalar = await mobilHaritaBenimSahalar(atamalar);
+    }
+    res.json({ ok: true, tum_saha: tum, kapsam, sahalar,
+      ozet: { saha: sahalar.length, konumlu: sahalar.filter((s) => s.konum).length, yaklasik: sahalar.filter((s) => !s.konum && s.yaklasik_il).length,
+        konumsuz: sahalar.filter((s) => !s.konum && !s.yaklasik_il).length, benim: sahalar.filter((s) => s.benim).length } });
+  } catch (e) {
+    if (e && e.durum) return res.status(e.durum).json({ ok: false, error: e.mesaj });
+    console.error("MOBIL HARITA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message });
+  }
+});
 // Fiziksel saha kapsamda mı (rota / saha bilgisi): alt marka → kendi kapsamındaki iş kodları; firma süzgeci → o firmanın işleri
 async function haritaSahaKapsami(req, id) {
   const K = await rolloutKapsam(req);

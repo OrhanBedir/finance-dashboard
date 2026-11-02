@@ -19,6 +19,7 @@ import { AvansDetayEkrani, AvansTalepEkrani } from "../ekranlar/AvansEkranlari";
 import { HesapHareketleriEkrani } from "../ekranlar/HesapHareketleriEkrani";
 import { SahaEkrani } from "../ekranlar/SahaEkrani";
 import { IsDetayEkrani } from "../ekranlar/IsDetayEkrani";
+import { SahaHaritaEkrani } from "../ekranlar/SahaHaritaEkrani";
 import { CleanupEkrani } from "../ekranlar/CleanupEkrani";
 import { MalzemeDetayEkrani, MalzemeTalepEkrani } from "../ekranlar/MalzemeEkranlari";
 import { StokIslemEkrani } from "../ekranlar/StokEkranlari";
@@ -116,6 +117,7 @@ export function Navigasyon() {
         <Yigin.Screen name="AvansDetay" component={AvansDetayEkrani} />
         <Yigin.Screen name="HesapHareketleri" component={HesapHareketleriEkrani} />
         <Yigin.Screen name="IsDetay" component={IsDetayEkrani} />
+        <Yigin.Screen name="SahaHarita" component={SahaHaritaEkrani} />
         <Yigin.Screen name="Cleanup" component={CleanupEkrani} />
         <Yigin.Screen name="MalzemeTalep" component={MalzemeTalepEkrani} />
         <Yigin.Screen name="MalzemeDetay" component={MalzemeDetayEkrani} />

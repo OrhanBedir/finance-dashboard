@@ -63,6 +63,11 @@ export const malzemeApi = {
   iade: (id, govde) => api.put(`/malzeme/dagitim/${id}/iade`, govde),
 };
 
+// Saha haritası (02.11.2026): kimin hangi sahaları göreceğine sunucu karar verir (personel → kendi atanan işleri)
+export const haritaApi = {
+  sahalar: () => api.get("/mobil/harita", { zamanAsimiMs: 90000 }),
+};
+
 export const isApi = {
   benim: () => api.get("/is-atama/benim"),
   detay: (id) => api.get(`/is-atama/${id}`),
