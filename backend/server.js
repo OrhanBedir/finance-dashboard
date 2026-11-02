@@ -585,7 +585,8 @@ const sahaKonum = require("./sahaKonum");
 const haritaIsDurumu = require("./haritaIsDurumu");
 const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
 const kmzKonum = require("./kmzKonum"); // 29.10.2026: Türk Telekom KMZ konum kaynağı (yalnız konum)
-const haritaPinDurum = require("./haritaPinDurum"); // 29.10.2026: pin rengi = iş durumu; anten / bant detayı
+const haritaPinDurum = require("./haritaPinDurum");
+const planAraMod = require("./planAra"); // 02.11.2026: Plan Yap 3. adım Site ID / iş kodu öneri araması // 29.10.2026: pin rengi = iş durumu; anten / bant detayı
 const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
 const hwMalzeme = require("./hwMalzeme"); // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 const fiiliDurum = require("./fiiliDurum"); // 31.10.2026: fiilî çalışma durumu (QC'den bağımsız fiziksel montaj)
@@ -14509,11 +14510,32 @@ app.get("/plan/ekipler", authMiddleware, async (req, res) => {
       tatiller: planlayici.TR_TATIL, varsayilan_donem: planlayici.varsayilanDonem(bugun), rota_servisi: !!process.env.ROTA_SERVIS_URL });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// 02.11.2026 (Orhan): Plan Yap 3. adım öneri araması — kaynak haritaVerisi (ZORUNLU Teknocenter kapsamı, ERC panelinden de);
+// ekranda yüklü / filtrelenmiş liste değil. Arama hiçbir şey yazmaz (atama, stok, ekip devri yok). Hızlı yazmada her tuşta harita
+// yeniden hesaplanmasın diye kullanıcı başına 60 sn önbellek (yalnız bu ucun; kapsam anahtarı kullanıcı + marka + rol).
+const _planAraOnbellek = new Map();
+app.get("/plan/is-ara", authMiddleware, async (req, res) => {
+  try {
+    if (!planYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Plan yapma yetkiniz yok" });
+    const q = String(req.query.q || "").slice(0, 60);
+    if (planAraMod.normal(q).length < 2) return res.json({ ok: true, kisa: true, sahalar: [], toplam_saha: 0, toplam_is: 0, kalan_saha: 0 });
+    const anahtar = [req.user?.email, req.user?.marka, req.user?.role, req.user?.tenant].join("|");
+    let o = _planAraOnbellek.get(anahtar);
+    if (!o || Date.now() - o.t > 60000) {
+      const V = await haritaVerisi(req);
+      o = { t: Date.now(), sahalar: V.sahalar };
+      _planAraOnbellek.set(anahtar, o);
+      if (_planAraOnbellek.size > 200) _planAraOnbellek.delete(_planAraOnbellek.keys().next().value);
+    }
+    res.json({ ok: true, q, ...planAraMod.planAra(o.sahalar, q, { offset: req.query.offset, limit: req.query.limit }) });
+  } catch (e) { if (e && e.durum) return res.status(e.durum).json({ ok: false, error: e.mesaj }); res.status(500).json({ ok: false, error: e.message }); }
+});
 app.post("/plan/onizle", authMiddleware, async (req, res) => {
   try { res.json(planCevap(await planHazirla(req, req.body || {}))); }
   catch (e) { res.status(e.durum || 500).json({ ok: false, error: e.message }); }
 });
 app.post("/plan/onayla", authMiddleware, async (req, res) => {
+  _planAraOnbellek.clear(); // yeni atama öneri listesinde hemen görünsün
   const b = req.body || {};
   const anahtar = String(b.istek_anahtari || "").trim();
   if (!/^[A-Za-z0-9_-]{8,80}$/.test(anahtar)) return res.status(400).json({ ok: false, error: "İstek anahtarı eksik" });

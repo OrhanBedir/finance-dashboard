@@ -16,7 +16,7 @@ import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2
 import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
-import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
+import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK, planAdayi, planAdayUygun } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -7806,7 +7806,7 @@ const PLAN_TUR = { YOL: ["🚚", "#e0f2fe", "#075985", "Yol"], TESLIM: ["📦", 
 // Plan Yap sarmalayıcıları bileşen DIŞINDA (render içinde tanımlanırsa her çizimde yeniden kurulur: odak / tıklama kaybolur)
 function PlanKart({ children, style }) { return <div style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", background: "#fff", marginBottom: 10, ...style }}>{children}</div>; }
 function PlanB2({ children, ...p }) { return <button type="button" className="rhmap-btn rhmap-btn-l" {...p}>{children}</button>; }
-function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
+function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }) {
   const [adim, setAdim] = useState("A");
   const [kaynak, setKaynak] = useState(null); const [kaynakHata, setKaynakHata] = useState("");
   const [ekipNo, setEkipNo] = useState(null);
@@ -7975,7 +7975,8 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi }) {
               </div>
             </PlanKart>
             <PlanIsSecimi isler={montajAday} secim={secim} setSecim={setSecim} ekip={ekip} mod={mod} gizliDahil={gizliDahil} setGizliDahil={setGizliDahil}
-              yenidenAta={yenidenAta} setYenidenAta={setYenidenAta} onGorunur={setGorunurKodlar}
+              yenidenAta={yenidenAta} setYenidenAta={setYenidenAta} onGorunur={setGorunurKodlar} cleanup={cleanup} planlananlar={planlananlar}
+              onAdayEkle={(a) => setIsler((l) => (l.some((y) => y.kod === a.kod) ? l : [...l, { ...a, sure_gun: "", sure_gerekce: "", par_id: "", kesinti: "", kesinti_dk: "", erisim_bas: "", erisim_bit: "", baslangic_tarih: "", baslangic_saat: "" }]))}
               satirAlanlari={(x) => {
                 const i = isler.findIndex((y) => y.kod === x.kod), sira = secim.indexOf(x.kod) + 1;
                 const S = (k, v) => setIsler((l) => l.map((y, j) => (j === i ? { ...y, [k]: v } : y)));
@@ -8858,12 +8859,8 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
       </div>
       {kmzAcik && <KmzIceAlmaModal onClose={() => setKmzAcik(false)} onUygulandi={() => { setVeriler({}); setHatalar({}); setYenile((n) => n + 1); }} />}
       {planAcik && <PlanYapModal firma={firma} onClose={() => { setPlanAcik(false); setPlanSaha(null); }} onKaydedildi={() => { setVeriler({}); setYenile((n) => n + 1); }}
-        adaylar={(planSaha ? [planSaha] : yilaGore).flatMap((s) => s.isler.filter((i) => (i.planlanabilir !== false && !["TAMAM_QC_OK", "TAMAM_QC_BEKLIYOR", "BASKA_FIRMA"].includes(i.montaj?.kod) && i.fiili?.kod !== "TAMAMLANDI") || filtre === "CLEANUP") // 31.10.2026: fiilen tamamlanan iş montaj adayı değil
-          .map((i) => ({ kod: String(i.site_code).replace(/\s+/g, "").toUpperCase(), fiziksel_id: s.fiziksel_id, montaj_ad: i.montaj?.ad || "", kapsam_ad: i.kapsam?.ad || "", konum_var: konumVar(s),
-            bolge: s.operasyon_bolgesi || s.bolge || "", il: s.il || s.yaklasik?.il || "", site_type: i.site_type || "", anten: i.anten?.anten || null, malzeme: i.malzeme || null, fiili: i.fiili || null, atanan_ekip: i.atanan_ekip || null,
-            mevcut_atama: i.fiili?.atama_id || (i.fiili?.kod === "PLANLANDI" && i.atanan_ekip) ? (i.atanan_ekip && i.fiili?.kod === "PLANLANDI" ? { ekip_no: i.atanan_ekip.ekip_no, ad: i.atanan_ekip.ad } : null) : null,
-            mevcut_plan: i.fiili?.plan_tarihi ? `${i.fiili.plan_tarihi}${i.atanan_ekip ? ` · ${i.atanan_ekip.ad}` : ""}` : null,
-            sure_gun_oto: filtre === "CLEANUP" ? null : i.sure?.gun ?? null, sure_gerekce_oto: filtre === "CLEANUP" ? "Clean Up süresini girin" : i.sure?.gerekce || "", kategori: filtre === "CLEANUP" ? "CLEANUP" : "NEW_SITE" })))} />}
+        cleanup={filtre === "CLEANUP"} // 02.11.2026: aday dönüşümü Operasyon.planAdayi (3. adım aramasıyla aynı); fiilen tamamlanan iş montaj adayı değil
+        adaylar={(planSaha ? [planSaha] : yilaGore).flatMap((s) => s.isler.filter((i) => planAdayUygun(i) || filtre === "CLEANUP").map((i) => planAdayi(s, i, { cleanup: filtre === "CLEANUP" })))} />}
     </div>
   );
 }
