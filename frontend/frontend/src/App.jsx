@@ -12,6 +12,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
 import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
+import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
@@ -8937,6 +8938,15 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   const [cleanupRows, setCleanupRows] = useState([]);
   const [showCleanupModal, setShowCleanupModal] = useState(false);
   const [editingCleanup, setEditingCleanup] = useState(null);
+  // 02.11.2026: sütun bazlı hızlı filtre — { alanAnahtari: değer }. Satır kapatılınca değerler KORUNUR; yalnız açıkça temizlenince kalkar.
+  const [sutunFiltre, setSutunFiltre] = useState({});
+  const [sutunFiltreAcik, setSutunFiltreAcik] = useState(false);
+  const sutunFiltreDegis = useCallback((k, v) => setSutunFiltre((p) => {
+    const n = { ...p };
+    if (v == null || v === "" || (typeof v === "object" && !v.mod)) delete n[k]; else n[k] = v;
+    return n;
+  }), []);
+  const sutunFiltreTemizle = useCallback(() => setSutunFiltre({}), []);
 
   const handleExportExcel = async () => {
     const today = new Date().toISOString().split("T")[0];
@@ -9197,7 +9207,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
     a.href = url;
     // 27.10.2026: firma / taşeron seçiliyse dosya adında görünür (içerik zaten filteredRows)
     const firmaEk = firmaSecim.length ? "_" + (firmaSecim.length === 1 ? rolloutFirmaEtiketi(firmaSecim[0], firmaMarkalar) : `${firmaSecim.length}_firma`).replace(/[^A-Za-z0-9ÇĞİÖŞÜçğıöşü_-]+/g, "_") : "";
-    a.download = `rollout_${regionLabel}${firmaEk}_${fileSuffix}_${today}.xlsx`;
+    // 02.11.2026: sütun filtresi etkinse dosya adı söyler (içerik zaten filteredRows = ekrandaki satırlar)
+    const sutunEk = sutunFiltreSayisi(sutunFiltre) ? "_sutun_filtreli" : "";
+    a.download = `rollout_${regionLabel}${firmaEk}${sutunEk}_${fileSuffix}_${today}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -9304,9 +9316,13 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
       return regionOk && typeOk && qcOk && enhOk && searchOk;
     });
   }, [rows, search, regionFilter, typeFilter, qcFilter, enhFilter, firmaSozluk, firmaMarkalar]);
-  // 27.10.2026: firma / taşeron süzgeci en son — liste, özet, sayaçlar ve Excel aynı sonucu kullanır
-  const filteredRows = useMemo(() => firmaHaricRows.filter((row) => rolloutFirmaSecili(row, firmaSecim, firmaSozluk, firmaKolu)),
+  // 27.10.2026: firma / taşeron süzgeci — ardından 02.11.2026 sütun filtresi en son; liste, özet, sayaçlar ve Excel aynı sonucu kullanır
+  const ustFiltreRows = useMemo(() => firmaHaricRows.filter((row) => rolloutFirmaSecili(row, firmaSecim, firmaSozluk, firmaKolu)),
     [firmaHaricRows, firmaSecim, firmaSozluk, firmaKolu]);
+  const filteredRows = useMemo(() => sutunFiltreUygula(ustFiltreRows, sutunFiltre), [ustFiltreRows, sutunFiltre]);
+  const etkinSutunFiltre = sutunFiltreSayisi(sutunFiltre);
+  // Seçim kutularının seçenekleri yalnız yetkili + üst filtrelerden geçmiş satırlardan (başka firmanın değeri listelenmez)
+  const sutunSecenek = useMemo(() => (sutunFiltreAcik ? sutunSecenekleri(ustFiltreRows) : {}), [sutunFiltreAcik, ustFiltreRows]);
   const firmaSecenekleri = useMemo(() => rolloutFirmaSecenekleri(firmaHaricRows, firmaSozluk, firmaMarkalar, firmaKolu, firmaSecim),
     [firmaHaricRows, firmaSozluk, firmaMarkalar, firmaKolu, firmaSecim]);
   const firmaBaslik = firmaSecim.length === 0 ? null
@@ -9369,6 +9385,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         toplam={rows.length}
         durum={errorMessage ? "hata" : loading ? "yukleniyor" : "ok"}
         firmaBaslik={firmaBaslik}
+        sutunFiltreSayisi={etkinSutunFiltre}
       />
 
       <div className="rolloutFiltre">
@@ -9434,6 +9451,8 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
 
         <FirmaTaseronFiltre secenekler={firmaSecenekleri} markalar={firmaMarkalar} secim={firmaSecim} onSecim={setFirmaSecim}
           kolu={firmaKolu} onKolu={setFirmaKolu} />
+
+        <SutunFiltreDugmesi acik={sutunFiltreAcik} sayi={etkinSutunFiltre} onClick={() => setSutunFiltreAcik((a) => !a)} />
 
         <div className="qcActionBox">
           {saltOkunur && <span className="rolloutYetkiEtiketi" title="Bu ekranda yalnız görüntüleme yetkiniz var; kayıt değiştirme, iş atama ve Clean Up kapalı">🔒 Görüntüleme</span>}
@@ -9530,7 +9549,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
             style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
             🗺 Harita
           </button>
-          {showHarita && <RolloutHaritaModal satirlar={filteredRows} bolgeVarsayilan={regionFilter} onClose={() => setShowHarita(false)} />}
+          {showHarita && <RolloutHaritaModal satirlar={ustFiltreRows} bolgeVarsayilan={regionFilter} onClose={() => setShowHarita(false)} />}
           {/* 31.10.2026: Rollout Weekly Plan — Harita düğmesinin yanında; operasyon görüntüleme izni (sunucu da denetler) */}
           {currentUser?.izinler?.operasyon_goruntule === true && <button type="button" onClick={() => setShowHaftalik(true)} title="Ekip × gün haftalık plan, fiilî durum, müşteri Excel'i"
             style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
@@ -9571,6 +9590,10 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
         saltOkunur={saltOkunur}
       />
 
+      {(sutunFiltreAcik || etkinSutunFiltre > 0) && !isKoluListeModu(rows, search, isKoluFilter) && (
+        <SutunFiltreBilgi filtre={sutunFiltre} gosterilen={filteredRows.length} ustSonrasi={ustFiltreRows.length} toplam={rows.length}
+          onTemizle={sutunFiltreTemizle} onTekTemizle={(k) => sutunFiltreDegis(k, null)} />
+      )}
       <div className="tableWrap rolloutTableWrap" style={isKoluListeModu(rows, search, isKoluFilter) ? { display: "none" } : undefined}>
         <table className="rolloutTable">
           <thead>
@@ -9591,7 +9614,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
 
               <th colSpan="7">BTK</th>
 
-              <th colSpan="4">EMR</th>
+              <th colSpan="3">EMR</th>
 
               <th colSpan="3">YSB</th>
 
@@ -9599,10 +9622,12 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
 
               <th colSpan="5">ENH</th>
 
-              <th colSpan="4">POWER</th>
+              <th colSpan="3">POWER</th>
 
-              <th colSpan="4">KABUL</th>
+              <th colSpan="3">KABUL</th>
             </tr>
+            {/* 02.11.2026: sütun filtre satırı — grup başlıklarının altında, sütun adlarının hemen üstünde (adlar yerinde kalır) */}
+            {sutunFiltreAcik && <RolloutSutunFiltreSatiri filtre={sutunFiltre} onDegis={sutunFiltreDegis} secenekler={sutunSecenek} />}
             <tr>
               <th style={{ background:"#0f172a", color:"#fff", fontSize:"11px" }}>Güncelle</th>
               <th style={{ background:"#1e293b", color:"#fff", fontSize:"11px" }}>Belgeler</th>
@@ -9679,16 +9704,18 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
           </thead>
 
           <tbody>
-            {filteredRows.length === 0 ? (
-              <EmptyRow colSpan={50} text={errorMessage ? "Rollout verisi yüklenemedi — kayıtlar gösterilemiyor, lütfen yenileyin" : loading ? "Yükleniyor…"
+            {filteredRows.length === 0 && etkinSutunFiltre > 0 && ustFiltreRows.length > 0 ? (
+              <tr><td colSpan={ROLLOUT_SUTUNLAR.length} className="rsfSonucYok">
+                Bu filtrelere uygun kayıt bulunamadı.
+                <button type="button" className="rsfHepsiniTemizle" onClick={sutunFiltreTemizle}>Tüm sütun filtrelerini temizle</button>
+              </td></tr>
+            ) : filteredRows.length === 0 ? (
+              <EmptyRow colSpan={ROLLOUT_SUTUNLAR.length} text={errorMessage ? "Rollout verisi yüklenemedi — kayıtlar gösterilemiyor, lütfen yenileyin" : loading ? "Yükleniyor…"
                 : kapsamEtiketi ? `${kapsamEtiketi} kapsamında Rollout kaydı bulunamadı` : "Rollout kaydı bulunamadı"} />
             ) : (
               filteredRows.map((row, index) => {
-                const ms_rfRcv   = !!(row.installation_actual_start_date || (String(row.malzeme_status||"").toUpperCase()==="OK"));
-                const ms_rfStart = !!row.installation_actual_start_date;
-                const ms_rfFin   = !!row.installation_actual_end_date;
-                const ms_qcOk    = String(row.qc_durum||"").toUpperCase()==="OK";
-                const ms_accept  = !!row.pac_actual_end_date;
+                // 02.11.2026: türetme ortak fonksiyonda — sütun filtresi aynı kuralı kullanır
+                const { rfRcv: ms_rfRcv, rfStart: ms_rfStart, rfFin: ms_rfFin, qcOk: ms_qcOk, accept: ms_accept } = rolloutMilestone(row);
                 // 27.10.2026: durum yalnız renkle değil ikon + metinle; tarih varsa hover ve klavye odağında (title / aria-label)
                 const msTd = (v, ad, tarih) => {
                   const t = tarih && tarih !== "N/A" ? formatDate(tarih) : "";
@@ -41900,7 +41927,7 @@ function QCUploadInline({ onClose, onUploaded }) {
     </div>
   );
 }
-function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok", firmaBaslik = null }) {
+function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok", firmaBaslik = null, sutunFiltreSayisi: sfSayi = 0 }) {
   const regionTitle = regionFilter === "ALL" ? "Tüm Bölgeler" : regionFilter;
   const isEnhMode = enhFilter !== "ALL";
 
@@ -41991,7 +42018,9 @@ function RolloutSummaryCard({ rows, regionFilter, enhFilter, toplam, durum = "ok
   // 27.10.2026: Firma / Taşeron filtresi seçiliyse başlık seçimi söyler ("Teknocenter — Saha Durum Özeti")
   const baslikKapsam = firmaBaslik ? (regionFilter && regionFilter !== "ALL" ? `${firmaBaslik} · ${regionTitle}` : firmaBaslik) : regionTitle;
   const baslik = `${baslikKapsam} — ${isEnhMode ? `${enhLabel} Sahaları (ENH)` : "Saha Durum Özeti"}`;
-  const kapsamNotu = typeof toplam === "number" && toplam !== rows.length ? `filtre: ${rows.length} / toplam ${toplam} saha` : null;
+  // 02.11.2026: sayaçlar tablodaki satırlarla aynı kümeyi (sütun filtreleri dahil) sayar; pill bunu açıkça yazar
+  const kapsamNotu = typeof toplam === "number" && toplam !== rows.length
+    ? `filtre${sfSayi ? " (sütun filtreleri dahil)" : ""}: ${rows.length} / toplam ${toplam} saha` : null;
   const veriYok = durum === "yukleniyor" || durum === "hata";
   return (
     <section aria-label="Saha durum özeti" className="rsOzet">

@@ -1655,3 +1655,52 @@ body {
 .rolloutTable .msCell { text-align: center; width: 44px; min-width: 44px; }
 .rolloutTable .msCell:focus-visible { outline: 2px solid #1e3a5f; outline-offset: -2px; }
 .rolloutTable .msIkon { display: inline-block; font-size: 13px; line-height: 1; width: 16px; }
+/* ── Rollout sütun filtresi (02.11.2026): huni düğmesi, başlık üstü filtre satırı, bilgi şeridi ── */
+.rsfDugme { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1.5px solid #e5e7eb; border-radius: 8px; background: #fff; color: #1e3a5f; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.rsfDugme:hover { border-color: #94a3b8; }
+.rsfDugme:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+.rsfDugmeDolu { border-color: #1e3a5f; background: #eef4ff; }
+.rsfDugmeAcik { box-shadow: inset 0 0 0 1px #1e3a5f; }
+.rsfRozet { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #1e3a5f; color: #fff; font-size: 11px; line-height: 18px; text-align: center; box-sizing: border-box; }
+.rsfBilgi { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 6px; padding: 7px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 12.5px; color: #334155; }
+.rsfBilgiSayi { display: inline-flex; align-items: center; gap: 5px; font-weight: 700; color: #1e3a5f; }
+.rsfBilgiAyrac { color: #cbd5e1; }
+.rsfBilgiNot { color: #64748b; font-size: 12px; }
+.rsfEtiket { font-weight: 600; }
+.rsfHepsiniTemizle { border: 1px solid #cbd5e1; background: #fff; color: #1e3a5f; font-size: 12px; font-weight: 700; border-radius: 8px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.rsfHepsiniTemizle:hover, .rsfHepsiniTemizle:focus-visible { background: #eef4ff; border-color: #1e3a5f; }
+.rsfBilgi .rsfHepsiniTemizle { margin-left: auto; }
+.rolloutTable thead tr.rsfSatir th.rsfHucre { background: #f8fafc; padding: 4px 5px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; font-weight: 400; }
+.rolloutTable thead tr.rsfSatir th.rsfHucre.siteIdCell { background: #f1f5ff; overflow: visible; }
+.rsfKutu { position: relative; display: flex; align-items: center; min-width: 64px; }
+.rsfKutu:has(input) { min-width: 84px; }
+.rsfMs .rsfKutu { min-width: 60px; }
+.rsfKutu input, .rsfKutu select, .rsfTarihDugme { width: 100%; min-width: 0; box-sizing: border-box; height: 26px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; font-size: 11.5px; color: #0f172a; font-family: inherit; font-weight: 500; }
+.rsfKutu input { padding: 0 20px 0 6px; }
+.rsfKutu select { padding: 0 18px 0 4px; cursor: pointer; }
+.rsfMs .rsfKutu select { font-size: 10.5px; padding: 0 2px; text-overflow: ellipsis; }
+.rsfKutu input::placeholder { color: #94a3b8; font-weight: 400; }
+.rsfKutu input:focus, .rsfKutu select:focus, .rsfTarihDugme:focus-visible { outline: 2px solid #93c5fd; outline-offset: 0; border-color: #3b82f6; }
+.rsfDolu input, .rsfDolu select, .rsfDolu .rsfTarihDugme { border-color: #1e3a5f; background: #eef4ff; font-weight: 700; color: #1e3a5f; }
+.rsfX { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; border: none; border-radius: 999px; background: transparent; color: #475569; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
+.rsfKutu select ~ .rsfX, .rsfTarihDugme ~ .rsfX { right: 16px; background: #eef4ff; }
+.rsfMs .rsfKutu select ~ .rsfX { display: none; }
+.rsfX:hover, .rsfX:focus-visible { background: #bfdbfe; color: #0f172a; outline: none; }
+.rsfTarihDugme { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 4px 0 6px; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; }
+.rsfTarihDugme > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.rsfYerTutucu { color: #94a3b8; font-weight: 400; }
+.rsfOk { color: #64748b; font-size: 10px; flex: none; }
+.rsfTarihPencere { position: fixed; z-index: 9500; background: #fff; border: 1px solid #dbe3ee; border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, .18); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; animation: ftfAc .12s ease-out; box-sizing: border-box; max-width: calc(100vw - 16px); }
+.rsfTarihBaslik { font-size: 12px; font-weight: 800; color: #1e3a5f; }
+.rsfTarihSatir { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; font-weight: 600; color: #475569; }
+.rsfTarihSatir select, .rsfTarihSatir input { height: 30px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 0 8px; font-size: 13px; color: #0f172a; font-family: inherit; }
+.rsfTarihNot { font-size: 11px; color: #64748b; }
+.rsfTarihAlt { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid #eef2f7; padding-top: 8px; }
+.rsfTarihTemizle, .rsfTarihTamam { font-size: 12px; font-weight: 700; border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+.rsfTarihTemizle { background: #fff; color: #1e3a5f; border: 1px solid #cbd5e1; }
+.rsfTarihTemizle:disabled { opacity: .45; cursor: default; }
+.rsfTarihTamam { background: #1e3a5f; color: #fff; border: 1px solid #1e3a5f; }
+.rolloutTable td.rsfSonucYok { padding: 22px 16px; color: #475569; font-size: 13px; text-align: left; position: sticky; left: 0; }
+.rolloutTable td.rsfSonucYok .rsfHepsiniTemizle { margin-left: 12px; }
+@media (prefers-reduced-motion: reduce) { .rsfTarihPencere { animation: none; } }
+@media (max-width: 640px) { .rsfKutu { min-width: 72px; } .rsfKutu input, .rsfKutu select, .rsfTarihDugme { height: 30px; font-size: 12.5px; } .rsfBilgi .rsfHepsiniTemizle { margin-left: 0; } }
