@@ -11,7 +11,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 // lisans: src/data/tr-iller.LICENSE.txt). Uygulamaya gömülüdür; çalışma anında dış harita servisi/tile kullanılmaz.
 import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
-import { AtananIsModal, atananExcel, paraMetni } from "./atananIs.jsx"; // 02.11.2026: Teknocenter Atanan İş Tutarı (PR + PO → BoQ)
+import { AtananIsModal, atananExcel, paraMetni, tlMetni, kurMetni } from "./atananIs.jsx"; // 02.11.2026: Teknocenter Atanan İş Tutarı (PR + PO → BoQ)
 import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
 import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
@@ -33057,7 +33057,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
   // Her aşama bir öncekinin içinden ilerler; yüzdeler aşamalar arası makası gösterir.
   // Teknocenter: ortak hesabın TL toplamı; USD kalem varsa yalnız YÜZDE için ekrandaki kurla eklenir (tutar satırında ayrı gösterilir)
   const _atanan  = _atananOrtak
-    ? (atananVeri ? Number(atananVeri.ozet?.toplam?.TRY || 0) + Number(atananVeri.ozet?.toplam?.USD || 0) * usdRate : 0)
+    ? (atananVeri ? (atananVeri.ozet?.toplam_tl ?? (Number(atananVeri.ozet?.toplam?.TRY || 0) + Number(atananVeri.ozet?.toplam?.USD || 0) * usdRate)) : 0)
     : (executiveSummary.assigned  || 0);
   const _fiziki  = ahyLockedFiziki !== null ? ahyLockedFiziki : (executiveSummary.fiziki || 0);
   const _qcOk    = (executiveSummary.qcOk      || 0);
@@ -33118,8 +33118,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ color: "#374151" }}>Atanan İş Tutarı (PR talebi){atananVeri && <span style={{ marginLeft: 6, fontSize: "11px" }}>🔍</span>}</div>
                     <div style={{ fontWeight: 600, color: "#111827", textAlign: "right" }}>
-                      {atananVeri ? formatMoneyByCurrency(atananVeri.ozet?.firma_tutar?.TRY || 0, "TRY") : atananHata ? "—" : "hesaplanıyor…"}
-                      {Number(atananVeri?.ozet?.firma_tutar?.USD || 0) > 0 && <div style={{ fontSize: 11, color: "#6b7280" }}>+ {formatMoneyByCurrency(atananVeri.ozet.firma_tutar.USD, "USD")} (USD ayrı)</div>}
+                      {atananVeri ? (atananVeri.ozet?.firma_tutar_tl != null ? formatMoneyByCurrency(atananVeri.ozet.firma_tutar_tl, "TRY") : paraMetni(atananVeri.ozet?.firma_tutar)) : atananHata ? "—" : "hesaplanıyor…"}
                     </div>
                   </div>
                   {atananHata && <div style={{ fontSize: "10.5px", color: "#b91c1c" }}>{atananHata}</div>}
@@ -33128,7 +33127,9 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
                     return (
                       <div style={{ fontSize: "10.5px", color: "#6b7280", marginTop: 2, lineHeight: 1.45 }}>
                         <div>{o.kapsam?.kalem || 0} kalem · {o.kapsam?.is_kaydi || 0} iş kaydı · {o.kapsam?.fiziksel_saha || 0} fiziksel saha · {o.fiziki_baslamamis || 0} kalem fiziki başlamamış</div>
-                        <div><span style={{ color: "#047857" }}>PO fiyatıyla {paraMetni(o.po_fiyatli)}</span> ({o.po_kalem || 0} kalem) · <span style={{ color: "#b45309" }}>BoQ üzerinden geçici {paraMetni(o.boq_gecici)}</span> ({o.boq_kalem || 0} kalem, PO bekleniyor)</div>
+                        <div><span style={{ color: "#047857" }}>PO fiyatıyla {tlMetni(o.po_fiyatli_tl, o.po_fiyatli)}</span> ({o.po_kalem || 0} kalem) · <span style={{ color: "#b45309" }}>BoQ üzerinden geçici {tlMetni(o.boq_gecici_tl, o.boq_gecici)}</span> ({o.boq_kalem || 0} kalem, PO bekleniyor)</div>
+                        {kurMetni(o) && <div>{kurMetni(o)}</div>}
+                        {Number(o.toplam?.USD || 0) > 0 && o.toplam_tl == null && <div style={{ color: "#b45309" }}>TCMB kuru alınamadı — USD tutar ayrı gösteriliyor</div>}
                         {(o.fiyatsiz?.kalem > 0 || o.miktar_supheli?.kalem > 0) && (
                           <div style={{ color: "#b91c1c" }}>
                             ⚠️ {o.fiyatsiz?.kalem > 0 ? `${o.fiyatsiz.kalem} kalemde fiyat doğrulanamadı — toplam eksik` : ""}
