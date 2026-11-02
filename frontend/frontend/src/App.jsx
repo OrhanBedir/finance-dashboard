@@ -7989,6 +7989,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
   // 31.10.2026: filtre dışında kalan seçimler sessizce plana girmez (gizliDahil açıkça işaretlenmeli); yeniden atama ayrı onay
   const [gizliDahil, setGizliDahil] = useState(false);
   const [yenidenAta, setYenidenAta] = useState([]);
+  const [ulasimOnay, setUlasimOnay] = useState(false); // 02.11.2026: ekipte mobil hesabı olan yoksa açık onayla devam
   const [gorunurKodlar, setGorunurKodlar] = useState(null);
   const [faaliyetler, setFaaliyetler] = useState([]);
   const [yolManuel, setYolManuel] = useState({});
@@ -8012,7 +8013,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
     calisma: { bas: form.bas, bit: form.bit, molaBas: form.molaBas, molaDk: Number(form.molaDk), kapasiteSaat: Number(form.kapasiteSaat), minBlokDk: Number(form.minBlokDk), surusPayYuzde: Number(form.surusPayYuzde) },
     baslangic: form.baslangic.startsWith("D:") ? { tur: "DEPO", id: Number(form.baslangic.slice(2)) } : form.baslangic.startsWith("S:") ? { tur: "SAHA", kod: form.baslangic.slice(2) } : null,
     malzeme: { durum: form.malzemeDurum, teslimler: form.teslimler.map((t) => ({ tarih: t.tarih, saat: t.saat, depo_id: Number(t.depo_id), sure_dk: Number(t.sure_dk) || 30, acilis: t.acilis, kapanis: t.kapanis, hazir_tarih: t.hazir_tarih, hazir_saat: t.hazir_saat })) },
-    yeniden_ata: yenidenAta,
+    yeniden_ata: yenidenAta, ulasim_onay: ulasimOnay,
     isler: planSecimi.map((k) => isler.find((x) => x.kod === k)).filter(Boolean).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_gerekce: x.sure_gerekce,
       baslangic_tarih: x.baslangic_tarih, baslangic_saat: x.baslangic_saat,
       par: { par_id: x.par_id, kesinti: x.kesinti, kesinti_dk: x.kesinti_dk, bas: x.erisim_bas, bit: x.erisim_bit } })),
@@ -8195,6 +8196,15 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
                 <span style={{ minWidth: 280 }}>{e.a_ad} → {e.b_ad}</span><input type="number" min="1" placeholder="dk" style={{ ...girdi, width: 100 }} value={yolManuel[k] || ""} onChange={(ev) => setYolManuel((m) => ({ ...m, [k]: ev.target.value }))} /> dk</div>; })}
             </PlanKart>}
             {onizleme.uyarilar.length > 0 && <PlanKart style={{ borderColor: "#fde68a" }}><b>Uyarılar</b>{onizleme.uyarilar.map((x, i) => <div key={i} style={{ color: "#92400e" }}>⚠ {x}</div>)}</PlanKart>}
+            {onizleme.ulasim && <PlanKart style={{ borderColor: onizleme.ulasim.ulasir ? "#86efac" : "#fecaca", background: onizleme.ulasim.ulasir ? "#f0fdf4" : "#fff1f2" }}>
+              <b>📱 Bu plan kime ulaşır?</b>
+              <div style={{ fontSize: 14, marginTop: 4 }}>{onizleme.ulasim.mesaj}</div>
+              {onizleme.ulasim.ulasan.length > 0 && <div style={{ fontSize: 13, color: "#166534" }}>Mobil hesabı olan: {onizleme.ulasim.ulasan.map((u) => `${u.ad}${u.sef ? " (şef)" : ""} · ${u.email}`).join(", ")}</div>}
+              {onizleme.ulasim.eksik.length > 0 && <div style={{ fontSize: 13, color: "#991b1b" }}>Ulaşmayan: {onizleme.ulasim.eksik.map((u) => `${u.ad} — ${u.neden}`).join("; ")}</div>}
+              {!onizleme.ulasim.ulasir && <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, fontWeight: 700, color: "#9a3412" }}>
+                <input type="checkbox" checked={ulasimOnay} onChange={(e) => setUlasimOnay(e.target.checked)} /> Mobil hesabı olmasa da ata (plan kayda girer, kimseye iletilmez — ekibe ayrıca haber verin)</label>}
+              <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 4 }}>Atama ekip üyelerinin "Rollout · İşlerim" ekranına düşer; uygulama açılınca / öne gelince / 45 sn'de bir yenilenir. Anlık push bildirimi yok.</div>
+            </PlanKart>}
             {onizleme.plan && !onizleme.plan.hata && <>
               <PlanKart>
                 <div style={{ fontWeight: 800 }}>{onizleme.ekip.ad} · {onizleme.plan.donem.baslangic} – {onizleme.plan.donem.bitis} · {mod === "ASISTAN" ? "Akıllı Asistan önerisi (taslak)" : "Kendi planınız (taslak)"}</div>
@@ -8230,6 +8240,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
               <div style={{ fontSize: 18, fontWeight: 800 }}>✓ Plan #{sonuc.plan_id} {sonuc.tekrar ? "zaten kayıtlıydı (tekrar tıklama — yeni kayıt açılmadı)" : "kaydedildi"}</div>
               <div>{sonuc.ekip?.ad} · {sonuc.donem?.baslangic} – {sonuc.donem?.bitis}{sonuc.atama_sayisi != null ? ` · ${sonuc.atama_sayisi} İş Ata kaydı` : ""}</div>
               <div style={{ fontSize: 13, color: "#475569" }}>PR miktarları, QC ve iş tamamlandı durumu değişmedi.</div>
+              {sonuc.ulasim && <div style={{ fontSize: 14, marginTop: 6, color: sonuc.ulasim.ulasir ? "#166534" : "#991b1b" }}>📱 {sonuc.ulasim.mesaj}</div>}
             </PlanKart>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <PlanB2 onClick={() => planDosyaIndir(`/plan/musteri-excel?bas=${sonuc.donem.baslangic}&bit=${sonuc.donem.bitis}`, `haftalik_plan_${sonuc.donem.baslangic}.xlsx`).catch((e) => setHata(e.message))}>⬇ Müşteri Excel'i (haftalık plan)</PlanB2>
@@ -8533,6 +8544,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     return () => { iptal = true; };
   }, [anahtar, yenile]); // eslint-disable-line
   useEffect(() => { const f = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose]);
+  // 02.11.2026: mobil bildirimler haritaya kendiliğinden yansısın — 60 sn'de bir ve sekme öne gelince yeniden çek (seçim korunur)
+  useEffect(() => { const tazele = () => { setVeriler({}); setHatalar({}); setYenile((n) => n + 1); }; const z = setInterval(tazele, 60000);
+    const g = () => { if (document.visibilityState === "visible") tazele(); }; document.addEventListener("visibilitychange", g);
+    return () => { clearInterval(z); document.removeEventListener("visibilitychange", g); }; }, []);
   const ekranKodlari = useMemo(() => new Set((satirlar || []).map((r) => String(r.site_code || "").toUpperCase().trim())), [satirlar]);
   const bolgeler = useMemo(() => [...new Set((veri?.sahalar || []).map((s) => s.bolge).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr")), [veri]);
   const konumVar = (s) => !!s.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);

@@ -22,7 +22,7 @@ const liste = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Bool
 const tr = (s) => String(s || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I");
 
 function kur(app, deps) {
-  const { pool, authMiddleware, planEkipleri, planTablolar, rolloutKapsam, haritaKapsamSatirlari, haritaFirmaSuzgeci, zorunluFirma, sahaKimlik, hwMalzeme, fiiliDurum, ExcelJS } = deps;
+  const { pool, authMiddleware, planEkipleri, planTablolar, rolloutKapsam, haritaKapsamSatirlari, haritaFirmaSuzgeci, zorunluFirma, sahaKimlik, hwMalzeme, fiiliDurum, ExcelJS, planSenkron } = deps;
   fiiliDurum.semaKur(pool).catch(() => {});
   const gorKapi = (req, res) => {
     if (deps.taseronMu(req.user) || req.user?.kullanici_tipi === "TASERON") { res.status(403).json({ ok: false, error: "Yetkiniz yok" }); return false; }
@@ -241,7 +241,11 @@ function kur(app, deps) {
       const atanan = a && (deps.isAtamaPersonelIcinde(a, email) || deps.taseronunIsiMi(req, a));
       if (!yetkili && !atanan) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
       if (yetkili && !atanan) { const kp = await kapsam(req); if (kp.K && !kp.kodlar.has(kod)) return res.status(403).json({ ok: false, error: "Bu iş erişim kapsamınızda değil" }); }
-      if (a && a.durum === "IPTAL") return res.status(400).json({ ok: false, error: "Atama iptal edilmiş" });
+      // 02.11.2026: iptal / devredilmiş atamaya çevrimdışı gelen bildirim kaybolmaz → inceleme kuyruğu (409); yetkili ofis kullanıcısı için eski davranış
+      if (a && a.durum === "IPTAL") {
+        if (planSenkron && !yetkili) return res.status(409).json(await planSenkron.incelemeyeAl(pool, req, a, "fiili", { ...b, istek_anahtari: undefined }, planSenkron.kapaliNeden(a)));
+        return res.status(400).json({ ok: false, error: "Atama iptal edilmiş" });
+      }
       if (olay === "ISSUE" && String(b.aciklama || "").trim().length < 3 && !b.issue_turu) return res.status(400).json({ ok: false, error: "Issue türünü seçin ya da kısa açıklama yazın" });
       const ins = await pool.query(`INSERT INTO is_fiili_bildirim (is_atama_id, site_code, olay, issue_turu, aciklama, ekip_no, bildiren_email, bildiren_ad, kanal, istek_anahtari)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (bildiren_email, istek_anahtari) WHERE istek_anahtari IS NOT NULL DO NOTHING RETURNING id`,

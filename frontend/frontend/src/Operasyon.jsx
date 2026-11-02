@@ -17,6 +17,11 @@ async function opGet(yol) {
   if (!r.ok || !j?.ok) throw new Error(j?.error || `Sunucu hatası (${r.status})`);
   return j;
 }
+async function opPost(yol, govde) {
+  const r = await fetch(API_BASE + yol, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenAl()}` }, body: JSON.stringify(govde || {}) });
+  const j = await r.json().catch(() => null);
+  return { s: r.status, j };
+}
 async function dosyaIndir(yol, ad) {
   const r = await fetch(API_BASE + yol, { headers: { Authorization: `Bearer ${tokenAl()}` } });
   if (!r.ok) { const j = await r.json().catch(() => null); throw new Error(j?.error || "İndirilemedi"); }
@@ -60,11 +65,15 @@ export function RolloutHaftalikModal({ onClose }) {
   const [v, setV] = useState(null); const [hata, setHata] = useState(""); const [yukleniyor, setYukleniyor] = useState(false);
   const [detay, setDetay] = useState(null); const [sekme, setSekme] = useState("PLAN"); const [nerede, setNerede] = useState(null);
   const [mobil, setMobil] = useState(() => typeof window !== "undefined" && window.innerWidth < 760);
+  const [yenile, setYenile] = useState(0); const [sonGuncelleme, setSonGuncelleme] = useState(null);
   useEffect(() => { const f = () => setMobil(window.innerWidth < 760); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  // 02.11.2026: mobil bildirimden sonra web kendiliğinden güncellensin — 60 sn'de bir ve sekme öne gelince (ücretli servis yok)
+  useEffect(() => { const z = setInterval(() => setYenile((n) => n + 1), 60000); const g = () => { if (document.visibilityState === "visible") setYenile((n) => n + 1); };
+    document.addEventListener("visibilitychange", g); return () => { clearInterval(z); document.removeEventListener("visibilitychange", g); }; }, []);
   const qs = () => new URLSearchParams({ hafta, ...(bolge.length ? { bolge: bolge.join(",") } : {}), ...(firma.length ? { firma: firma.join(",") } : {}), ...(tip.length ? { tip: tip.join(",") } : {}), ...(ekip ? { ekip } : {}) }).toString();
   useEffect(() => { let iptal = false; setYukleniyor(true); setHata("");
-    opGet(`/operasyon/haftalik?${qs()}`).then((d) => { if (!iptal) setV(d); }).catch((e) => { if (!iptal) setHata(e.message); }).finally(() => { if (!iptal) setYukleniyor(false); });
-    return () => { iptal = true; }; }, [hafta, bolge.join(), firma.join(), tip.join(), ekip]); // eslint-disable-line
+    opGet(`/operasyon/haftalik?${qs()}`).then((d) => { if (!iptal) { setV(d); setSonGuncelleme(new Date()); } }).catch((e) => { if (!iptal) setHata(e.message); }).finally(() => { if (!iptal) setYukleniyor(false); });
+    return () => { iptal = true; }; }, [hafta, bolge.join(), firma.join(), tip.join(), ekip, yenile]); // eslint-disable-line
   useEffect(() => { if (sekme !== "NEREDE") return; setNerede(null); opGet(`/operasyon/ekipler-nerede?${qs()}`).then(setNerede).catch((e) => setNerede({ hata: e.message })); }, [sekme, bolge.join(), firma.join(), tip.join(), ekip]); // eslint-disable-line
   useEffect(() => { const f = (e) => { if (e.key === "Escape") (detay ? setDetay(null) : onClose()); }; window.addEventListener("keydown", f); return () => window.removeEventListener("keydown", f); }, [onClose, detay]);
   const bugun = v?.bugun || ISTANBUL_BUGUN();
@@ -105,7 +114,8 @@ export function RolloutHaftalikModal({ onClose }) {
           <button type="button" onClick={() => setHafta(gunEkle(hafta, 7))} aria-label="Sonraki hafta" style={opBtn}>Sonraki ›</button>
           <span style={{ fontWeight: 700 }}>{tarihTR(hafta)} – {tarihTR(gunEkle(hafta, 6))}</span></div>}
         {sekme === "PLAN" && <button type="button" style={{ ...opBtn, background: "#fff", color: LAC }} onClick={() => dosyaIndir(`/operasyon/haftalik/excel?${qs()}`, `teknocenter_weekly_plan_${hafta}.xlsx`).catch((e) => setHata(e.message))}>⬇ Müşteri Excel'i</button>}
-        <button type="button" onClick={onClose} style={{ ...opBtn, marginLeft: "auto" }} aria-label="Kapat (Esc)">✕</button>
+        <span style={{ fontSize: 12, opacity: .85, marginLeft: "auto" }}>{sonGuncelleme ? `Son güncelleme ${sonGuncelleme.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })} · 60 sn'de bir yenilenir` : ""}</span>
+        <button type="button" onClick={onClose} style={opBtn} aria-label="Kapat (Esc)">✕</button>
       </div>
       {filtreler}
       <div style={{ padding: "6px 14px", background: "#fff", borderBottom: "1px solid #e2e8f0" }}><FiiliAciklama /></div>
@@ -177,6 +187,7 @@ export function RolloutHaftalikModal({ onClose }) {
             <dt style={dtS}>Ekip şefi</dt><dd style={ddS}>{detay.e.sef ? `${detay.e.sef.ad}${detay.e.sef.telefon ? ` · ${detay.e.sef.telefon}` : ""}` : "kayıtlı değil"}</dd>
             <dt style={dtS}>Araç</dt><dd style={ddS}>{detay.e.plaka || "kayıtlı değil"}</dd>
           </dl>
+          {detay.k.atama_id && <PlanDegistir kart={detay.k} ekipler={v?.secenekler?.ekipler || []} onTamam={(mesaj) => { setDetay(null); setYenile((n) => n + 1); if (mesaj) setHata(""); }} />}
         </div></div>}
     </div>
   </div>;
@@ -440,4 +451,69 @@ function Bolum({ baslik, alt, sayi, children, acik, setAcik }) {
     <div style={{ fontSize: 13, color: "#64748b", margin: "2px 0 6px" }}>{alt}</div>
     {children}
   </details>;
+}
+
+/* ═══ PLAN DEĞİŞİKLİĞİ (02.11.2026): tarih / saat (aynı atama), başka ekibe taşı (başlanmamış) / kalan işi devret (başlanmış), iptal.
+   Yetki ve Teknocenter kapsamı sunucuda (İş Ata yetkisi). Plan ekibini değiştirmek malzemeyi devretmez — sunucu uyarısı gösterilir. */
+function PlanDegistir({ kart, ekipler, onTamam }) {
+  const [ac, setAc] = useState(null); // ZAMAN | EKIP | IPTAL
+  const [f, setF] = useState({ tarih: kart.tarih, bas: kart.bas || "08:00", bit_tarih: kart.tarih, bit: kart.bit || "17:00", ekip_no: "", gerekce: "", kalan_sure_gun: "" });
+  const [hata, setHata] = useState(""); const [bilgi, setBilgi] = useState(null); const [onay, setOnay] = useState(null); const [gonder, setGonder] = useState(false);
+  const basladi = ["DEVAM", "TAMAMLANDI"].includes(kart.fiili?.kod) || ["BASLADI", "DEVAM", "ARA_VERILDI"].includes(kart.plan_durum);
+  const bitti = kart.fiili?.kod === "TAMAMLANDI" || ["TAMAMLANDI", "QC_BEKLE"].includes(kart.plan_durum);
+  const g = { padding: "7px 9px", border: "1.5px solid #cbd5e1", borderRadius: 8, fontSize: 14 };
+  const btn = (renk) => ({ padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${renk}`, background: "#fff", color: renk, fontWeight: 800, cursor: "pointer", fontSize: 13.5 });
+  const calistir = async (ek = {}) => {
+    setGonder(true); setHata(""); setBilgi(null);
+    try {
+      let r;
+      if (ac === "ZAMAN") r = await opPost(`/plan/atama/${kart.atama_id}/zaman`, { bas: `${f.tarih}T${f.bas}:00+03:00`, bit: `${f.bit_tarih}T${f.bit}:00+03:00`, gerekce: f.gerekce, ...ek });
+      else if (ac === "EKIP") r = await opPost(`/plan/atama/${kart.atama_id}/ekip-degistir`, { yeni_ekip_no: Number(f.ekip_no), gerekce: f.gerekce, kalan_sure_gun: f.kalan_sure_gun || null, ...ek });
+      else r = await opPost(`/plan/atama/${kart.atama_id}/iptal`, { gerekce: f.gerekce, ...ek });
+      if (r.s === 409 && (r.j?.kalan_devir_gerekli || r.j?.ulasim_onay_gerekli || r.j?.baslamis_onay_gerekli)) { setOnay(r.j); return; }
+      if (!r.j?.ok) { setHata(r.j?.error || `Hata ${r.s}`); return; }
+      const u = r.j.ulasim ? ` ${r.j.ulasim.mesaj}` : "";
+      const uy = (r.j.uyarilar || []).join(" · ");
+      setBilgi(`Kaydedildi.${u}${uy ? ` ⚠ ${uy}` : ""}`);
+      setTimeout(() => onTamam(true), 1500);
+    } catch (e) { setHata(e.message); } finally { setGonder(false); }
+  };
+  if (bitti) return <div style={{ marginTop: 12, fontSize: 13, color: "#64748b" }}>Tamamlanmış iş yeniden planlanmaz; yeniden çalışma gerekiyorsa gerekçeli yeni iş / ziyaret açın.</div>;
+  return <div style={{ marginTop: 14, borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+    <div style={{ fontWeight: 800, marginBottom: 6 }}>Planı değiştir</div>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <button type="button" style={btn("#1e3a5f")} onClick={() => { setAc("ZAMAN"); setOnay(null); }}>🕒 Tarih / saat</button>
+      <button type="button" style={btn("#7c3aed")} onClick={() => { setAc("EKIP"); setOnay(null); }}>{basladi ? "↪ Kalan işi devret" : "↪ Başka ekibe taşı"}</button>
+      <button type="button" style={btn("#dc2626")} onClick={() => { setAc("IPTAL"); setOnay(null); }}>✕ Plandan çıkar</button>
+    </div>
+    {ac && <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+      {ac === "ZAMAN" && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <label style={{ fontSize: 12.5 }}>Başlangıç<input type="date" style={{ ...g, width: "100%" }} value={f.tarih} onChange={(e) => setF({ ...f, tarih: e.target.value, bit_tarih: f.bit_tarih < e.target.value ? e.target.value : f.bit_tarih })} /></label>
+        <label style={{ fontSize: 12.5 }}>Saat<input type="time" style={{ ...g, width: "100%" }} value={f.bas} onChange={(e) => setF({ ...f, bas: e.target.value })} /></label>
+        <label style={{ fontSize: 12.5 }}>Bitiş<input type="date" style={{ ...g, width: "100%" }} value={f.bit_tarih} onChange={(e) => setF({ ...f, bit_tarih: e.target.value })} /></label>
+        <label style={{ fontSize: 12.5 }}>Saat<input type="time" style={{ ...g, width: "100%" }} value={f.bit} onChange={(e) => setF({ ...f, bit: e.target.value })} /></label>
+        <div style={{ gridColumn: "1 / -1", fontSize: 12.5, color: "#64748b" }}>Aynı atama güncellenir; ekibin İşlerim ekranında mükerrer kayıt açılmaz. Çok günlükse günlük bloklar 08:00–18:00 arasına bölünür (Pazar atlanır).</div>
+      </div>}
+      {ac === "EKIP" && <>
+        <select style={g} value={f.ekip_no} onChange={(e) => setF({ ...f, ekip_no: e.target.value })}><option value="">Yeni ekip seçin…</option>{ekipler.filter((e) => Number(e.ekip_no) !== Number(kart.ekip_no)).map((e) => <option key={e.ekip_no} value={e.ekip_no}>{e.ad}{e.tip ? ` · ${TIP_AD[e.tip]}` : ""}</option>)}</select>
+        {basladi && <><div style={{ fontSize: 13, color: "#9a3412", fontWeight: 700 }}>Bu işte çalışma başlamış: önceki ekibin gün kayıtları ve bildirimleri korunur, kalan iş yeni ekibe bağlanır.</div>
+          <input style={g} inputMode="decimal" placeholder="Kalan süre (ekip-gün, isteğe bağlı)" value={f.kalan_sure_gun} onChange={(e) => setF({ ...f, kalan_sure_gun: e.target.value })} /></>}
+        <div style={{ fontSize: 12.5, color: "#64748b" }}>Plan ekibini değiştirmek malzemeyi devretmez; malzeme eski ekipteyse HW Malzeme Durumu'ndan ayrı devir kaydı gerekir.</div>
+      </>}
+      <input style={g} placeholder={ac === "IPTAL" ? "İptal gerekçesi (zorunlu)" : ac === "EKIP" ? "Gerekçe (zorunlu)" : "Gerekçe (isteğe bağlı)"} value={f.gerekce} onChange={(e) => setF({ ...f, gerekce: e.target.value })} />
+      {onay && <div style={{ background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: 8, fontSize: 13 }}>
+        <b>{onay.error}</b>
+        {onay.ilerleme && <div>Mevcut ilerleme: {onay.ilerleme.durum} · {onay.ilerleme.gunler} gün kaydı{onay.ilerleme.not ? ` · ${onay.ilerleme.not}` : ""}</div>}
+        {onay.ulasim && <div>{onay.ulasim.mesaj}</div>}
+        <button type="button" style={{ ...btn("#9a3412"), marginTop: 6 }} disabled={gonder} onClick={() => calistir(onay.kalan_devir_gerekli ? { kalan_devir: true } : onay.ulasim_onay_gerekli ? { ulasim_onay: true } : { baslamis_onay: true })}>
+          {onay.kalan_devir_gerekli ? "Gerekçeyle kalan işi devret" : onay.ulasim_onay_gerekli ? "Mobil hesabı olmasa da ata" : "Yine de iptal et"}</button>
+      </div>}
+      {hata && <div style={{ color: "#991b1b", fontWeight: 700, fontSize: 13 }}>{hata}</div>}
+      {bilgi && <div style={{ color: "#166534", fontWeight: 700, fontSize: 13 }}>{bilgi}</div>}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" style={{ ...btn("#fff"), background: LAC, color: "#fff", border: "none" }} disabled={gonder} onClick={() => calistir()}>{gonder ? "Kaydediliyor…" : "Uygula"}</button>
+        <button type="button" style={btn("#64748b")} onClick={() => { setAc(null); setOnay(null); setHata(""); }}>Vazgeç</button>
+      </div>
+    </div>}
+  </div>;
 }

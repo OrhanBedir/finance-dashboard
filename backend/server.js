@@ -591,6 +591,7 @@ const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Y
 const hwMalzeme = require("./hwMalzeme"); // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 const fiiliDurum = require("./fiiliDurum"); // 31.10.2026: fiilî çalışma durumu (QC'den bağımsız fiziksel montaj)
 const operasyon = require("./operasyon"); // 31.10.2026: Rollout Weekly Plan, ekipler nerede, fiilî bildirim
+const planSenkron = require("./planSenkron"); // 02.11.2026: plan ↔ mobil iş ataması senkronu (ulaşım, idempotent, devir, inceleme)
 const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
 const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
 onayDevri.semaKur(pool).catch((e) => console.error("[onay-devri]", e.message));
@@ -14358,6 +14359,9 @@ async function planHazirla(req, b) {
   if (!ekip) throw planHata(403, "Ekip bulunamadı ya da kapsamınızda değil");
   const kisiHata = await isAtamaPersonelKapsamHatasi(req, ekip.uyeler.filter((u) => u.email).map((u) => ({ email: u.email, ad: u.ad })));
   if (kisiHata) throw planHata(403, kisiHata);
+  // 02.11.2026: atama kime ulaşacak? Üyelerin mobil hesabı yoksa onaydan ÖNCE açık uyarı; hiç kimseye ulaşmıyorsa engel
+  // (kullanıcı "ulasim_onay" ile bilerek devam edebilir; o zaman yalnız uyarı). "Başarıyla iletildi" izlenimi verilmez.
+  const ulasim = await planSenkron.ekipUlasim(pool, ekip);
   const K = await rolloutKapsam(req);
   const es = await rolloutFirmaEsleyicileri();
   const grup = (ad) => (ad ? es.find((m) => m.esle(ad))?.kod || null : null);
@@ -14369,6 +14373,8 @@ async function planHazirla(req, b) {
   const rowMap = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
   const engeller = [], uyarilar = [];
   if (!ekip.uyeler.some((u) => u.email)) engeller.push(`${ekip.ad}: ekipte e-postası kayıtlı personel yok — İş Ata kaydı kişiye bağlanamaz`);
+  else if (!ulasim.ulasir && b?.ulasim_onay !== true) engeller.push(`${ulasim.mesaj} — yine de kaydetmek için "mobil hesabı olmasa da ata" onayı verin`);
+  else if (ulasim.eksik.length) uyarilar.push(ulasim.mesaj);
   if (!ekip.plaka) uyarilar.push(`${ekip.ad}: araç plakası kayıtlı değil`);
   if (!ekip.sef) uyarilar.push(`${ekip.ad}: ekip şefi kayıtlı değil`);
   await sahaKonum.tabloHazirla(pool);
@@ -14494,10 +14500,10 @@ async function planHazirla(req, b) {
   const nokAd = { BASLANGIC: baslangic?.ad || "Başlangıç" };
   teslimler.forEach((t, i) => { nokAd[`TESLIM:${i}`] = t.nokta.ad; });
   for (const x of isler) nokAd[`IS:${x.kod}`] = x.ad;
-  return { ekip, isler, faaliyetler, plan, engeller, uyarilar, mesgul, onceki_konum: oncekiKonum, rota: { durum: rt.durum, mesaj: rt.mesaj || null }, nokta_adlari: nokAd,
+  return { ekip, ulasim, isler, faaliyetler, plan, engeller, uyarilar, mesgul, onceki_konum: oncekiKonum, rota: { durum: rt.durum, mesaj: rt.mesaj || null }, nokta_adlari: nokAd,
     imza: plan && !plan.hata ? require("crypto").createHash("sha256").update(JSON.stringify(plan.gunler.map((g) => g.segmentler.map((s) => [s.tur, s.kod, s.bas, s.bit])))).digest("hex").slice(0, 16) : null };
 }
-const planCevap = (H) => ({ ok: true, ekip: H.ekip, isler: H.isler.map(({ otomatik_sure, ...x }) => ({ ...x, otomatik_sure })), faaliyetler: H.faaliyetler,
+const planCevap = (H) => ({ ok: true, ekip: H.ekip, ulasim: H.ulasim, isler: H.isler.map(({ otomatik_sure, ...x }) => ({ ...x, otomatik_sure })), faaliyetler: H.faaliyetler,
   plan: H.plan, engeller: H.engeller, uyarilar: [...H.uyarilar, ...(H.plan?.uyarilar || [])], rota: H.rota, nokta_adlari: H.nokta_adlari, imza: H.imza, mesgul: H.mesgul, onceki_konum: H.onceki_konum });
 app.get("/plan/ekipler", authMiddleware, async (req, res) => {
   try {
@@ -14614,7 +14620,8 @@ app.post("/plan/onayla", authMiddleware, async (req, res) => {
           s.bas, s.bit, s.km ?? null, s.kaynak || null, s.aciklama || null]);
       }
       await db.query("COMMIT");
-      res.json({ ok: true, plan_id: planId, atama_sayisi: Object.keys(atamaIdler).length, kalanlar: H.plan.kalanlar });
+      res.json({ ok: true, plan_id: planId, atama_sayisi: Object.keys(atamaIdler).length, kalanlar: H.plan.kalanlar, ulasim: H.ulasim,
+        bildirim: { tur: "YENI_IS", alicilar: H.ulasim.ulasan.map((u) => u.email), ulasmayan: H.ulasim.eksik } });
     } catch (e) { await db.query("ROLLBACK").catch(() => {}); throw e; } finally { db.release(); }
   } catch (e) { console.error("PLAN ONAY ERROR:", e.message); res.status(e.durum || 500).json({ ok: false, error: e.message }); }
 });
@@ -14738,7 +14745,12 @@ async function opMontajFiili(kodlar) {
 hwMalzeme.kur(app, { pool, authMiddleware, upload: multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 } }), uploadToStorage,
   kapsamIsKodlari: opKapsamIsKodlari, ekipKapsamda: opEkipKapsamda, montajFiili: opMontajFiili, fizikselSaha: (k) => sahaKimlik.fizikselSaha(k),
   yetki: { goruntule: (req) => opIzin(req, "hw_malzeme_goruntule") || opIzin(req, "hw_malzeme_hareket"), hareket: (req) => opIzin(req, "hw_malzeme_hareket") } });
-operasyon.kur(app, { pool, authMiddleware, ExcelJS, sahaKimlik, hwMalzeme, fiiliDurum, haritaFirmaSuzgeci: (...a) => haritaFirmaSuzgeci(...a), zorunluFirma: HARITA_ZORUNLU_FIRMA,
+planSenkron.kur(app, { pool, authMiddleware, hwMalzeme, fiiliDurum, isAtamaDetay: (...a) => isAtamaDetay(...a), isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a),
+  planEkipleri: (...a) => planEkipleri(...a), planTablolar: (...a) => planTablolar(...a), islemGecmisiYaz: (...a) => islemGecmisiYaz(...a), kapsamIsKodlari: async (req) => {
+    const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0] });
+    const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM); return { kodlar: new Set([...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) }; },
+  altMarkaKullanicisi: (...a) => altMarkaKullanicisi(...a), isAtamaPersonelKapsamHatasi: (...a) => isAtamaPersonelKapsamHatasi(...a), fizikselSaha: (k) => sahaKimlik.fizikselSaha(k) });
+operasyon.kur(app, { pool, authMiddleware, ExcelJS, sahaKimlik, hwMalzeme, fiiliDurum, planSenkron, haritaFirmaSuzgeci: (...a) => haritaFirmaSuzgeci(...a), zorunluFirma: HARITA_ZORUNLU_FIRMA,
   planEkipleri: (...a) => planEkipleri(...a), planTablolar: (...a) => planTablolar(...a), rolloutKapsam: (...a) => rolloutKapsam(...a),
   haritaKapsamSatirlari: (...a) => haritaKapsamSatirlari(...a), taseronMu: (...a) => taseronMu(...a), isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a),
   isAtamaPersonelIcinde: (...a) => isAtamaPersonelIcinde(...a), taseronunIsiMi: (...a) => taseronunIsiMi(...a) });
@@ -15636,7 +15648,12 @@ app.get("/is-atama/benim", authMiddleware, async (req, res) => {
     }
     const bekleyen = rows.filter((x) => !["TAMAMLANDI", "IPTAL"].includes(x.durum));
     const tamamlanan = rows.filter((x) => ["TAMAMLANDI", "IPTAL"].includes(x.durum));
-    res.json({ ok: true, bekleyen, tamamlanan });
+    // 02.11.2026: geciken (plan tarihi geçmiş, hâlâ açık — kaybolmaz) + geçmiş (iptal / başka ekibe aktarılan); eski mobil sürüm bu alanları yok sayar
+    const bugun = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    for (const x of bekleyen) x.geciken = !!(x.plan_tarihi && String(x.plan_tarihi instanceof Date ? x.plan_tarihi.toISOString().slice(0, 10) : x.plan_tarihi).slice(0, 10) < bugun);
+    const gecmis = rows.filter((x) => x.durum === "IPTAL").map((x) => ({ id: x.id, site_codes: x.site_codes, kategori_ad: x.kategori_ad, kategori_ikon: x.kategori_ikon, plan_tarihi: x.plan_tarihi, updated_at: x.updated_at,
+      durum_ad: x.iptal_nedeni === "DEVIR" ? "Başka ekibe aktarıldı" : x.iptal_nedeni === "KALAN_DEVIR" ? "Kalan iş başka ekibe devredildi" : "İptal edildi", devir_hedef_atama_id: x.devir_hedef_atama_id || null }));
+    res.json({ ok: true, bekleyen, tamamlanan, gecmis, sync_zamani: new Date().toISOString() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.get("/is-atama/:id", authMiddleware, async (req, res) => {
@@ -15676,8 +15693,12 @@ app.post("/is-atama/:id/basla", authMiddleware, async (req, res) => {
     const row = await isAtamaDetay(id);
     if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req) && !taseronunIsiMi(req, row)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
+    // 02.11.2026: iptal / devredilmiş atamaya çevrimdışı birikmiş "başladım" gelirse kaybetmeden incelemeye al (yeni atama ezilmez)
+    const kn = planSenkron.kapaliNeden(row);
+    if (kn && !isAtamaYetkiliMi(req)) return res.status(409).json(await planSenkron.incelemeyeAl(pool, req, row, "basla", { is_atama_id: id }, kn));
     if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş kapanmış" });
-    if (row.durum === "BASLADI") return res.json({ ok: true, row, bilgi: "Zaten başlamış" });
+    if (row.durum === "BASLADI") return res.json({ ok: true, row, bilgi: "Zaten başlamış", tekrar: true }); // tekrar gönderim: ikinci kayıt yok
+    const sonucB = await planSenkron.idempotent(pool, req, "basla", async () => {
     const ad = (row.personeller || []).find((p) => p.email === email)?.ad || req.user?.name || email;
     await pool.query(`UPDATE is_atama SET durum = 'BASLADI', baslama_ts = COALESCE(baslama_ts, NOW()), updated_at = NOW() WHERE id = $1`, [id]);
     await pool.query(
@@ -15689,7 +15710,8 @@ app.post("/is-atama/:id/basla", authMiddleware, async (req, res) => {
     if (row.kategori === "CLEANUP") {
       await pool.query(`UPDATE rollout_cleanup SET visit_date = COALESCE(visit_date, CURRENT_DATE), updated_at = NOW() WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [row.site_codes || []]);
     }
-    res.json({ ok: true, row: await isAtamaDetay(id) });
+    return { ok: true, row: await isAtamaDetay(id) }; });
+    res.json(sonucB);
   } catch (e) { console.error("IS BASLA ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 // Çıkış Yap — günü kapatır; tamamlandıysa işi ve rollout bitiş kolonunu kapatır
@@ -15701,14 +15723,17 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
     const row = await isAtamaDetay(id);
     if (!row) return res.status(404).json({ ok: false, error: "Kayıt yok" });
     if (!isAtamaPersonelIcinde(row, email) && !isAtamaYetkiliMi(req) && !taseronunIsiMi(req, row)) return res.status(403).json({ ok: false, error: "Bu iş size atanmamış" });
+    const knB = planSenkron.kapaliNeden(row);
+    if (knB && !isAtamaYetkiliMi(req)) return res.status(409).json(await planSenkron.incelemeyeAl(pool, req, row, "bitir", { is_atama_id: id, ...(req.body || {}) }, knB));
     if (["TAMAMLANDI", "IPTAL"].includes(row.durum)) return res.status(400).json({ ok: false, error: "Bu iş zaten kapanmış" });
+    const sonucC = await planSenkron.idempotent(pool, req, "bitir", async () => {
     const { tamamlandi, qc_tamamlandi, not: notu, calisanlar, sebep } = req.body || {};
     const bitti = tamamlandi === true || tamamlandi === "true";
     const sebepTxt = !bitti && sebep ? String(sebep).trim() : "";
-    if (sebepTxt && sebepTxt !== "Yarın devam" && !String(notu || "").trim()) return res.status(400).json({ ok: false, error: "Ara verme sebebi için kısa bir not yazın" });
+    if (sebepTxt && sebepTxt !== "Yarın devam" && !String(notu || "").trim()) return { ok: false, _http: 400, error: "Ara verme sebebi için kısa bir not yazın" };
     const qcSoruldu = bitti && row.qc_yazar;
     const qcOk = qcSoruldu ? (qc_tamamlandi === true || qc_tamamlandi === "true") : null;
-    if (qcSoruldu && !qcOk && !String(notu || "").trim()) return res.status(400).json({ ok: false, error: "QC tamamlanmadıysa not zorunlu" });
+    if (qcSoruldu && !qcOk && !String(notu || "").trim()) return { ok: false, _http: 400, error: "QC tamamlanmadıysa not zorunlu" };
     // Bugün çalışanlar: seçilenler (yoksa çıkış yapan kişi); listedeki herkes atanmış olmalı
     let kisiler = (Array.isArray(calisanlar) ? calisanlar : []).map((p) => ({ email: String(p?.email || p || "").toLowerCase().trim(), ad: p?.ad || null })).filter((p) => p.email);
     if (!kisiler.length) kisiler = [{ email, ad: req.user?.name || null }];
@@ -15748,7 +15773,9 @@ app.post("/is-atama/:id/bitir", authMiddleware, async (req, res) => {
       }
       // Clean Up'ta tamamlanma fotoğraf/onay akışından gelir; burada yalnız iş kaydı kapanır
     }
-    res.json({ ok: true, row: await isAtamaDetay(id), durum: yeniDurum });
+    return { ok: true, row: await isAtamaDetay(id), durum: yeniDurum }; });
+    if (sonucC && sonucC._http) { const { _http, ...g } = sonucC; return res.status(_http).json(g); }
+    res.json(sonucC);
   } catch (e) { console.error("IS BITIR ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 app.get("/is-atama/durdurma-sebepleri", authMiddleware, (req, res) => res.json({ ok: true, sebepler: IS_DURDURMA_SEBEPLERI }));
