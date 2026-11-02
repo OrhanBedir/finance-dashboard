@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiPost } from "../api";
+import { UYGULAMA_SURUM } from "../EkranHata";
 
 export default function LoginScreen({ onLoginSuccess }) {
   const [email, setEmail] = useState("");
@@ -60,7 +61,7 @@ export default function LoginScreen({ onLoginSuccess }) {
           <View style={styles.logoCircle}>
             <Text style={styles.logoText}>⚡</Text>
           </View>
-          <Text style={styles.appName}>AHY Elektrik</Text>
+          <Text style={styles.appName}>ERC Operasyon</Text>
           <Text style={styles.appSub}>Hakediş Takip Sistemi</Text>
         </View>
 
@@ -112,7 +113,7 @@ export default function LoginScreen({ onLoginSuccess }) {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.footer}>Şimşektel © 2026</Text>
+        <Text style={styles.footer}>Şimşektel © 2026 · v{UYGULAMA_SURUM}</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

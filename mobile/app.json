@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "AHY Elektrik",
+    "name": "ERC Operasyon",
     "slug": "erc-operasyon",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.simsektel.ercoperasyon",
-      "buildNumber": "13",
+      "buildNumber": "30",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -26,7 +26,8 @@
         "backgroundColor": "#1D4ED8"
       },
       "package": "com.simsektel.ercoperasyon",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "versionCode": 30
     },
     "web": {
       "favicon": "./assets/favicon.png"

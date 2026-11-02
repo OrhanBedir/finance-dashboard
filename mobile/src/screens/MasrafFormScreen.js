@@ -5,7 +5,12 @@ import {
   Platform, Modal, Image,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { apiGet, apiPost, apiPut, apiDelete, apiUpload, API_BASE } from "../api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import FisKirpma from "../components/FisKirpma";
+import FisIsleme from "../components/FisIsleme";
+import AkisAdim from "../components/AkisAdim";
+import { apiGet, apiPost, apiPut, apiDelete, apiIstek, API_BASE } from "../api";
+import { tutarOku } from "../sayi";
 
 // ─── Category definitions (same as PC) ───────────────────────────────────────
 const MASRAF_KATEGORILER = [
@@ -110,6 +115,12 @@ function PickerModal({ visible, title, options, value, onSelect, onClose, getLab
   );
 }
 
+// 24.10.2026: fişin kırpma durumu (web fiş görüntüleyicisiyle aynı etiketler)
+const KIRPMA_ETIKET = { OTOMATIK: "✂️ Otomatik kırpıldı", KULLANICI: "✂️ Kullanıcı düzeltti", KIRPILMADI: "Kırpılmadı (orijinal)",
+  MOBIL_ELLE: "✂️ Mobilde elle kırpıldı", DOGRULANAMADI: "Kırpma bilgisi doğrulanamadı" };
+const kirpmaEtiketi = (b) => KIRPMA_ETIKET[b?.kirpma_durum] || (b?.kirpildi === true ? "✂️ Mobilde kırpılmış" : b?.kirpildi === false ? "Orijinal (kırpılmadan yüklendi)" : b?.kaynak === "web" ? "Web'den yüklendi (kırpılmadı)" : "Kırpma bilgisi yok (eski kayıt)");
+const BEKLEYEN_FIS = "fis_bekleyen_v1";
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function MasrafFormScreen({ navigation, user }) {
   const [activeForm, setActiveForm]       = useState(null);
@@ -124,7 +135,7 @@ export default function MasrafFormScreen({ navigation, user }) {
   // Photo / OCR flow
   const [fotoModal, setFotoModal]         = useState(null);  // { kalemId, kategori, tutar }
   const [ocrResult, setOcrResult]         = useState(null);
-  const [isUploading, setIsUploading]     = useState(false);
+  const [fisGor, setFisGor]               = useState(null);   // eklenmiş fişi tam ekran gösterir
   const [fisOlmadan, setFisOlmadan]       = useState("");
   const [tutarAciklama, setTutarAciklama] = useState("");
   const [addingKalem, setAddingKalem]     = useState(false);
@@ -150,6 +161,15 @@ export default function MasrafFormScreen({ navigation, user }) {
         if (formRes?.id) {
           setActiveForm(formRes);
           setKalemler(formRes.kalemler || []);
+          // 24.10.2026: bağlantı/servis hatası ya da uygulama kapanması yüzünden eklenemeyen fiş fotoğrafı
+          const bek = JSON.parse((await AsyncStorage.getItem(BEKLEYEN_FIS).catch(() => null)) || "null");
+          const kalem = bek && bek.formId === formRes.id && Date.now() - bek.t < 24 * 3600e3 && (formRes.kalemler || []).find((k) => k.id === bek.kalemId);
+          if (kalem) {
+            Alert.alert("Yarım kalan fiş", "Daha önce çektiğiniz fiş fotoğrafı henüz masrafa eklenmedi. Şimdi işlensin mi?", [
+              { text: "Sil", style: "destructive", onPress: () => AsyncStorage.removeItem(BEKLEYEN_FIS).catch(() => {}) },
+              { text: "Devam", onPress: () => { setFotoModal({ kalemId: bek.kalemId, kategori: bek.kategori, tutar: bek.tutar }); fisIsle(bek.foto, bek.kalemId); } },
+            ]);
+          } else if (bek) AsyncStorage.removeItem(BEKLEYEN_FIS).catch(() => {});
         }
         if (Array.isArray(personelRes)) setPersonelList(personelRes.filter(p => p.aktif));
       } catch (e) {
@@ -186,7 +206,8 @@ export default function MasrafFormScreen({ navigation, user }) {
 
   // ── Add kalem ─────────────────────────────────────────────────────────────
   const handleAddKalem = async () => {
-    if (!kalemForm.tutar || isNaN(Number(kalemForm.tutar))) {
+    const tutar = tutarOku(kalemForm.tutar);   // "282,5" gibi virgüllü tutar da geçerli
+    if (Number.isNaN(tutar)) {
       Alert.alert("Eksik Alan", "Geçerli bir tutar giriniz.");
       return;
     }
@@ -202,13 +223,13 @@ export default function MasrafFormScreen({ navigation, user }) {
         aciklama:        kalemForm.site_id
                            ? `Site ID: ${kalemForm.site_id}${kalemForm.aciklama ? " | " + kalemForm.aciklama : ""}`
                            : kalemForm.aciklama.trim() || null,
-        tutar:           Number(kalemForm.tutar),
+        tutar:           tutar,
         plaka:           kalemForm.plaka.trim().toUpperCase() || null,
         ceza_personel_id: kalemForm.ceza_personel_id || null,
         fis_var:         true,
       }, true);
       if (saved?.id) {
-        setFotoModal({ kalemId: saved.id, kategori: addingKat, tutar: Number(kalemForm.tutar) });
+        setFotoModal({ kalemId: saved.id, kategori: addingKat, tutar });
         setOcrResult(null);
         setFisOlmadan("");
         setTutarAciklama("");
@@ -236,11 +257,22 @@ export default function MasrafFormScreen({ navigation, user }) {
   };
 
   // ── Photo upload flow ─────────────────────────────────────────────────────
+  // 24.10.2026 (Orhan): OTOMATİK FİŞ KIRPMA. Çekilen/seçilen fotoğraf hemen sunucuya gider; sunucu fişi
+  // (yapay zekâ + klasik görüntü işleme) bulur, kırpılmış önizleme(ler) döner — henüz ek oluşmaz. Kullanıcı
+  // onaylayınca ya da köşeleri düzeltince sunucu orijinalden kırpıp ek yapar. Fotoğraf yarım kalırsa
+  // AsyncStorage'da tutulur (bağlantı/servis hatasında kaybolmaz); tekrar denemede aynı istek kimliği gider.
+  const [fisIs, setFisIs] = useState(null);         // { foto, kalemId, asama, sonuc, hata, ekleHata, bekleyenEk }
+  const [duzeltme, setDuzeltme] = useState(null);   // { aday } — köşe düzeltme / elle kırpma ekranı
+  const fisIsRef = useRef(null);
+  fisIsRef.current = fisIs;
+
   const closeFotoModal = () => {
     setFotoModal(null);
     setOcrResult(null);
     setFisOlmadan("");
     setTutarAciklama("");
+    setFisIs(null);
+    setDuzeltme(null);
   };
 
   const pickAndUpload = async (fromCamera) => {
@@ -252,37 +284,77 @@ export default function MasrafFormScreen({ navigation, user }) {
       Alert.alert("İzin Gerekli", fromCamera ? "Kamera erişimi gerekiyor." : "Galeri erişimi gerekiyor.");
       return;
     }
+    // Sistem kırpması KAPALI (iOS'ta zorunlu kare — uzun fişin altı kesiliyordu); kırpma sunucuda yapılır.
+    const secenek = { mediaTypes: "images", quality: 0.9, allowsEditing: false };
     const result = fromCamera
-      ? await ImagePicker.launchCameraAsync({ mediaTypes: "images", quality: 0.85 })
-      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: "images", quality: 0.85 });
+      ? await ImagePicker.launchCameraAsync(secenek)
+      : await ImagePicker.launchImageLibraryAsync(secenek);
 
     if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
+    const foto = result.assets[0].uri;
+    AsyncStorage.setItem(BEKLEYEN_FIS, JSON.stringify({ formId: activeForm?.id, kalemId: fotoModal.kalemId,
+      kategori: fotoModal.kategori, tutar: fotoModal.tutar, foto, t: Date.now() })).catch(() => {});
+    fisIsle(foto, fotoModal.kalemId);
+  };
 
-    setIsUploading(true);
+  // Fotoğrafı sunucuda işlet (aynı fotoğraf tekrar gönderilirse sunucu önceki sonucu döner, model yeniden çalışmaz)
+  const fisIsle = async (foto, kalemId) => {
+    setDuzeltme(null);
+    setFisIs({ foto, kalemId, asama: "isleniyor" });
+    const ext = foto.split(".").pop()?.toLowerCase();
     try {
-      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const mime = ext === "png" ? "image/png" : "image/jpeg";
-      const belge = await apiUpload(`/hr/masraf-belge/${fotoModal.kalemId}`, asset.uri, mime, "dosya");
-
-      const { ocr_tutar, ocr_plaka, ocr_plaka_eslesti } = belge || {};
-      const entered  = fotoModal.tutar || 0;
-      const ocrAmt   = ocr_tutar ? Number(ocr_tutar) : null;
-      const mismatch = ocrAmt && entered && Math.abs(ocrAmt - entered) > Math.max(entered * 0.05, 10);
-      const plateWarn = fotoModal.kategori === "YAKIT" && ocr_plaka && ocr_plaka_eslesti === false;
-
-      if (mismatch) {
-        setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id, hasTutarUyari: true });
-      } else if (plateWarn) {
-        setOcrResult({ ocr_tutar: ocrAmt, ocr_plaka, ocr_plaka_eslesti, belgeId: belge.id, hasPlateWarn: true });
-      } else {
-        closeFotoModal();
-        refreshForm(activeForm.id);
-      }
+      const sonuc = await apiIstek(`/hr/masraf-belge/${kalemId}/isle`, {
+        dosya: { uri: foto, type: ext === "png" ? "image/png" : "image/jpeg", name: foto.split("/").pop() || "fis.jpg" },
+      });
+      setFisIs({ foto, kalemId, asama: "sonuc", sonuc });
     } catch (e) {
-      Alert.alert("Yükleme Hatası", "Fiş yüklenemedi: " + e.message);
-    } finally {
-      setIsUploading(false);
+      setFisIs({ foto, kalemId, asama: "hata", hata: e.message });
+    }
+  };
+
+  const yeniIstekId = () => `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+
+  // Onaylanan seçimleri ek yap. Aynı seçim tekrar denenirse aynı istek kimlikleri gider → çift ek oluşmaz.
+  const fisEkle = async (secimler) => {
+    const is = fisIsRef.current;
+    if (!is?.sonuc) return;
+    const anahtar = JSON.stringify(secimler);
+    const ek = is.bekleyenEk?.anahtar === anahtar ? is.bekleyenEk : { anahtar, liste: secimler.map((x) => ({ ...x, istek_id: yeniIstekId() })) };
+    setFisIs({ ...is, asama: "ekleniyor", bekleyenEk: ek, ekleHata: null });
+    try {
+      const yanit = await apiIstek(`/hr/masraf-belge/${is.kalemId}`, { body: { isleme_id: is.sonuc.isleme_id, secimler: ek.liste } });
+      AsyncStorage.removeItem(BEKLEYEN_FIS).catch(() => {});
+      setDuzeltme(null);
+      setFisIs(null);
+      ocrKontrol(yanit.belgeler || [yanit]);
+    } catch (e) {
+      setDuzeltme(null);
+      // Orijinalin saklama süresi dolmuşsa fotoğraf (telefondaki) yeniden işlenir
+      if (e.status === 410) { fisIsle(is.foto, is.kalemId); return; }
+      setFisIs({ ...is, asama: "sonuc", bekleyenEk: ek, ekleHata: e.message + (e.ag ? " — aynı düğmeyle tekrar deneyin" : "") });
+    }
+  };
+
+  const fisKirpmadan = () => Alert.alert("Kırpmadan eklensin mi?", "Fotoğrafın tamamı (fişin çevresiyle birlikte) masrafa eklenecek ve \"Kırpılmadı\" olarak işaretlenecek.", [
+    { text: "Vazgeç", style: "cancel" },
+    { text: "Kırpmadan ekle", onPress: () => fisEkle([{ kirpma: "yok" }]) },
+  ]);
+  const fisIptal = () => { setFisIs(null); setDuzeltme(null); AsyncStorage.removeItem(BEKLEYEN_FIS).catch(() => {}); };
+
+  // OCR kontrolü (tutar farkı / plaka) — birden fazla fiş eklendiyse tutarlar toplanır
+  const ocrKontrol = (belgeler) => {
+    const tutarlar = belgeler.map((b) => (b?.ocr_tutar ? Number(b.ocr_tutar) : null));
+    const ocrAmt = tutarlar.length && tutarlar.every((t) => t) ? tutarlar.reduce((a, b) => a + b, 0) : null;
+    const entered  = fotoModal?.tutar || 0;
+    const mismatch = ocrAmt && entered && Math.abs(ocrAmt - entered) > Math.max(entered * 0.05, 10);
+    const plakaB = fotoModal?.kategori === "YAKIT" ? belgeler.find((b) => b?.ocr_plaka && b.ocr_plaka_eslesti === false) : null;
+    if (mismatch) {
+      setOcrResult({ ocr_tutar: ocrAmt, belgeId: belgeler[0].id, hasTutarUyari: true });
+    } else if (plakaB) {
+      setOcrResult({ ocr_tutar: plakaB.ocr_tutar ? Number(plakaB.ocr_tutar) : null, ocr_plaka: plakaB.ocr_plaka, ocr_plaka_eslesti: false, belgeId: plakaB.id, hasPlateWarn: true });
+    } else {
+      closeFotoModal();
+      refreshForm(activeForm.id);
     }
   };
 
@@ -370,6 +442,12 @@ export default function MasrafFormScreen({ navigation, user }) {
             ₺{formatTL(totalKalem)}
           </Text>
         </View>
+        {/* 10.09.2026: formun onayı kimde — personel "nerede kaldı" diye sormasın */}
+        {activeForm?.durum ? (
+          <View style={{ paddingHorizontal: 16, paddingBottom: 8, backgroundColor: "#fff" }}>
+            <AkisAdim durum={activeForm.durum} tip="MASRAF" />
+          </View>
+        ) : null}
 
         <ScrollView contentContainerStyle={st.body} keyboardShouldPersistTaps="handled">
 
@@ -402,7 +480,16 @@ export default function MasrafFormScreen({ navigation, user }) {
                       {k.belge_aciklama ? <Text style={st.kalemAciklama}>{k.belge_aciklama}</Text> : null}
                       {k.aciklama ? <Text style={st.kalemAciklamaGray}>{k.aciklama}</Text> : null}
                       {!k.fis_var && <Text style={st.kalemNoFis}>⚠ Fişsiz: {k.fis_olmadan_aciklama}</Text>}
-                      {(k.belgeler?.length > 0) && <Text style={st.kalemFis}>📷 {k.belgeler.length} fiş eklendi</Text>}
+                      {(k.belgeler?.length > 0) && (
+                        <View style={st.fisSatir}>
+                          {k.belgeler.filter((b) => String(b.dosya_yolu || "").startsWith("http")).map((b) => (
+                            <TouchableOpacity key={b.id} onPress={() => setFisGor(b)}>
+                              <Image source={{ uri: b.dosya_yolu }} style={st.fisKucuk} />
+                            </TouchableOpacity>
+                          ))}
+                          <Text style={st.kalemFis}>📷 {k.belgeler.length} fiş · {[...new Set(k.belgeler.map(kirpmaEtiketi))].join(" / ")}</Text>
+                        </View>
+                      )}
                     </View>
                     <View style={st.kalemRowRight}>
                       <Text style={st.kalemTutar}>₺{formatTL(k.tutar)}</Text>
@@ -610,18 +697,17 @@ export default function MasrafFormScreen({ navigation, user }) {
 
         // Main photo upload modal
         return (
-          <Modal visible transparent animationType="slide" onRequestClose={closeFotoModal}>
+          <Modal visible transparent animationType="slide" onRequestClose={() => {
+            if (duzeltme) { if (fisIs?.asama !== "ekleniyor") setDuzeltme(null); }
+            else if (fisIs) { if (!["isleniyor", "ekleniyor"].includes(fisIs.asama)) fisIptal(); }
+            else closeFotoModal();
+          }}>
             <View style={st.fullModal}>
               <View style={st.photoCard}>
                 <Text style={st.photoTitle}>📷 Fiş / Fatura Yükle</Text>
                 <Text style={st.photoSubtitle}>Masraf tutarı: <Text style={{ fontWeight: "800" }}>₺{formatTL(fotoModal.tutar)}</Text></Text>
 
-                {isUploading ? (
-                  <View style={{ paddingVertical: 30, alignItems: "center" }}>
-                    <ActivityIndicator color="#059669" size="large" />
-                    <Text style={{ color: "#6b7280", marginTop: 10, fontSize: 13 }}>Fiş yükleniyor...</Text>
-                  </View>
-                ) : (
+                {(
                   <>
                     <TouchableOpacity style={[st.photoBtn, { backgroundColor: "#1e3a5f" }]} onPress={() => pickAndUpload(true)}>
                       <Text style={st.photoBtnTxt}>📸 Fotoğraf Çek</Text>
@@ -647,9 +733,34 @@ export default function MasrafFormScreen({ navigation, user }) {
                 )}
               </View>
             </View>
+            {/* Fiş işleme + kırpma düzeltme aynı Modal'ın içinde katman (iOS ikinci Modal'ı göstermiyor) */}
+            {fisIs && (
+              <FisIsleme is={fisIs} onEkle={fisEkle} onDuzelt={(aday) => setDuzeltme({ aday })}
+                onYenidenCek={() => { setFisIs(null); setDuzeltme(null); }}
+                onTekrarDene={() => fisIsle(fisIs.foto, fisIs.kalemId)} onKirpmadan={fisKirpmadan} onIptal={fisIptal} />
+            )}
+            <FisKirpma gomulu gorunur={!!duzeltme && !!fisIs?.sonuc?.kaynak}
+              uri={fisIs?.sonuc?.kaynak?.onizleme} olcu={fisIs?.sonuc?.olcu}
+              baslangic={duzeltme?.aday?.kose || fisIs?.sonuc?.elle_baslangic}
+              baslik={duzeltme?.aday ? "Kırpmayı düzelt" : "Elle kırp"} isliyor={fisIs?.asama === "ekleniyor"}
+              onIptal={() => setDuzeltme(null)}
+              onTamam={(kose) => fisEkle([{ ...(duzeltme?.aday ? { aday_no: duzeltme.aday.no } : {}), kose }])} />
           </Modal>
         );
       })()}
+
+      {/* Eklenmiş fiş: web görüntüleyici, indirme ve PDF ile aynı dosya */}
+      {fisGor && (
+        <Modal visible animationType="fade" onRequestClose={() => setFisGor(null)}>
+          <View style={st.fisGorKap}>
+            <Image source={{ uri: fisGor.dosya_yolu }} style={{ flex: 1 }} resizeMode="contain" />
+            <View style={st.fisGorAlt}>
+              <Text style={st.fisGorTxt}>{kirpmaEtiketi(fisGor)}{fisGor.genislik ? ` · ${fisGor.genislik}×${fisGor.yukseklik} px` : ""}</Text>
+              <TouchableOpacity onPress={() => setFisGor(null)} style={st.fisGorBtn}><Text style={st.fisGorBtnTxt}>Kapat</Text></TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -657,6 +768,13 @@ export default function MasrafFormScreen({ navigation, user }) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
   safe:  { flex: 1, backgroundColor: "#F0FFF4" },
+  fisSatir: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 },
+  fisKucuk: { width: 34, height: 46, borderRadius: 4, backgroundColor: "#e5e7eb" },
+  fisGorKap: { flex: 1, backgroundColor: "#000", paddingTop: Platform.OS === "ios" ? 50 : 20 },
+  fisGorAlt: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, paddingBottom: Platform.OS === "ios" ? 34 : 16 },
+  fisGorTxt: { color: "#e5e7eb", fontSize: 13, flex: 1 },
+  fisGorBtn: { backgroundColor: "#1f2937", borderRadius: 9, paddingVertical: 9, paddingHorizontal: 16 },
+  fisGorBtnTxt: { color: "#fff", fontWeight: "700" },
   flex:  { flex: 1 },
   body:  { padding: 12, paddingBottom: 40 },
 

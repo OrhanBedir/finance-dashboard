@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -13,6 +14,9 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { apiGet, apiPut } from "../api";
+import AkisAdim from "../components/AkisAdim";
+import { AvansRedKutusu, AvansGonderimDetayi, AvansGonderimRozeti } from "../components/AvansRed";
+import { AvansDetayModal } from "./IsAvansListeScreen";
 
 function fmtTL(val) {
   try {
@@ -89,9 +93,33 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   const [onayBekleyenMalzemeler, setOnayBekleyenMalzemeler] = useState([]);
   const [isPM, setIsPM]                 = useState(false);
   const [isDirektor, setIsDirektor]     = useState(false);
+  const [isRM, setIsRM]                 = useState(false); // Rollout Müdürü aşaması (Nurcan vb.)
   const [onayYukleniyor, setOnayYukleniyor] = useState(null); // id of item being processed
   const [malzemeOnayYukleniyor, setMalzemeOnayYukleniyor] = useState(null);
   const [inceleAvans, setInceleAvans] = useState(null); // avans detail modal
+  // 02.11.2026: reddedilen iş avanslarım (sunucudan ayrı liste; gerekçe / reddeden / aşama ile) + kendi talep detayı + red gerekçesi penceresi
+  const [reddedilenAvanslar, setReddedilenAvanslar] = useState([]);
+  const [kendiDetay, setKendiDetay] = useState(null);
+  const [redModal, setRedModal] = useState(null); // { item, metin }
+  // Clean Up onayı bekleyen sahalar — backend yetkisiz kullanıcıya boş liste döner
+  const [cleanupOnay, setCleanupOnay] = useState([]);
+  // Bana atanan açık rollout işi sayısı (Rollout · İşlerim rozeti)
+  const [bekleyenIs, setBekleyenIs] = useState(0);
+  useEffect(() => {
+    const yukle = async () => {
+      try {
+        const d = await apiGet("/rollout/cleanup/onay-bekleyen");
+        setCleanupOnay(d && d.ok && Array.isArray(d.rows) ? d.rows : []);
+      } catch { setCleanupOnay([]); }
+      try {
+        const b = await apiGet("/is-atama/benim");
+        setBekleyenIs(b && b.ok && Array.isArray(b.bekleyen) ? b.bekleyen.length : 0);
+      } catch { setBekleyenIs(0); }
+    };
+    yukle();
+    const unsub = navigation.addListener("focus", yukle);
+    return unsub;
+  }, [navigation]);
 
   const fetchData = async (isRefresh) => {
     try {
@@ -101,6 +129,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
       const data  = await apiGet("/hr/mobile-dashboard?email=" + email + "&name=" + name);
       if (data && typeof data === "object" && !data.error) {
         if (Array.isArray(data.avanslar))      setAvanslar(data.avanslar);
+        setReddedilenAvanslar(Array.isArray(data.reddedilenAvanslar) ? data.reddedilenAvanslar.filter((a) => a.duzeltilebilir) : (data.avanslar || []).filter((a) => a.durum === "REDDEDILDI" && a.duzeltilebilir));
         if (Array.isArray(data.masraflar))     setMasraflar(data.masraflar);
         if (data.puantaj)                      setPuantaj(data.puantaj);
         if (Array.isArray(data.cezaKalemler)) setCezaKalemler(data.cezaKalemler);
@@ -114,6 +143,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         if (Array.isArray(data.onayBekleyenMalzemeler)) setOnayBekleyenMalzemeler(data.onayBekleyenMalzemeler);
         if (typeof data.isPM === "boolean")      setIsPM(data.isPM);
         if (typeof data.isDirektor === "boolean") setIsDirektor(data.isDirektor);
+        if (typeof data.isRM === "boolean")       setIsRM(data.isRM);
       }
     } catch (_) {}
     setLoading(false);
@@ -122,6 +152,9 @@ export default function HomeScreen({ user, onLogout, navigation }) {
 
   useEffect(() => {
     fetchData(false);
+    // 02.11.2026: düzelt-yeniden gönder sonrası ana ekrana dönüşte liste tazelenir
+    const unsub = navigation.addListener("focus", () => fetchData(false));
+    return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -140,59 +173,54 @@ export default function HomeScreen({ user, onLogout, navigation }) {
   };
 
   // --- Onay / red işlemleri ---
+  // 16.09.2026 (Orhan): mobil onayda firma sorulmuyordu; gider firmasız kaldığı
+  // için nakit akışında Şimşek tarafına düşüyordu. Web'deki gibi firma sorulur.
+  // 14.10.2026 (Orhan): AHY bitti, 15.10'dan itibaren Teknocenter → seçenekler ŞİMŞEK / TEKNO.
+  // (Sunucu eski sürümden gelen "AHY" değerini de TEKNO'ya çevirir.)
+  const onayGonder = async (item, firma) => {
+    try {
+      setOnayYukleniyor(item.id);
+      const endpoint = isDirektor
+        ? `/hr/is-avans/${item.id}/direktor-onayla`
+        : `/hr/is-avans/${item.id}/onayla`;
+      // 02.11.2026: ekranda görülen gönderim turu ve aşama gönderilir — talep arada düzeltilip yeniden gönderildiyse sunucu 409 verir
+      await apiPut(endpoint, { ...(firma ? { firma } : {}), tur_no: item.tur_no || 1, beklenen_durum: item.durum });
+      await fetchData(false);
+    } catch (e) {
+      Alert.alert("Hata", e?.message || "Onay islemi basarisiz.");
+    } finally {
+      setOnayYukleniyor(null);
+    }
+  };
+
   const handleOnayla = (item) => {
     Alert.alert(
-      "Avans Onayla",
-      `${item.talep_eden_ad || "Personel"} — ${fmtTL(item.tutar)}\n${item.proje || item.gider_turu || ""}`,
+      "Avans Onayla — hangi firma?",
+      `${item.talep_eden_ad || "Personel"} — ${fmtTL(item.tutar)}\n${item.proje || item.gider_turu || ""}\n\nBu gider hangi firmanin kasasindan cikacak?`,
       [
         { text: "Iptal", style: "cancel" },
-        {
-          text: "Onayla",
-          onPress: async () => {
-            try {
-              setOnayYukleniyor(item.id);
-              const endpoint = isDirektor
-                ? `/hr/is-avans/${item.id}/direktor-onayla`
-                : `/hr/is-avans/${item.id}/onayla`;
-              await apiPut(endpoint, {});
-              await fetchData(false);
-            } catch (e) {
-              Alert.alert("Hata", e?.message || "Onay islemi basarisiz.");
-            } finally {
-              setOnayYukleniyor(null);
-            }
-          },
-        },
+        { text: "SIMSEK", onPress: () => onayGonder(item, "ERC") },
+        { text: "TEKNO", onPress: () => onayGonder(item, "TEKNO") },
       ]
     );
   };
 
-  const handleReddet = (item) => {
-    Alert.alert(
-      "Avansi Reddet",
-      `${item.talep_eden_ad || "Personel"} — ${fmtTL(item.tutar)}\nReddetmek istediginizden emin misiniz?`,
-      [
-        { text: "Iptal", style: "cancel" },
-        {
-          text: "Reddet",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setOnayYukleniyor(item.id);
-              await apiPut(`/hr/is-avans/${item.id}/reddet`, {
-                red_aciklama: "Mobil uygulama uzerinden reddedildi.",
-                reddeden_email: user?.email || "",
-              });
-              await fetchData(false);
-            } catch (e) {
-              Alert.alert("Hata", e?.message || "Red islemi basarisiz.");
-            } finally {
-              setOnayYukleniyor(null);
-            }
-          },
-        },
-      ]
-    );
+  // 02.11.2026 (Orhan): red gerekçesi zorunlu ve personele görünür — sabit "mobilden reddedildi" metni kaldırıldı
+  const handleReddet = (item) => setRedModal({ item, metin: "" });
+  const redGonder = async () => {
+    const m = redModal; if (!m) return;
+    const metin = String(m.metin || "").trim();
+    if (metin.length < 3) { Alert.alert("Gerekçe gerekli", "Personel neyi düzelteceğini bilmeli — red gerekçesini yazın."); return; }
+    try {
+      setOnayYukleniyor(m.item.id);
+      await apiPut(`/hr/is-avans/${m.item.id}/reddet`, { red_aciklama: metin, reddeden_email: user?.email || "", tur_no: m.item.tur_no || 1, beklenen_durum: m.item.durum });
+      setRedModal(null);
+      await fetchData(false);
+    } catch (e) {
+      Alert.alert("Hata", e?.message || "Red islemi basarisiz.");
+    } finally {
+      setOnayYukleniyor(null);
+    }
   };
 
   // --- Malzeme onay / red işlemleri ---
@@ -267,7 +295,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.htitle}>AHY Elektrik</Text>
+            <Text style={styles.htitle}>ERC Operasyon</Text>
             <Text style={styles.hsub}>Hakedis Takip</Text>
           </View>
           <View style={styles.avatar}><Text style={styles.avatarTxt}>{initial}</Text></View>
@@ -282,7 +310,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
       {/* HEADER */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.htitle}>AHY Elektrik</Text>
+          <Text style={styles.htitle}>ERC Operasyon</Text>
           <Text style={styles.hsub}>Hakedis Takip</Text>
         </View>
         <TouchableOpacity onPress={handleLogout}>
@@ -373,6 +401,34 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           </View>
         )}
 
+        {/* Clean Up onayı bekleyen sahalar (02.09.2026) — yalnız yetkili yönetici görür */}
+        {cleanupOnay.length > 0 && (
+          <>
+            <View style={styles.onayHeader}>
+              <Text style={styles.onayTitle}>{"🧹"} CLEAN UP ONAYI BEKLEYEN ({cleanupOnay.length})</Text>
+            </View>
+            {cleanupOnay.map((c) => {
+              const items = Array.isArray(c.items) ? c.items : [];
+              const foto = items.reduce((s, it) => s + ((it.fotolar || []).length), 0);
+              return (
+                <TouchableOpacity key={c.id} style={styles.onayCard} activeOpacity={0.85}
+                  onPress={() => navigation.navigate("RolloutCleanup", { site: c.site_code, onayModu: true })}>
+                  <View style={styles.cardRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.onayCardName} numberOfLines={1}>{c.site_code}</Text>
+                      <Text style={styles.onayCardSub} numberOfLines={1}>
+                        {items.length} kalem · {foto} fotoğraf{c.onaya_gonderen ? ` · ${String(c.onaya_gonderen).split("@")[0]}` : ""}
+                      </Text>
+                      <Text style={styles.cardDate}>{fmtDate(c.onaya_gonderme_tarihi)}</Text>
+                    </View>
+                    <Text style={[styles.onayCardAmt, { fontSize: 22 }]}>{"›"}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </>
+        )}
+
         {/* Hizli Islemler */}
         <View style={styles.btnGrid}>
           <TouchableOpacity
@@ -411,6 +467,25 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           <Text style={styles.wideBtnArrow}>{"›"}</Text>
         </TouchableOpacity>
 
+        {/* Rollout · İşlerim (Faz 1, 03.09.2026): merkezden atanan montaj/ENH/survey/MW/On Air/Clean Up işleri;
+            sahada İşe Başla / Çıkış Yap → rollout verisi otomatik. Clean Up fotoğraf akışı içinden açılır. */}
+        <TouchableOpacity
+          style={[styles.wideBtn, { backgroundColor: "#0f766e", marginTop: 10 }]}
+          onPress={() => navigation.navigate("RolloutIsler")}
+          activeOpacity={0.8}
+        >
+          <View>
+            <Text style={styles.wideBtnIcon}>{"📡"}</Text>
+            {bekleyenIs > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeTxt}>{bekleyenIs}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.wideBtnTxt}>Rollout · İşlerim</Text>
+          <Text style={styles.wideBtnArrow}>{"›"}</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.wideBtn, { backgroundColor: "#1D4ED8", marginTop: 10 }]}
           onPress={() => navigation.navigate("UzerimdekiMalzemeler")}
@@ -420,6 +495,26 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           <Text style={[styles.wideBtnTxt, { color: "#fff" }]}>Uzerimdeki Malzemeler</Text>
           <Text style={[styles.wideBtnArrow, { color: "#93C5FD" }]}>{"›"}</Text>
         </TouchableOpacity>
+
+        {/* 31.10.2026: Operasyon ekranları — izinler girişte sunucudan (user.izinler); sunucu her uçta ayrıca denetler.
+            Emre: HW Malzeme Durumu (kabul / teslim). Yöneticiler: Weekly Rollout Plan, Ekipler nerede?, Depodaki Sahalar. */}
+        {(user?.izinler?.hw_malzeme_goruntule === true || user?.izinler?.hw_malzeme_hareket === true) && (
+          <TouchableOpacity style={[styles.wideBtn, { backgroundColor: "#7c3aed", marginTop: 10 }]} onPress={() => navigation.navigate("HwMalzeme")} activeOpacity={0.8}>
+            <Text style={styles.wideBtnIcon}>{"📦"}</Text>
+            <Text style={[styles.wideBtnTxt, { color: "#fff" }]}>HW Malzeme Durumu</Text>
+            <Text style={[styles.wideBtnArrow, { color: "#ddd6fe" }]}>{"›"}</Text>
+          </TouchableOpacity>
+        )}
+        {user?.izinler?.operasyon_goruntule === true && (
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+            {[["HaftalikPlan", "📅", "Weekly Plan"], ["EkiplerNerede", "🗺", "Ekipler nerede?"], ["DepodakiSahalar", "🏬", "Depodaki Sahalar"]].map(([ekran, ikon, ad]) => (
+              <TouchableOpacity key={ekran} style={[styles.wideBtn, { flex: 1, flexDirection: "column", paddingVertical: 12, marginTop: 0 }]} onPress={() => navigation.navigate(ekran)} activeOpacity={0.8}>
+                <Text style={styles.wideBtnIcon}>{ikon}</Text>
+                <Text style={[styles.wideBtnTxt, { fontSize: 12.5, textAlign: "center" }]}>{ad}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* Trafik Cezalari */}
         {cezaKalemler.length > 0 && (
@@ -443,7 +538,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         )}
 
         {/* Onay Bekleyen Avans Talepleri (PM veya Direktor icin) — sadece bekleyen varsa goster */}
-        {(isPM || isDirektor) && onayBekleyenAvanslar.length > 0 && (
+        {(isPM || isDirektor || isRM) && onayBekleyenAvanslar.length > 0 && (
           <>
             <View style={styles.onayHeader}>
               <Text style={styles.onayTitle}>
@@ -464,9 +559,13 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                           {[a.proje, a.gider_turu, a.bolge].filter(Boolean).join(" · ")}
                         </Text>
                         <Text style={styles.cardDate}>{fmtDate(a.tarih || a.created_at)}</Text>
+                        <AvansGonderimRozeti t={a} />
                       </View>
                       <Text style={styles.onayCardAmt}>{fmtTL(a.tutar)}</Text>
                     </View>
+                    {/* 10.09.2026: onay sırası kimde — PM'e düşen kayıt aslında rollout adımında olabilir */}
+                    <AkisAdim durum={a.durum} tip="AVANS" />
+                    {Number(a.tur_no) > 1 ? <AvansGonderimDetayi t={a} /> : null}
                     <View style={styles.onayBtnRow}>
                       <TouchableOpacity
                         style={[styles.onayBtn, styles.onayBtnIncele]}
@@ -552,8 +651,42 @@ export default function HomeScreen({ user, onLogout, navigation }) {
           </>
         )}
 
+        {/* 02.11.2026: Reddedilen iş avanslarım — kaybolmaz, ayrı bölümde; gerekçe, reddeden, zaman, aşama; düzelt ve yeniden gönder */}
+        {reddedilenAvanslar.length > 0 && (
+          <>
+            <View style={[styles.onayHeader, { backgroundColor: "#FEF2F2", borderLeftColor: "#DC2626" }]}>
+              <Text style={[styles.onayTitle, { color: "#991B1B" }]}>{"❌"} REDDEDİLDİ · DÜZELTMENİZ BEKLENİYOR ({reddedilenAvanslar.length})</Text>
+            </View>
+            {reddedilenAvanslar.map((a, idx) => (
+              <View key={"red" + (a.id || idx)} style={[styles.onayCard, { borderLeftColor: "#DC2626" }]}>
+                <View style={styles.cardRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.onayCardName} numberOfLines={1}>{String(a.proje || a.gider_turu || "-")}{a.gider_turu && a.proje ? ` · ${a.gider_turu}` : ""}</Text>
+                    <Text style={styles.onayCardSub} numberOfLines={1}>AV-{a.id} · {fmtDate(a.tarih || a.created_at)}{a.bolge ? ` · ${a.bolge}` : ""}{Number(a.tur_no) > 1 ? ` · ${a.tur_no}. gönderim` : ""}</Text>
+                  </View>
+                  <Text style={[styles.onayCardAmt, { color: "#B91C1C" }]}>{fmtTL(a.tutar)}</Text>
+                </View>
+                <AvansRedKutusu t={a} />
+                <View style={styles.onayBtnRow}>
+                  <TouchableOpacity style={[styles.onayBtn, styles.onayBtnIncele]} onPress={() => setKendiDetay(a)} activeOpacity={0.8}>
+                    <Text style={styles.onayBtnInceleTxt}>{"🕘"} Detay</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.onayBtn, styles.onayBtnRed, { flex: 2 }]} onPress={() => navigation.navigate("IsAvans", { duzelt: a })} activeOpacity={0.8}>
+                    <Text style={styles.onayBtnTxt}>{"🔁"} Düzelt ve yeniden gönder</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
         {/* Is Avanslarim */}
-        <Text style={styles.secTitle}>Is Avanslarim ({avanslar.length})</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={styles.secTitle}>Is Avanslarim ({avanslar.length})</Text>
+          <TouchableOpacity onPress={() => navigation.navigate("IsAvansListe")} style={{ paddingVertical: 6, paddingHorizontal: 4 }}>
+            <Text style={{ color: "#1D4ED8", fontWeight: "800", fontSize: 13 }}>Tümünü gör ›</Text>
+          </TouchableOpacity>
+        </View>
         {avanslar.length === 0 ? (
           <View style={styles.emptyBox}>
             <Text style={styles.emptyTxt}>Henuz is avansi talebiniz yok.</Text>
@@ -563,7 +696,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
             try {
               const b = getBadge(a.durum);
               return (
-                <View key={a.id || idx} style={styles.card}>
+                <TouchableOpacity key={a.id || idx} style={styles.card} onPress={() => setKendiDetay(a)} activeOpacity={0.85}>
                   <View style={styles.cardRow}>
                     <Text style={styles.cardTitle} numberOfLines={1}>
                       {String(a.proje || a.proje_kodu || a.gider_turu || "-")}
@@ -576,7 +709,9 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                     <Text style={styles.cardAmt}>{fmtTL(a.tutar)}</Text>
                     <Text style={styles.cardDate}>{fmtDate(a.created_at)}</Text>
                   </View>
-                </View>
+                  <AvansGonderimRozeti t={a} />
+                  {a.red ? <AvansRedKutusu t={a} /> : <AkisAdim durum={a.durum} tip="AVANS" />}
+                </TouchableOpacity>
               );
             } catch (_) { return null; }
           })
@@ -613,6 +748,7 @@ export default function HomeScreen({ user, onLogout, navigation }) {
                     <Text style={styles.cardAmt}>{fmtTLDecimal(m.toplam_tutar || m.tutar)}</Text>
                     <Text style={styles.cardDate}>{fmtDate(m.created_at)}</Text>
                   </View>
+                  <AkisAdim durum={m.durum} tip="MASRAF" />
                 </View>
               );
             } catch (_) { return null; }
@@ -654,10 +790,17 @@ export default function HomeScreen({ user, onLogout, navigation }) {
             {/* Detay Satırlari */}
             {[
               ["Talep Eden",   inceleAvans?.talep_eden_ad],
+              ["Kim İçin",     inceleAvans?.personel_ad
+                                 ? `${inceleAvans.personel_ad}${inceleAvans.personel_unvan ? ` (${inceleAvans.personel_unvan})` : ""}`
+                                 : null],
+              ["Firma",        inceleAvans?.firma],
               ["E-posta",      inceleAvans?.talep_eden_email],
               ["Gider Türü",   inceleAvans?.gider_turu],
               ["Proje",        inceleAvans?.proje],
               ["Bölge",        inceleAvans?.bolge],
+              ["Plaka",        inceleAvans?.plaka],
+              ["Araç KM",      inceleAvans?.arac_km != null && inceleAvans?.arac_km !== ""
+                                 ? Number(inceleAvans.arac_km).toLocaleString("tr-TR") : null],
               ["Tarih",        fmtDate(inceleAvans?.tarih || inceleAvans?.created_at)],
             ].filter(([, v]) => v).map(([label, value]) => (
               <View key={label} style={styles.modalRow}>
@@ -666,11 +809,21 @@ export default function HomeScreen({ user, onLogout, navigation }) {
               </View>
             ))}
 
-            {/* Açıklama */}
-            {inceleAvans?.aciklama ? (
+            {/* 02.11.2026: yeniden gönderilen talepte önceki red gerekçesi, personelin açıklaması ve değişen alanlar */}
+            {Number(inceleAvans?.tur_no) > 1 ? <AvansGonderimDetayi t={inceleAvans} /> : null}
+            {/* Not (talep formundaki not alanı) */}
+            {inceleAvans?.not_aciklama ? (
+              <View style={styles.modalAciklamaBox}>
+                <Text style={styles.modalAciklamaLabel}>NOT</Text>
+                <Text style={styles.modalAciklamaTxt}>{inceleAvans.not_aciklama}</Text>
+              </View>
+            ) : null}
+
+            {/* Açıklama — sunucu eski build için özet ekler; yeni build ham metni gösterir */}
+            {(inceleAvans?.aciklama_ham ?? inceleAvans?.aciklama) ? (
               <View style={styles.modalAciklamaBox}>
                 <Text style={styles.modalAciklamaLabel}>AÇIKLAMA / GEREKÇE</Text>
-                <Text style={styles.modalAciklamaTxt}>{inceleAvans.aciklama}</Text>
+                <Text style={styles.modalAciklamaTxt}>{inceleAvans.aciklama_ham ?? inceleAvans.aciklama}</Text>
               </View>
             ) : null}
 
@@ -701,6 +854,25 @@ export default function HomeScreen({ user, onLogout, navigation }) {
         </SafeAreaView>
       </Modal>
 
+      {/* 02.11.2026: kendi talebimin detayı (gönderim turları + işlem geçmişi) */}
+      <AvansDetayModal talep={kendiDetay} onClose={() => setKendiDetay(null)} onDuzelt={(a) => navigation.navigate("IsAvans", { duzelt: a })} />
+
+      {/* 02.11.2026: red gerekçesi penceresi (zorunlu) */}
+      <Modal visible={!!redModal} transparent animationType="fade" onRequestClose={() => setRedModal(null)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(15,23,42,0.55)", justifyContent: "center", padding: 20 }}>
+          <View style={{ backgroundColor: "#fff", borderRadius: 16, padding: 18 }}>
+            <Text style={{ fontSize: 17, fontWeight: "800", color: "#991B1B" }}>Avansı Reddet</Text>
+            <Text style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>{redModal?.item?.talep_eden_ad || "Personel"} — {fmtTL(redModal?.item?.tutar)}</Text>
+            <Text style={{ fontSize: 12.5, color: "#6B7280", marginTop: 8 }}>Red gerekçesi personele gösterilir; neyi düzeltmesi gerektiğini yazın. <Text style={{ color: "#DC2626" }}>*</Text></Text>
+            <TextInput value={redModal?.metin || ""} onChangeText={(v) => setRedModal((m) => (m ? { ...m, metin: v } : m))} multiline placeholder="Örn. Konaklama fişi eksik, tutar fazla…" placeholderTextColor="#9CA3AF"
+              style={{ borderWidth: 1.5, borderColor: "#FCA5A5", borderRadius: 10, padding: 10, minHeight: 80, fontSize: 14, color: "#111827", marginTop: 8, textAlignVertical: "top" }} autoFocus />
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
+              <TouchableOpacity onPress={() => setRedModal(null)} style={{ flex: 1, backgroundColor: "#F3F4F6", borderRadius: 10, paddingVertical: 12, alignItems: "center" }}><Text style={{ fontWeight: "700", color: "#374151" }}>Vazgeç</Text></TouchableOpacity>
+              <TouchableOpacity onPress={redGonder} disabled={!!onayYukleniyor} style={{ flex: 1, backgroundColor: "#DC2626", borderRadius: 10, paddingVertical: 12, alignItems: "center", opacity: onayYukleniyor ? 0.6 : 1 }}><Text style={{ fontWeight: "800", color: "#fff" }}>Reddet</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

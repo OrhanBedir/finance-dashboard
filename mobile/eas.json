@@ -23,6 +23,15 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "store": {
+      "distribution": "store",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "ios": {
+        "simulator": false
+      }
     }
   },
   "submit": {
@@ -32,6 +41,11 @@
       }
     },
     "testflight": {
+      "ios": {
+        "ascAppId": "6775361138"
+      }
+    },
+    "store": {
       "ios": {
         "ascAppId": "6775361138"
       }
