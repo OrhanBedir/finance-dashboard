@@ -17,7 +17,9 @@
 //   3) Fiyat bulunamazsa tutar 0 sayılmaz: "Fiyat doğrulanamadı" — toplamın eksik olduğu ayrıca belirtilir.
 // Kısmi PO: PO'nun karşıladığı miktar PO fiyatıyla, kalan PR miktarı BoQ fiyatıyla; aynı miktar iki kez sayılmaz.
 // PO miktarı PR'den fazlaysa PR miktarı esas kalır (PR değiştirilmez), fark uyarı olarak gösterilir.
-// Para birimleri ayrı toplanır (TRY / USD); kur bu modülde uygulanmaz.
+// Para birimleri ayrı toplanır (TRY / USD) ve iz için saklanır. Ekranda tek TL tutar (02.11.2026, Orhan: "tamamı TL"):
+// USD → TL çevrimi TCMB döviz satış kuruyla (sunucunun mevcut getTcmbUsdTrySellingRate kuralı). Kur alınamazsa TL toplamı
+// verilmez (null) ve kart para birimlerini ayrı gösterir; tahmini kur kullanılmaz.
 // Hakediş: firma payı (markalar.kirilim_yuzde → pay) tutara uygulanır; PO/BoQ birim fiyatı ile firmaya düşen tutar ayrı alanlardır.
 // Bu modül hiçbir kaydı değiştirmez (PR, PO, katalog, fatura). Fiyat kaynağı geçmişi yalnız ayrı günlük tablosu varsa yazılır.
 
@@ -107,7 +109,7 @@ function boqFiyati(k, { katalog, rollout, bolgeOf }) {
    poSatirlari: kapsamdaki iş kodlarının po_rows satırları
    anahtarSayilari: Map "PROJE|SAHA|KALEM" → tüm firmalarda o anahtardaki PR satırı sayısı (yalnız sayı; başka firmanın verisi dönmez)
    rollout: Map SAHA → [{bolge, malzeme_gelis_tarihi}] · katalog: boq_katalog satırları · pay: firma hakediş oranı (0–1) */
-function hesapla({ kalemler = [], poSatirlari = [], anahtarSayilari = new Map(), rollout = new Map(), katalog = [], pay = 1, bolgeOf = null }) {
+function hesapla({ kalemler = [], poSatirlari = [], anahtarSayilari = new Map(), rollout = new Map(), katalog = [], pay = 1, bolgeOf = null, kur = null }) {
   const poBySahaKalem = new Map();
   for (const p of poSatirlari) {
     const k = `${sNorm(p.site_code)}|${kNorm(p.item_code)}`;
@@ -217,7 +219,26 @@ function hesapla({ kalemler = [], poSatirlari = [], anahtarSayilari = new Map(),
     else if (satir.durum === "DAHIL" && fiyatsizKalan) satir.kismi_fiyatsiz = true;
     satirlar.push(satir);
   }
-  return { satirlar, ozet: ozetle(satirlar, pay) };
+  const usdKur = Number(kur?.usd_try) > 0 ? Number(kur.usd_try) : null;
+  // TL karşılığı: TRY aynen, USD × TCMB kuru; kur yoksa ya da başka para birimi varsa null (sessiz çevrim yok)
+  const tl = (o) => {
+    let t = 0;
+    for (const [pb, v] of Object.entries(o || {})) {
+      if (pb === "TRY") t += Number(v);
+      else if (pb === "USD" && usdKur) t += Number(v) * usdKur;
+      else return null;
+    }
+    return yuvarla(t);
+  };
+  for (const st of satirlar) {
+    st.tutar_tl = tl(st.tutar); st.po_tutar_tl = tl(st.po_tutar); st.boq_tutar_tl = tl(st.boq_tutar); st.firma_tutar_tl = tl(st.firma_tutar);
+    if (st.tutar_disarida) st.tutar_disarida_tl = tl(st.tutar_disarida);
+  }
+  const ozet = ozetle(satirlar, pay);
+  ozet.kur = { usd_try: usdKur, kaynak: kur?.kaynak || "TCMB döviz satış", tarih: kur?.tarih || null };
+  ozet.toplam_tl = tl(ozet.toplam); ozet.po_fiyatli_tl = tl(ozet.po_fiyatli); ozet.boq_gecici_tl = tl(ozet.boq_gecici); ozet.firma_tutar_tl = tl(ozet.firma_tutar);
+  ozet.usd_cevrildi = !!(usdKur && Object.keys(ozet.toplam).includes("USD"));
+  return { satirlar, ozet };
 }
 
 function ozetle(satirlar, pay) {
@@ -250,14 +271,14 @@ function ozetle(satirlar, pay) {
 
 // ── Veri yükleme (salt okunur) ───────────────────────────────────────────────────────────────────
 // eslesir(subcon_name) → firmanın kalemi mi (server.js subconRowMatches). Başka firmanın satırları istemciye dönmez.
-async function yukle(pool, { eslesir, pay = 1, bolgeOf = null }) {
+async function yukle(pool, { eslesir, pay = 1, bolgeOf = null, kur = null }) {
   const mw = await pool.query(`SELECT id, project_code, site_code, item_code, item_description, done_qty, tamamlanan_qty, subcon_name, qc_durum,
       boq_surum, boq_bolge, boq_birim, boq_para_birimi, boq_birim_fiyat, boq_aciklama, to_char(created_at,'YYYY-MM-DD') AS created_at
     FROM master_works WHERE COALESCE(TRIM(subcon_name),'') <> '' AND COALESCE(TRIM(site_code),'') <> '' ORDER BY id`);
   const kalemler = mw.rows.filter((r) => eslesir(r.subcon_name));
   const sahalar = [...new Set(kalemler.map((r) => sNorm(r.site_code)))];
   const kodlar = [...new Set(kalemler.map((r) => kNorm(r.item_code)))];
-  if (!sahalar.length) return hesapla({ kalemler: [], pay });
+  if (!sahalar.length) return hesapla({ kalemler: [], pay, kur });
   const [po, sayi, ro, kat] = await Promise.all([
     pool.query(`SELECT id, project_code, site_code, item_code, unit_price, currency, requested_qty, billed_qty, due_qty, po_no, po_line_no,
         shipment_no, po_status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
@@ -272,7 +293,7 @@ async function yukle(pool, { eslesir, pay = 1, bolgeOf = null }) {
   const anahtarSayilari = new Map(sayi.rows.map((r) => [`${r.p}|${r.s}|${r.i}`, Number(r.n)]));
   const rollout = new Map();
   for (const r of ro.rows) { if (!rollout.has(r.s)) rollout.set(r.s, []); rollout.get(r.s).push(r); }
-  return hesapla({ kalemler, poSatirlari: po.rows, anahtarSayilari, rollout, katalog: kat.rows, pay, bolgeOf });
+  return hesapla({ kalemler, poSatirlari: po.rows, anahtarSayilari, rollout, katalog: kat.rows, pay, bolgeOf, kur });
 }
 
 // ── Fiyat kaynağı geçmişi (yalnız atanan_fiyat_kaynak_gecmis tablosu varsa; tabloyu bu kod OLUŞTURMAZ) ──────────────

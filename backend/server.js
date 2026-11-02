@@ -11488,6 +11488,14 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
 // Kapsam: oturumdaki firma (taşeron / alt marka) — sorgu parametresiyle değiştirilemez; yalnız admin ?taseron= ile bakabilir.
 // /finance altında olduğu için fiyat görme yetkisi olmayan hesap 403 alır (fiyat katmanı).
 const atananIs = require("./atananIs");
+// TCMB kuru 1 saat önbellekte; TCMB 6 sn'de yanıt vermezse son başarılı kur, o da yoksa null (TL toplamı verilmez, USD ayrı görünür)
+let _atananKur = { t: 0, v: null };
+async function atananUsdKuru() {
+  if (_atananKur.v && Date.now() - _atananKur.t < 3600e3) return _atananKur.v;
+  const v = await Promise.race([getTcmbUsdTrySellingRate().then(Number).catch(() => null), new Promise((r) => setTimeout(() => r(null), 6000))]);
+  if (v > 0) _atananKur = { t: Date.now(), v };
+  return v > 0 ? v : _atananKur.v;
+}
 app.get("/finance/atanan-is", authMiddleware, async (req, res) => {
   try {
     const k = taseronOkumaKapsami(req);
@@ -11500,7 +11508,10 @@ app.get("/finance/atanan-is", authMiddleware, async (req, res) => {
       if (!kapsam) return res.status(400).json({ ok: false, error: "taseron parametresi gerekli" });
     }
     const pay = altMarkaPayOf(kapsam.toLowerCase());
-    const d = await atananIs.yukle(pool, { eslesir: (ad) => subconRowMatches(kapsam, ad), pay: pay ?? 1, bolgeOf: getRegionFromSiteCode });
+    // 02.11.2026 (Orhan): Atanan İş tamamı TL — USD kalemler TCMB döviz satış kuruyla (diğer hakediş uçlarıyla aynı kaynak)
+    const usdTry = await atananUsdKuru();
+    const d = await atananIs.yukle(pool, { eslesir: (ad) => subconRowMatches(kapsam, ad), pay: pay ?? 1, bolgeOf: getRegionFromSiteCode,
+      kur: { usd_try: usdTry, kaynak: "TCMB döviz satış", tarih: new Date().toISOString().slice(0, 10) } });
     // Fiyat kaynağı değişiklik günlüğü (tablo varsa; yoksa sessizce atlanır) + kalemin önceki kaynakları
     await atananIs.kaynakGecmisiYaz(pool, d.satirlar.filter((s) => s.durum !== "HARIC"), req.user?.email).catch((e) => console.error("ATANAN GECMIS:", e.message));
     const gecmis = await atananIs.kaynakGecmisiOku(pool, d.satirlar.map((s) => s.id)).catch(() => new Map());

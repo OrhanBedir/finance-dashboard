@@ -16,6 +16,10 @@ const DURUM = {
   INCELEME: "🔎 İnceleme",
   HARIC: "Hesaba alınmadı",
 };
+// 02.11.2026 (Orhan): tutarlar tek TL — USD kalem TCMB döviz satış kuruyla çevrilir; kur yoksa para birimleri ayrı kalır
+export const tlMetni = (tl, o) => (tl === null || tl === undefined ? paraMetni(o) : `₺${sayi(tl, 0)}`);
+const usdNotu = (o) => (Number(o?.USD || 0) ? ` (${paraMetni({ USD: o.USD })})` : "");
+export const kurMetni = (oz) => (oz?.usd_cevrildi && oz?.kur?.usd_try ? `USD kalemler ${oz.kur.kaynak || "TCMB"} kuruyla TL'ye çevrildi (1 USD = ₺${sayi(oz.kur.usd_try, 4)})` : "");
 export const durumMetni = (s) => (s.durum === "DAHIL" && s.kismi_fiyatsiz ? "⚠️ Kısmen fiyatsız" : DURUM[s.durum] || s.durum);
 const poMetni = (s) => (s.po_satirlari || []).map((p) => `${p.po_no}${p.po_line_no ? " / " + p.po_line_no : ""}${p.shipment_no ? " / " + p.shipment_no : ""}`).join(" · ");
 const boqSurum = (s) => (s.boq ? s.boq.surum : "");
@@ -43,11 +47,11 @@ export const ATANAN_SUTUNLAR = [
   ["Para Birimi", (s) => [...new Set([s.po_para, s.boq && s.bekleyen_qty > 0 ? s.boq.para : null].filter(Boolean))].join(" + "), false, 8],
   ["Fiyat Kaynağı", (s) => s.etiket, false, 40],
   ["PO − BoQ Birim Farkı", (s) => s.fark_po_boq ?? "", true, 14],
-  ["Tutar (KDV Hariç)", (s) => paraMetni(s.tutar), false, 16],
+  ["Tutar ₺ (KDV Hariç)", (s) => tlMetni(s.tutar_tl, s.tutar) + usdNotu(s.tutar), false, 18],
   ["Hakediş Oranı", (s) => `%${Math.round(Number(s.hakedis_orani || 0) * 100)}`, false, 9],
-  ["Teknocenter Tutarı (KDV Hariç)", (s) => paraMetni(s.firma_tutar), false, 18],
+  ["Teknocenter Tutarı ₺ (KDV Hariç)", (s) => tlMetni(s.firma_tutar_tl, s.firma_tutar), false, 18],
   ["Uyarı", (s) => [...(s.uyarilar || []),
-    s.tutar_disarida ? `Hesaplanan ${paraMetni(s.tutar_disarida)} toplama girmedi` : "",
+    s.tutar_disarida ? `Hesaplanan ${tlMetni(s.tutar_disarida_tl, s.tutar_disarida)} toplama girmedi` : "",
     s.boq_neden && !s.boq && !(s.uyarilar || []).some((u) => u.includes(s.boq_neden)) ? "BoQ: " + s.boq_neden : "",
     (s.kaynak_gecmisi || []).length > 1 ? "Önceki kaynak: " + s.kaynak_gecmisi.slice(0, -1).map((g) => `${g.fiyat_kaynagi} (${g.zaman})`).join(" → ") : "",
   ].filter(Boolean).join(" · "), false, 60],
@@ -67,27 +71,28 @@ const FILTRELER = [
 // Excel: kalem sayfası (sayılar sayı, tutarlar para birimine göre ayrı sütun) + özet sayfası
 export function atananExcel(veri, exportStandardExcel, firma = "Teknocenter") {
   const satirlar = veri?.satirlar || [];
-  const pbs = [...new Set(satirlar.flatMap((s) => Object.keys(s.tutar || {})).concat(["TRY"]))];
-  const sut = ATANAN_SUTUNLAR.filter(([b]) => !["Tutar (KDV Hariç)", "Teknocenter Tutarı (KDV Hariç)"].includes(b));
-  const headers = [...sut.map(([b]) => b), ...pbs.flatMap((pb) => [`Tutar ${pb} (KDV Hariç)`, `${firma} Tutarı ${pb}`])];
-  const sayisal = new Set(sut.map(([, , n], i) => (n ? i : -1)).filter((i) => i >= 0));
-  pbs.forEach((_, j) => { sayisal.add(sut.length + j * 2); sayisal.add(sut.length + j * 2 + 1); });
-  const rows = satirlar.map((s) => [...sut.map(([, f, n]) => { const v = f(s); return n && v !== "" ? Number(v) : v; }),
-    ...pbs.flatMap((pb) => [Number(s.tutar?.[pb] || 0), Number(s.firma_tutar?.[pb] || 0)])]);
   const o = veri?.ozet || {};
+  // Önce TL sütunları (kartla aynı toplam), sonra iz için asıl para birimi sütunları
+  const pbs = [...new Set(satirlar.flatMap((s) => Object.keys(s.tutar || {})))].filter((pb) => pb !== "TRY");
+  const sut = ATANAN_SUTUNLAR.filter(([b]) => !b.startsWith("Tutar ₺") && !b.startsWith("Teknocenter Tutarı"));
+  const headers = [...sut.map(([b]) => b), "Tutar TL (KDV Hariç)", `${firma} Tutarı TL`, ...pbs.map((pb) => `Asıl Tutar ${pb}`)];
+  const sayisal = new Set(sut.map(([, , n], i) => (n ? i : -1)).filter((i) => i >= 0));
+  for (let j = 0; j < 2 + pbs.length; j++) sayisal.add(sut.length + j);
+  const rows = satirlar.map((s) => [...sut.map(([, f, n]) => { const v = f(s); return n && v !== "" ? Number(v) : v; }),
+    Number(s.tutar_tl || 0), Number(s.firma_tutar_tl || 0), ...pbs.map((pb) => Number(s.tutar?.[pb] || 0))]);
   const ozetSatir = (a, b) => [a, b];
   const ozet = [
     ozetSatir("Kapsam", `${o.kapsam?.kalem || 0} kalem · ${o.kapsam?.is_kaydi || 0} iş kaydı · ${o.kapsam?.fiziksel_saha || 0} fiziksel saha`),
-    ozetSatir("Atanan İş Tutarı (toplam)", paraMetni(o.toplam)),
-    ozetSatir("  · PO fiyatıyla", `${paraMetni(o.po_fiyatli)} (${o.po_kalem || 0} kalem)`),
-    ozetSatir("  · BoQ üzerinden geçici (PO bekleniyor)", `${paraMetni(o.boq_gecici)} (${o.boq_kalem || 0} kalem)`),
-    ozetSatir(`${firma} tutarı (hakediş %${Math.round(Number(o.hakedis_orani || 0) * 100)})`, paraMetni(o.firma_tutar)),
+    ozetSatir("Atanan İş Tutarı (toplam, TL)", tlMetni(o.toplam_tl, o.toplam)),
+    ozetSatir("  · PO fiyatıyla", `${tlMetni(o.po_fiyatli_tl, o.po_fiyatli)} (${o.po_kalem || 0} kalem)`),
+    ozetSatir("  · BoQ üzerinden geçici (PO bekleniyor)", `${tlMetni(o.boq_gecici_tl, o.boq_gecici)} (${o.boq_kalem || 0} kalem)`),
+    ozetSatir(`${firma} tutarı (hakediş %${Math.round(Number(o.hakedis_orani || 0) * 100)})`, tlMetni(o.firma_tutar_tl, o.firma_tutar)),
     ozetSatir("Fiyat doğrulanamadı (toplamda YOK)", `${o.fiyatsiz?.kalem || 0} kalem · ${sayi(o.fiyatsiz?.pr_qty || 0)} miktar${o.toplam_eksik ? " — parasal toplam eksik" : ""}`),
     ozetSatir("Miktar doğrulanamadı (toplama eklenmedi)", `${o.miktar_supheli?.kalem || 0} kalem · ${paraMetni(o.miktar_supheli?.tutar_disarida)}`),
     ozetSatir("İnceleme gereken", `${o.inceleme?.kalem || 0} kalem`),
     ozetSatir("Hesaba alınmayan (PR miktarı 0)", `${o.haric?.kalem || 0} kalem`),
     ozetSatir("Fiziki başlamamış ama atanan", `${o.fiziki_baslamamis || 0} kalem`),
-    ozetSatir("Para birimleri", "Ayrı toplanmıştır; kur uygulanmamıştır"),
+    ozetSatir("Para birimi", kurMetni(o) || (Number(o.toplam?.USD || 0) && o.toplam_tl === null ? "TCMB kuru alınamadı — USD ayrı gösterildi" : "Tüm kalemler TL")),
   ];
   return exportStandardExcel({
     title: `${firma} — Atanan İş Tutarı (PR talebi · fiyat PO, yoksa BoQ)`,
@@ -127,10 +132,10 @@ export function AtananIsModal({ veri, onClose, onExcel }) {
           <button onClick={onClose} style={{ background: "#f3f4f6", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700 }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 8, padding: "10px 16px", flexWrap: "wrap", background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
-          {kutu("Atanan İş Tutarı", paraMetni(o.toplam), `${o.kapsam?.kalem || 0} kalem · ${o.kapsam?.is_kaydi || 0} iş kaydı · ${o.kapsam?.fiziksel_saha || 0} fiziksel saha`)}
-          {kutu("PO fiyatıyla", paraMetni(o.po_fiyatli), `${o.po_kalem || 0} kalem · doğrulanmış PO satırı`, "#047857")}
-          {kutu("BoQ üzerinden geçici", paraMetni(o.boq_gecici), `${o.boq_kalem || 0} kalem · PO gelince PO fiyatına geçer`, "#b45309")}
-          {kutu(`Teknocenter tutarı (%${Math.round(Number(o.hakedis_orani || 0) * 100)})`, paraMetni(o.firma_tutar), "hakediş oranı uygulanmış")}
+          {kutu("Atanan İş Tutarı", tlMetni(o.toplam_tl, o.toplam), `${o.kapsam?.kalem || 0} kalem · ${o.kapsam?.is_kaydi || 0} iş kaydı · ${o.kapsam?.fiziksel_saha || 0} fiziksel saha`)}
+          {kutu("PO fiyatıyla", tlMetni(o.po_fiyatli_tl, o.po_fiyatli), `${o.po_kalem || 0} kalem · doğrulanmış PO satırı`, "#047857")}
+          {kutu("BoQ üzerinden geçici", tlMetni(o.boq_gecici_tl, o.boq_gecici), `${o.boq_kalem || 0} kalem · PO gelince PO fiyatına geçer`, "#b45309")}
+          {kutu(`Teknocenter tutarı (%${Math.round(Number(o.hakedis_orani || 0) * 100)})`, tlMetni(o.firma_tutar_tl, o.firma_tutar), "hakediş oranı uygulanmış")}
           {(o.fiyatsiz?.kalem > 0 || o.miktar_supheli?.kalem > 0 || o.inceleme?.kalem > 0) &&
             kutu("⚠️ Toplama girmeyen / incelenecek", `${o.fiyatsiz?.kalem || 0} fiyatsız · ${o.miktar_supheli?.kalem || 0} miktar şüpheli`,
               `${o.inceleme?.kalem || 0} inceleme · ${o.haric?.kalem || 0} PR miktarı 0${o.toplam_eksik ? " · parasal toplam eksik" : ""}`, "#b91c1c")}
@@ -160,7 +165,7 @@ export function AtananIsModal({ veri, onClose, onExcel }) {
                       <td key={b} style={{ padding: "6px 10px", borderBottom: "1px solid #f1f5f9", whiteSpace: b === "Kalem Açıklaması" || b === "Uyarı" ? "normal" : "nowrap",
                         minWidth: b === "Uyarı" ? 260 : b === "Kalem Açıklaması" ? 220 : undefined, textAlign: n ? "right" : "left",
                         color: b === "Fiyat Kaynağı" ? (String(v).startsWith("PO fiyatı") ? "#047857" : String(v).startsWith("BoQ") ? "#b45309" : "#b91c1c") : b === "Uyarı" ? "#b91c1c" : "#374151",
-                        fontWeight: b === "Tutar (KDV Hariç)" || b === "İş Kodu" || b === "Fiyat Kaynağı" ? 700 : 400 }}>
+                        fontWeight: b.startsWith("Tutar ₺") || b === "İş Kodu" || b === "Fiyat Kaynağı" ? 700 : 400 }}>
                         {n && v !== "" ? sayi(v) : v === "" || v === null || v === undefined ? "—" : v}
                       </td>
                     );
@@ -174,7 +179,7 @@ export function AtananIsModal({ veri, onClose, onExcel }) {
         <div style={{ padding: "8px 16px", fontSize: 11, color: "#64748b", borderTop: "1px solid #e5e7eb" }}>
           Kapsam: firmanın PR talebi (Günlük İş Girişi kalemi, PR miktarı &gt; 0). Fiziki tamamlanma, QC, PO ya da fatura şart değildir ve bu listeye girmek işi
           tamamlanmış / faturalanabilir yapmaz. Fiyat: doğrulanmış Huawei PO satırı (aynı proje + iş kodu + kalem); PO yoksa PR'daki BoQ sürümü ve fiyatı.
-          Tutarlar KDV hariçtir; para birimleri ayrı toplanır.
+          Tutarlar KDV hariç ve TL'dir{kurMetni(o) ? `; ${kurMetni(o)}` : ""}.
         </div>
       </div>
     </div>,
