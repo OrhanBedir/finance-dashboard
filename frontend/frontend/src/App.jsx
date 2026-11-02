@@ -41137,8 +41137,8 @@ function App() {
                     ] : []),
                     ...(isAltMarka && isAdmin && !_fiyatGizli ? [
                       { ikon:'💰', label:'Nakit Akışı (Günlük)', aktif: page==='marka_nakit', onClick:()=>setPage('marka_nakit') },
-                      { ikon:'🧾', label:'Fatura Girişi', aktif: page==='marka_fatura_girisi', onClick:()=>setPage('marka_fatura_girisi') },
-                      { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron', onClick:()=>setPage('marka_taseron') },
+                      // 02.11.2026: ayrı "Fatura Girişi" kaldırıldı — Taşeron Faturaları firmanın tüm faturalarını listeler, "+ Fatura Girişi" aynı ekranı açar
+                      { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron' || page==='marka_fatura_girisi', onClick:()=>setPage('marka_taseron') },
                       { ikon:'🧾', label:'Şimşek Fatura Takip', aktif: page==='marka_fatura_takip', onClick:()=>setPage('marka_fatura_takip') },
                     ] : []),
                     ...(["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) ? [{ ikon:'🏦', label:'Nakit Akışı', aktif: page==='cashflow', onClick:()=>setPage('cashflow') }] : []),
