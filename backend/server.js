@@ -14417,12 +14417,18 @@ async function planHazirla(req, b) {
     }
     const montaj = sahaFiltre.montajDurumu(r);
     const otomatik = sahaFiltre.isSuresi({ row: r, kod, kalemler, montaj });
-    let sureGun = otomatik.gun, sureKaynak = otomatik.gun != null ? `Kural: ${otomatik.gerekce}` : null;
+    let sureGun = otomatik.gun, sureDk = null, sureKaynak = otomatik.gun != null ? `Kural: ${otomatik.gerekce}` : null;
+    // 02.11.2026: kullanıcı süresi ekip-gün YA DA saat olarak girilebilir (devam eden işte KALAN süre); gerekçe zorunlu.
+    // Girilen süre önizleme → imza → onay boyunca aynı gövdeyle taşınır (istemci her çağrıda gönderir).
+    const birim = String(x.sure_birim || "GUN").toUpperCase() === "SAAT" ? "SAAT" : "GUN";
     if (x.sure_gun != null && x.sure_gun !== "") {
       const v = Number(String(x.sure_gun).replace(",", "."));
-      if (!(v > 0 && v <= 30)) engeller.push(`${kod}: süre 0–30 ekip-gün aralığında olmalı`);
-      else if (String(x.sure_gerekce || "").trim().length < 3) engeller.push(`${kod}: süre değişikliği için gerekçe yazın`);
-      else { sureGun = v; sureKaynak = `Kullanıcı: ${String(x.sure_gerekce).trim().slice(0, 200)}${otomatik.gun != null ? ` (kural: ${otomatik.gun} gün)` : ""}`; }
+      if (birim === "SAAT" ? !(v > 0 && v <= 240) : !(v > 0 && v <= 30)) engeller.push(`${kod}: süre ${birim === "SAAT" ? "0–240 saat" : "0–30 ekip-gün"} aralığında olmalı`);
+      else if (String(x.sure_gerekce || "").trim().length < 3) engeller.push(`${kod}: süre için kısa gerekçe yazın`);
+      else {
+        if (birim === "SAAT") { sureDk = Math.round(v * 60); sureGun = null; } else sureGun = v;
+        sureKaynak = `Kullanıcı: ${String(v).replace(".", ",")} ${birim === "SAAT" ? "saat" : "ekip-gün"} — ${String(x.sure_gerekce).trim().slice(0, 200)}${otomatik.gun != null ? ` (kural: ${otomatik.gun} gün)` : ""}`;
+      }
     }
     if (r && !montaj.malzeme_ok && (x.kategori || "NEW_SITE") === "NEW_SITE") uyarilar.push(`${kod}: Rollout'ta malzeme OK değil`);
     if (montaj.belirsiz) uyarilar.push(`${kod}: durum belirsiz — ${montaj.belirsiz.join("; ")}`);
@@ -14431,7 +14437,7 @@ async function planHazirla(req, b) {
     if (/ENH/.test(String(x.kategori || "")) && !ekip.yetkinlik.elektrik_isi) uyarilar.push(`${kod}: ENH işi — ekipte elektrik işi yetkinliği kayıtlı üye yok`);
     const par = x.par && typeof x.par === "object" ? { par_id: String(x.par.par_id || "").trim().slice(0, 60) || null, kesinti: ["VAR", "YOK"].includes(x.par.kesinti) ? x.par.kesinti : null,
       kesinti_dk: Number(x.par.kesinti_dk) > 0 ? Number(x.par.kesinti_dk) : null, bas: plSaat(x.par.bas), bit: plSaat(x.par.bit) } : null;
-    isler.push({ kod, ad: f?.fiziksel_id || kod, fiziksel_id: f?.fiziksel_id || kod, konum, sureGun, mevcut_atamalar: aktif, yeniden_ata: yenidenAta,
+    isler.push({ kod, ad: f?.fiziksel_id || kod, fiziksel_id: f?.fiziksel_id || kod, konum, sureGun, sureDk, sure_gerekli: sureGun == null && sureDk == null, mevcut_atamalar: aktif, yeniden_ata: yenidenAta,
       malzeme: hwD ? { etiket: hwD.etiket, teslim: hwD.teslim, konum: hwD.konum, ekipte: hwD.ekipte, eksik_aciklama: hwD.eksik_aciklama } : null, sureKaynak, sureGerekce: otomatik.gerekce, otomatik_sure: otomatik,
       kategori: x.kategori || "NEW_SITE", isAd: { STANDALONE_POLE: "Standalone montaj (pole)", STANDALONE_KABIN_ANTEN: "Standalone montaj (kabinet + anten)", LTE_ANTEN: "Antenli montaj / değişim", RRU: "RRU montaj / söküm" }[otomatik.kural] || "Montaj", kapsam: kap, montaj, par,
       erisim: par?.bas && par?.bit ? { bas: par.bas, bit: par.bit } : null,
@@ -14556,7 +14562,10 @@ app.post("/plan/onayla", authMiddleware, async (req, res) => {
     if (!isAtamaYetkiliMi(req)) return res.status(403).json({ ok: false, error: "Planı onaylamak (kalıcı iş ataması) için İş Ata yetkisi gerekir — taslağı yetkiliye iletin" });
     if (b.imza && b.imza !== H.imza) return res.status(409).json({ ok: false, error: "Güncel atamalar / yol süreleri değişti; plan farklı çıktı. Yeniden önizleyip onaylayın.", yeni: planCevap(H) });
     const segs = H.plan.gunler.flatMap((g) => g.segmentler);
-    if (!segs.length) return res.status(400).json({ ok: false, error: "Planda kaydedilecek iş yok" });
+    if (!segs.length) {
+      const be = H.plan.bilgi_eksik || [], kl = H.plan.kalanlar || [];
+      return res.status(400).json({ ok: false, error: `Planda kaydedilecek iş yok${be.length ? ` — ${be.length} işte bilgi eksik (${be.map((x) => `${x.kod}: ${x.tur === "SURE" ? "iş süresi gerekli" : "konum / yol süresi gerekli"}`).join("; ")})` : ""}${kl.length ? ` — ${kl.length} iş döneme sığmadı` : ""}`, bilgi_eksik: be, kalanlar: kl });
+    }
     const kisiler = H.ekip.uyeler.filter((u) => u.email).map((u) => ({ email: u.email, ad: u.ad }));
     const mailler = kisiler.map((k) => k.email);
     const ben = String(req.user?.email || "").toLowerCase().trim();
@@ -14953,8 +14962,9 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
         ? r.qc_closed_date || null
         : r.qc_closed_date || null;
 
-      const installStart =
-        r.installation_actual_start_date || r.plan_start_date || null;
+      // 02.11.2026: "Installation Start Date" yalnız FİİLÎ montaj başlangıcıdır — plan tarihi ayrı sütunda (Plan Start Date);
+      // eskiden fiilî tarih boşsa plan tarihi gösteriliyordu ve montaj başlamış sanılıyordu (BI0616_DSS_MWA).
+      const installStart = r.installation_actual_start_date || null;
 
       // Installation End Date: SADECE gerçek tarih varsa göster
       // (onair_date fallback kaldırıldı — iki ayrı kavram; biri bitmişken diğeri boş olabilir)
@@ -14962,10 +14972,12 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
 
       const onairDate = r.onair_date || null;
 
-      const malzemeStatus =
-        qcOk || onairDate || installEnd || installStart
-          ? r.malzeme_status || "OK"
-          : r.malzeme_status || null;
+      // Malzeme durumu ortak kural: kayıtlı değer esastır; yoksa AYNI işin RF QC OK'u ya da fiilî montaj / OnAir kanıtıyla
+      // "OK" türetilir ve kaynağı ayrıca döner (teslim miktarı / stok / konum anlamı taşımaz). Plan tarihi kanıt değildir.
+      const malzemeKaynak = r.malzeme_status ? "KAYIT" : qcOk ? "QC" : (onairDate || installEnd || installStart) ? "MONTAJ" : null;
+      const malzemeStatus = r.malzeme_status || (malzemeKaynak ? "OK" : null);
+      // Gerçek geliş tarihi yoksa yalnız REFERANS: bu işin RF QC kapanış tarihi (alana yazılmaz, BoQ seçimini değiştirmez)
+      const malzemeGelisReferans = !r.malzeme_gelis_tarihi && qcOk && r.qc_closed_date ? r.qc_closed_date : null;
 
       const passiveValue =
         normalizedSiteType === "5G" || normalizedSiteType === "LTE"
@@ -14983,6 +14995,9 @@ app.get("/rollout/list", authMiddleware, async (req, res) => {
         onair_date: onairDate,
         qc_closed_date: qcClosedDate,
         malzeme_status: malzemeStatus,
+        malzeme_kaynak: malzemeKaynak,
+        malzeme_gelis_referans: malzemeGelisReferans,
+        malzeme_gelis_referans_kaynak: malzemeGelisReferans ? "QC" : null,
 
         los_subcon: passiveValue || r.los_subcon,
         los_plan_date: passiveValue || r.los_plan_date,

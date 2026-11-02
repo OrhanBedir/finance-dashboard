@@ -113,7 +113,9 @@ function isSuresi({ row, kod, kalemler, montaj }) {
   if (anten) return { gun: 1, kural: "LTE_ANTEN", gerekce: "Standalone değil, antenli montaj / değişim → 1 ekip-gün" };
   if (ana.every((k) => /\bRRU\b/i.test(k.item_description) && /install|dismantl|removal|montaj|söküm/i.test(k.item_description)))
     return { gun: 0.7, kural: "RRU", gerekce: "Yalnız RRU montaj / söküm → 0,7 ekip-gün (günlük kapasitenin %70'i)" };
-  return { gun: null, kural: null, gerekce: "Kapsam süre kurallarından birine uymuyor — süreyi girin" };
+  // 02.11.2026: kapsam kurallara uymuyorsa süre UYDURULMAZ (ör. NR700 band ilavesi · anten revizyonsuz — kod adından anten /
+  // pole / kabinet tahmin edilmez); kullanıcıdan ekip-gün ya da saat istenir. Kalemleri gerekçede göster ki ne olduğu anlaşılsın.
+  return { gun: null, kural: null, gerekce: `İş süresi gerekli — otomatik süre kuralı yok (${ana.map((k) => String(k.item_description || k.item_code || "").slice(0, 60)).join(" + ")}); ekip-gün ya da saat girin` };
 }
 
 module.exports = { montajDurumu, cleanupBekliyor, kapsamRengi, kalemAnten, isSuresi, standaloneMi, YARDIMCI_RX };

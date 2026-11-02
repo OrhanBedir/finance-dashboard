@@ -93,3 +93,9 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* 02.11.2026: boş tarih kutusu — Safari'nin soluk "bugün" yer tutucusu kayıt sanılmasın */
+input[type="date"].tarihBos:not(:focus) { color: transparent; }
+input[type="date"].tarihBos:not(:focus)::-webkit-datetime-edit { color: transparent; }
+.tarihBosYazi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 13px; pointer-events: none; }
+input[type="date"].tarihBos:focus + .tarihBosYazi { display: none; }

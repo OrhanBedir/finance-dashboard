@@ -203,20 +203,27 @@ function planla(girdi) {
   let sira = isler, siraBilgi = null;
   if (girdi.mod === "ASISTAN") { siraBilgi = siraOner(pos, isler, tablo); sira = siraBilgi.sira; }
   const kalanEkle = (x, kalanDk, neden) => kalanlar.push({ kod: x.kod, ad: x.ad, kalan_saat: kalanDk != null ? Math.round(kalanDk / 6) / 10 : null, neden });
+  // 02.11.2026: bilgisi eksik iş "sonraki döneme kalan" DEĞİLDİR — ayrı listede, düzeltilecek alanla birlikte döner
+  const bilgiEksik = [];
+  const bilgiEkle = (x, tur, neden) => bilgiEksik.push({ kod: x.kod, ad: x.ad, tur, neden });
+  // İş süresi dakika: kullanıcı saat girdiyse o (sureDk), değilse ekip-gün × günlük kapasite
+  const isDk = (x) => (Number(x.sureDk) > 0 ? Number(x.sureDk) : Number(x.sureGun) > 0 ? Number(x.sureGun) * kapasiteDk : 0);
 
   for (const x of sira) {
     if (!ilkTeslimTamam) { kalanEkle(x, null, "Malzeme teslimi planlanamadı"); continue; }
-    if (donemBitti()) { kalanEkle(x, x.sureGun ? x.sureGun * kapasiteDk : null, "Plan dönemi doldu"); continue; }
-    if (!(Number(x.sureGun) > 0)) { kalanEkle(x, null, x.sureGerekce || "İş süresi yok — süreyi girin"); continue; }
-    if (!x.konum) { kalanEkle(x, x.sureGun * kapasiteDk, "Saha konumu yok — yol planlanamadı"); continue; }
+    if (!(isDk(x) > 0)) { bilgiEkle(x, "SURE", x.sureGerekce || "İş süresi yok — süreyi girin"); continue; }
+    // Doğrulanmış koordinat yok: akıllı sıralama yapılamaz. Manuel planda kullanıcının tahmini yol süresiyle devam edilir
+    // (yol bacağı "eksik yol" olarak sorulur); kesin rota / süre uydurulmaz.
+    if (!x.konum && girdi.mod !== "MANUEL") { bilgiEkle(x, "KONUM", "Doğrulanmış saha koordinatı yok — akıllı sıralama yapılamaz; \"Kendim planlayacağım\" ile tarih/saat ve tahmini yol süresi girerek planlayın"); continue; }
+    if (donemBitti()) { kalanEkle(x, isDk(x), "Plan dönemi doldu"); continue; }
     // Manuel planda kullanıcının verdiği en erken başlangıç (gün / saat): öncesine iş konmaz
     if (x.enErken?.tarih) {
       while (t < x.enErken.tarih && !donemBitti()) gunuKapat();
       if (t === x.enErken.tarih && x.enErken.saat && dk(x.enErken.saat) > m) m = dk(x.enErken.saat);
       if (x.enErken.tarih < donem.baslangic || x.enErken.tarih > donem.bitis) uyarilar.push(`${x.kod}: seçilen başlangıç (${x.enErken.tarih}) plan dönemi dışında`);
     }
-    if (donemBitti()) { kalanEkle(x, x.sureGun * kapasiteDk, "Plan dönemi doldu"); continue; }
-    let kalanDk = Number(x.sureGun) * kapasiteDk, ilkGun = true, varildi = false;
+    if (donemBitti()) { kalanEkle(x, isDk(x), "Plan dönemi doldu"); continue; }
+    let kalanDk = isDk(x), ilkGun = true, varildi = false;
     const erisimBas = x.erisim?.bas ? dk(x.erisim.bas) : null, erisimBit = x.erisim?.bit ? dk(x.erisim.bit) : null;
     let guvenlik = 0;
     while (kalanDk > 0.5 && guvenlik++ < 60) {
@@ -253,7 +260,7 @@ function planla(girdi) {
       const blok = Math.min(kalanDk, bos, kapKalan);
       if (blok < Math.min(minBlok, kalanDk) - 0.5) { if (sonrakiTeslim != null) { m = Math.max(m, sonrakiTeslim); continue; } gunuKapat(); continue; }
       const parca = Math.floor(blok);
-      const toplamDk = Number(x.sureGun) * kapasiteDk;
+      const toplamDk = isDk(x);
       const yapilan = toplamDk - kalanDk + parca;
       const son = yerlestir(t, m, parca, { tur: "MONTAJ", ad: x.ad, kod: x.kod, kategori: x.kategori || "NEW_SITE",
         aciklama: `${x.isAd || "Montaj"} — ${yapilan >= toplamDk - 0.5 ? (ilkGun ? "tamamı" : "son kısım") : `kısmi (${Math.round(yapilan / 6) / 10} / ${Math.round(toplamDk / 6) / 10} saat)`}`,
@@ -277,7 +284,7 @@ function planla(girdi) {
     return { ...g, donem_ici: g.tarih >= donem.baslangic && g.tarih <= donem.bitis, kullanilan_dk: kullanilan, pencere_dk: pencere, kalan_dk: Math.max(0, pencere - kullanilan),
       montaj_dk: g.montajDk, kapasite_dk: g.calisma ? kapasiteDk : 0 };
   });
-  return { donem, gunler: liste, kalanlar, uyarilar: [...new Set(uyarilar)], varsayimlar, eksik_yollar: eksikYollar,
+  return { donem, gunler: liste, kalanlar, bilgi_eksik: bilgiEksik, uyarilar: [...new Set(uyarilar)], varsayimlar, eksik_yollar: eksikYollar,
     sira: sira.map((x) => x.kod), sira_gerekce: siraBilgi?.gerekce || (girdi.mod === "MANUEL" ? "Sıra kullanıcının seçtiği sıradır" : null),
     toplam_yol_dk: siraBilgi?.toplamYolDk ?? null };
 }

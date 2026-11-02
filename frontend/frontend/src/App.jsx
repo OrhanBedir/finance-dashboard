@@ -8014,7 +8014,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
     baslangic: form.baslangic.startsWith("D:") ? { tur: "DEPO", id: Number(form.baslangic.slice(2)) } : form.baslangic.startsWith("S:") ? { tur: "SAHA", kod: form.baslangic.slice(2) } : null,
     malzeme: { durum: form.malzemeDurum, teslimler: form.teslimler.map((t) => ({ tarih: t.tarih, saat: t.saat, depo_id: Number(t.depo_id), sure_dk: Number(t.sure_dk) || 30, acilis: t.acilis, kapanis: t.kapanis, hazir_tarih: t.hazir_tarih, hazir_saat: t.hazir_saat })) },
     yeniden_ata: yenidenAta, ulasim_onay: ulasimOnay,
-    isler: planSecimi.map((k) => isler.find((x) => x.kod === k)).filter(Boolean).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_gerekce: x.sure_gerekce,
+    isler: planSecimi.map((k) => isler.find((x) => x.kod === k)).filter(Boolean).map((x) => ({ kod: x.kod, kategori: x.kategori || "NEW_SITE", sure_gun: x.sure_gun, sure_birim: x.sure_birim || "GUN", sure_gerekce: x.sure_gerekce,
       baslangic_tarih: x.baslangic_tarih, baslangic_saat: x.baslangic_saat,
       par: { par_id: x.par_id, kesinti: x.kesinti, kesinti_dk: x.kesinti_dk, bas: x.erisim_bas, bit: x.erisim_bit } })),
     faaliyetler: faaliyetler.map((f) => ({ ...f, sure_dk: Number(f.sure_dk) })), yol_manuel: yolManuel,
@@ -8152,9 +8152,12 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
                   {mod === "MANUEL" && <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                     <button type="button" className="rhmap-btn" onClick={() => siraTasi(x.kod, -1)} disabled={sira <= 1} aria-label="Plan sırasında yukarı">↑</button>
                     <button type="button" className="rhmap-btn" onClick={() => siraTasi(x.kod, 1)} disabled={sira >= secim.length} aria-label="Plan sırasında aşağı">↓</button></span>}
-                  <span style={{ alignSelf: "center" }}>Süre: <b>{x.sure_gun_oto != null ? `${String(x.sure_gun_oto).replace(".", ",")} ekip-gün` : "otomatik yok"}</b> <span className="rhmap-k">({x.sure_gerekce_oto})</span></span>
-                  <input placeholder={x.fiili?.kod === "DEVAM" ? "Kalan süre (gün)" : "Yeni süre (gün)"} style={{ ...girdi, width: 130 }} value={isler[i]?.sure_gun || ""} onChange={(e) => S("sure_gun", e.target.value)} />
-                  {(isler[i]?.sure_gun || "") !== "" && <input placeholder="Değişiklik gerekçesi (zorunlu)" style={{ ...girdi, width: 240 }} value={isler[i]?.sure_gerekce || ""} onChange={(e) => S("sure_gerekce", e.target.value)} />}
+                  {/* 02.11.2026: otomatik süre yoksa belirgin uyarı + ekip-gün / saat girişi (devam eden işte KALAN süre) */}
+                  {x.sure_gun_oto == null && secim.includes(x.kod) && !(isler[i]?.sure_gun || "") && <span id={`plan-sure-${x.kod}`} style={{ flexBasis: "100%", background: "#fef2f2", border: "1.5px solid #fca5a5", color: "#991b1b", borderRadius: 8, padding: "5px 9px", fontWeight: 700 }}>⏱ İş süresi gerekli — {x.sure_gerekce_oto || "otomatik süre kuralı yok"}. Aşağıya {x.fiili?.kod === "DEVAM" ? "KALAN" : "toplam"} süreyi ekip-gün ya da saat olarak ve kısa gerekçeyle girin.</span>}
+                  <span style={{ alignSelf: "center" }}>Süre: <b>{x.sure_gun_oto != null ? `${String(x.sure_gun_oto).replace(".", ",")} ekip-gün` : "otomatik yok"}</b>{x.sure_gun_oto != null && <span className="rhmap-k"> ({x.sure_gerekce_oto})</span>}</span>
+                  <input placeholder={x.fiili?.kod === "DEVAM" ? "Kalan süre" : x.sure_gun_oto == null ? "Süre (zorunlu)" : "Yeni süre"} inputMode="decimal" style={{ ...girdi, width: 120, ...(x.sure_gun_oto == null && secim.includes(x.kod) && !(isler[i]?.sure_gun || "") ? { borderColor: "#ef4444", boxShadow: "0 0 0 2px #fecaca" } : {}) }} value={isler[i]?.sure_gun || ""} onChange={(e) => S("sure_gun", e.target.value)} />
+                  <select style={{ ...girdi, width: 104 }} value={isler[i]?.sure_birim || "GUN"} onChange={(e) => S("sure_birim", e.target.value)} aria-label="Süre birimi"><option value="GUN">ekip-gün</option><option value="SAAT">saat</option></select>
+                  {(isler[i]?.sure_gun || "") !== "" && <input placeholder={x.sure_gun_oto == null ? "Süre gerekçesi (zorunlu)" : "Değişiklik gerekçesi (zorunlu)"} style={{ ...girdi, width: 240 }} value={isler[i]?.sure_gerekce || ""} onChange={(e) => S("sure_gerekce", e.target.value)} />}
                   <input placeholder="PAR ID" style={{ ...girdi, width: 120 }} value={isler[i]?.par_id || ""} onChange={(e) => S("par_id", e.target.value)} />
                   <select style={girdi} value={isler[i]?.kesinti || ""} onChange={(e) => S("kesinti", e.target.value)}><option value="">Kesinti: bekleniyor</option><option value="VAR">Kesintili çalışma</option><option value="YOK">Kesinti yok</option></select>
                   {isler[i]?.kesinti === "VAR" && <input placeholder="Kesinti (dk)" style={{ ...girdi, width: 100 }} value={isler[i]?.kesinti_dk || ""} onChange={(e) => S("kesinti_dk", e.target.value)} />}
@@ -8211,8 +8214,24 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
                 {onizleme.plan.sira_gerekce && <div style={{ fontSize: 14, marginTop: 4 }}><b>Neden bu sıra?</b> {onizleme.plan.sira_gerekce}{onizleme.plan.toplam_yol_dk != null ? ` Toplam yol ≈ ${Math.round(onizleme.plan.toplam_yol_dk)} dk.` : ""}</div>}
                 <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>Yol süresi kaynağı: {onizleme.rota?.durum === "OK" ? "rota servisi (karayolu, canlı trafik yok)" : onizleme.rota?.mesaj || "—"}{Object.keys(yolManuel).length ? " + manuel varsayımlar" : ""}</div>
                 <details style={{ marginTop: 6 }}><summary style={{ cursor: "pointer", fontWeight: 700 }}>Varsayımlar ({onizleme.plan.varsayimlar.length})</summary>{onizleme.plan.varsayimlar.map((v, i) => <div key={i} style={{ fontSize: 13 }}>• {v}</div>)}
-                  {onizleme.isler.map((x) => <div key={x.kod} style={{ fontSize: 13 }}>• {x.kod}: {x.sureGun != null ? `${String(x.sureGun).replace(".", ",")} ekip-gün — ${x.sureKaynak}` : `süre yok — ${x.sureGerekce}`}</div>)}</details>
+                  {onizleme.isler.map((x) => <div key={x.kod} style={{ fontSize: 13 }}>• {x.kod}: {x.sureGun != null || x.sureDk != null ? x.sureKaynak : `süre yok — ${x.sureGerekce}`}</div>)}</details>
+                {(() => { // 02.11.2026: seçilen / planlanan / planlanamayan sayıları
+                  const planli = new Set(onizleme.plan.gunler.flatMap((g) => g.segmentler.filter((s) => s.kod && s.tur !== "YOL").map((s) => s.kod)));
+                  const be = onizleme.plan.bilgi_eksik || [], kl = onizleme.plan.kalanlar || [];
+                  return <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, fontSize: 13 }}>
+                    <span style={{ background: "#f1f5f9", borderRadius: 999, padding: "2px 10px" }}>Seçilen <b>{onizleme.isler.length}</b></span>
+                    <span style={{ background: "#dcfce7", color: "#166534", borderRadius: 999, padding: "2px 10px" }}>Planlanan <b>{planli.size}</b></span>
+                    {be.length > 0 && <span style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 999, padding: "2px 10px" }}>Bilgi eksik <b>{be.length}</b></span>}
+                    {kl.length > 0 && <span style={{ background: "#fef3c7", color: "#92400e", borderRadius: 999, padding: "2px 10px" }}>Sonraki döneme kalan <b>{kl.length}</b></span>}
+                  </div>; })()}
               </PlanKart>
+              {(onizleme.plan.bilgi_eksik || []).length > 0 && <PlanKart style={{ borderColor: "#fca5a5", background: "#fef2f2" }}>
+                <b style={{ color: "#991b1b" }}>Bilgi eksik · Planlanamayan işler ({onizleme.plan.bilgi_eksik.length})</b>
+                <div style={{ fontSize: 12.5, color: "#7f1d1d", margin: "2px 0 4px" }}>Bunlar kapasite yüzünden değil, eksik bilgi yüzünden plana girmedi. Malzeme geliş tarihi eksikliği plana engel değildir (yalnız uyarı).</div>
+                {onizleme.plan.bilgi_eksik.map((k) => <div key={k.kod} style={{ fontSize: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "2px 0" }}>
+                  <span>• <b>{k.kod}</b> — {k.tur === "SURE" ? "İş süresi gerekli" : "Konum / yol süresi gerekli"}: {k.neden}</span>
+                  <button type="button" className="rhmap-btn" onClick={() => { setAdim("C"); setTimeout(() => document.getElementById(`plan-sure-${k.kod}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120); }}>{k.tur === "SURE" ? "Süreyi gir →" : "Düzenle →"}</button>
+                </div>)}</PlanKart>}
               {onizleme.plan.gunler.filter((g) => g.segmentler.length || g.not).map((g) => <PlanKart key={g.tarih} style={{ padding: 0, overflow: "hidden" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", background: g.calisma ? "#f1f5f9" : "#fee2e2" }}>
                   <b>{g.tarih.split("-").reverse().join(".")} {g.gun_adi}</b>{g.not && <span style={{ color: "#92400e", fontSize: 13 }}>{g.not}</span>}
@@ -8230,8 +8249,12 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <PlanB2 onClick={() => setAdim("C")}>← Düzenle</PlanB2>
               <PlanB2 onClick={onizle} disabled={yukleniyor}>{yukleniyor ? "Hesaplanıyor…" : "Yeniden önizle"}</PlanB2>
-              <PlanB2 onClick={onayla} disabled={kaydediliyor || onizleme.engeller.length > 0 || (onizleme.plan?.eksik_yollar || []).length > 0 || !onizleme.plan || !!onizleme.plan.hata}
-                style={{ background: onizleme.engeller.length || (onizleme.plan?.eksik_yollar || []).length ? "#cbd5e1" : "#15803d", color: "#fff" }}>{kaydediliyor ? "Kaydediliyor…" : "✓ Onayla ve İş Ata'ya kaydet"}</PlanB2>
+              {(() => { const bos = !!onizleme.plan && !onizleme.plan.hata && !onizleme.plan.gunler.some((g) => g.segmentler.some((s) => s.tur !== "YOL"));
+                const kapali = kaydediliyor || onizleme.engeller.length > 0 || (onizleme.plan?.eksik_yollar || []).length > 0 || !onizleme.plan || !!onizleme.plan.hata || bos;
+                return <>
+                  <PlanB2 onClick={onayla} disabled={kapali} style={{ background: kapali ? "#cbd5e1" : "#15803d", color: "#fff" }}>{kaydediliyor ? "Kaydediliyor…" : "✓ Onayla ve İş Ata'ya kaydet"}</PlanB2>
+                  {bos && <span style={{ alignSelf: "center", color: "#991b1b", fontSize: 13, fontWeight: 700 }}>Planda kaydedilecek iş yok — {(onizleme.plan.bilgi_eksik || []).length ? "yukarıdaki \"Bilgi eksik\" işlerin süresini / bilgisini girip yeniden önizleyin" : "seçilen işler döneme sığmadı"}.</span>}
+                </>; })()}
             </div>
           </>}
 
@@ -9936,7 +9959,9 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
                   <td>{row.site_physical_type}</td>
                   <td>{row.project_code}</td>
                   <td className="siteIdCell" title={row.site_code}>{row.site_code}</td>
-                  <td>{row.malzeme_status}</td>
+                  <td title={row.malzeme_kaynak === "QC" ? "Malzeme OK · bu işin RF QC kaydından çıkarıldı (teslim / stok kaydı değil)" : row.malzeme_kaynak === "MONTAJ" ? "Malzeme OK · fiilî montaj / OnAir kaydından çıkarıldı" : undefined}>
+                    {row.malzeme_status}{row.malzeme_kaynak && row.malzeme_kaynak !== "KAYIT" && <span style={{ marginLeft: 4, fontSize: 10, color: "#64748b" }}>· {row.malzeme_kaynak === "QC" ? "QC'den" : "montajdan"}</span>}
+                    {!row.malzeme_gelis_tarihi && row.malzeme_gelis_referans && <div style={{ fontSize: 10, color: "#64748b" }} title="Gerçek geliş tarihi bilinmiyor; bu işin RF QC kapanış tarihi referans olarak gösteriliyor">QC ref: {String(row.malzeme_gelis_referans).slice(0, 10).split("-").reverse().join(".")}</div>}</td>
                   <td>{row.il}</td>
 
                   <td>{row._taseron_cozum?.rf?.durum === "COKLU"
@@ -43850,7 +43875,9 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
     site_type: existingRow.site_type || "",
     site_physical_type: existingRow.site_physical_type || "",
     project_code: existingRow.project_code || "",
-    malzeme_status: existingRow.malzeme_status || "",
+    // 02.11.2026: listede türetilmiş "OK" (QC / montaj kanıtı) forma kayıtlı değer gibi alınmaz — kaydedince veritabanına
+    // yazılmasın; yalnız kayıtlı değer (malzeme_kaynak = KAYIT ya da eski yanıt) forma gelir, türetilmiş olan bilgi notu olur.
+    malzeme_status: (!existingRow.malzeme_kaynak || existingRow.malzeme_kaynak === "KAYIT") ? (existingRow.malzeme_status || "") : "",
     // 27.10.2026: gerçek malzeme geliş tarihi (RF / ENH) — BoQ sürüm önerisinin tek kaynağı
     malzeme_gelis_tarihi: existingRow.malzeme_gelis_tarihi || "",
     enh_malzeme_gelis_tarihi: existingRow.enh_malzeme_gelis_tarihi || "",
@@ -44175,13 +44202,17 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
             {naMsg}
           </div>
         ) : type === "date" ? (
-          <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"4px", position:"relative" }}>
+            {/* 02.11.2026: boş tarih kutusunda Safari bugünün tarihini soluk gösteriyordu (kayıt sanılıyordu) — boşken metin gizlenir,
+                "Tarih girilmemiş" yazar; kutuya tıklanınca normal tarih seçici açılır */}
             <input
               type="date"
+              className={form[field] ? undefined : "tarihBos"}
               value={form[field] || ""}
               onChange={(e) => handleChange(field, e.target.value)}
               style={{ flex:1 }}
             />
+            {!form[field] && <span className="tarihBosYazi">Tarih girilmemiş</span>}
             {form[field] && (
               <button
                 type="button"
@@ -44328,6 +44359,15 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
           {input("Malzeme Geliş Tarihi (RF)", "malzeme_gelis_tarihi", "date")}
           {input("ENH Malzeme Geliş Tarihi", "enh_malzeme_gelis_tarihi", "date")}
         </div>
+        {/* 02.11.2026: gerçek geliş tarihi yok, aynı işin RF QC'si OK ve QC tarihi var → yalnız REFERANS (alana yazılmaz, BoQ'yu değiştirmez) */}
+        {!form.malzeme_gelis_tarihi && String(existingRow.qc_durum || "").toUpperCase() === "OK" && (
+          <div style={{ fontSize:"12px", color:"#475569", background:"#f1f5f9", border:"1px dashed #cbd5e1", borderRadius:"8px", padding:"6px 10px", margin:"6px 0 0" }}>
+            {existingRow.qc_closed_date ? <>Gerçek geliş tarihi bilinmiyor · <b>QC referans tarihi: {String(existingRow.qc_closed_date).slice(0, 10).split("-").reverse().join(".")}</b> (bu işin RF QC kaydından; malzeme geliş tarihi alanına yazılmadı)</> : <>Malzeme OK · QC kaydından çıkarıldı — QC tarihi de kayıtlı değil, geliş tarihi bilinmiyor</>}
+          </div>
+        )}
+        {!form.malzeme_status && existingRow.malzeme_kaynak && existingRow.malzeme_kaynak !== "KAYIT" && (
+          <div style={{ fontSize:"12px", color:"#475569", margin:"4px 0 0" }}>Listede "Malzeme OK" görünür: {existingRow.malzeme_kaynak === "QC" ? "bu işin RF QC kaydından" : "fiilî montaj / OnAir kaydından"} çıkarıldı (kayıtlı malzeme durumu yok; teslim / stok bilgisi değildir).</div>
+        )}
         <div style={{ fontSize:"11px", color:"#64748b", margin:"4px 0 0" }}>Malzeme geliş tarihi = malzemenin sahaya/depoya GERÇEK varış günü (Excel yükleme ya da kayıt tarihi değil). 12.10.2026 öncesi → 2025 BoQ, 12.10.2026 ve sonrası → 2026 BoQ önerilir.</div>
 
         {/* ===== RF ===== */}
