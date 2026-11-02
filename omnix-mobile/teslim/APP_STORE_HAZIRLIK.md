@@ -12,6 +12,20 @@ Satıcı/geliştirici hesabı: Orhan BEDR (bireysel, team 42H743X873). Platform 
 
 ---
 
+## 0a. GÖNDERİLDİ — 26.10.2026 12:28 (Orhan onayıyla): iOS 1.0.0 (build 9) "Waiting for Review"
+App Privacy beyanı aynı gün girilip yayımlandı (6 tür, App Functionality, kullanıcıya bağlı, izleme yok). App Review iletişim
+bilgisi girildi. Yayın tipi manuel: Apple onayı gelince App Store Connect → "Release This Version" Orhan'da.
+
+## 0. App Store Connect durumu — 26.10.2026 (API ile girildi)
+Girildi: ad + altyazı + gizlilik URL · kategori İş · sürüm **1.0.0** (build **9**, üretim; telif; yayın **manuel**) · açıklama,
+anahtar kelimeler, promosyon metni, destek/pazarlama URL'leri · 8 ekran görüntüsü (6,9") · yaş 4+ · ücretsiz · yalnız Türkiye ·
+üçüncü taraf içerik yok · App Review bilgisi (Orhan Bedir, telefon, e-posta; demo hesap demo.personel; İngilizce not — üç demo
+hesap not içinde). Build 9: şifreleme muaf (`usesNonExemptEncryption=false`), iOS 15.1+.
+Demo firma canlıda: izole `omnixdemo` "Omnix Demo Telekom"; hesaplar demo.personel / demo.yonetici (Şirket sahibi) / demo.taseron
+(Demo Montaj) — şifre Orhan'ın belirlediği ortak şifre (yalnız ASC notunda).
+**Kalan (elle, ASC arayüzü):** App Privacy beyanı (bölüm 6'daki cevaplar; API'den girilemiyor) → sonra "Add for Review" (Orhan onayı).
+İsteğe bağlı: ekran kaydı (bölüm 2), test cihazı bilgisi.
+
 ## 1. App Review Information → Notes (İngilizce, yapıştırmaya hazır)
 
 Köşeli parantezli yerler gönderimden önce doldurulur.

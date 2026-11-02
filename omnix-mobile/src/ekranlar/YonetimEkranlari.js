@@ -53,7 +53,8 @@ export function YonetimAnaSayfa({ navigation }) {
             </Pressable>
           </View>
           <Metin tur="baslikXL" renk="#fff" style={{ marginTop: aralik.l }} numberOfLines={1}>Merhaba{ad ? `, ${ad}` : ""}</Metin>
-          <Metin tur="kucuk" renk="#C7D3E3" numberOfLines={1}>{[profilAdi(kullanici) || rolAdi(kullanici?.role), o?.firma?.ad || kullanici?.marka_ad].filter(Boolean).join(" · ")}</Metin>
+          {/* İzole firmada marka tanımı yoktur: firma adı kod ("ERC") olarak dönerse firmanın (tenant) adı gösterilir */}
+          <Metin tur="kucuk" renk="#C7D3E3" numberOfLines={1}>{[profilAdi(kullanici) || rolAdi(kullanici?.role), (o?.firma?.ad && o.firma.ad !== o.firma.kod ? o.firma.ad : null) || kullanici?.marka_ad || kullanici?.tenant_name].filter(Boolean).join(" · ")}</Metin>
         </View>
         <BaglantiBandi />
         <View style={{ paddingHorizontal: aralik.m, marginTop: -48 }}>
