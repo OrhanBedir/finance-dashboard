@@ -1267,8 +1267,9 @@ const MALI_YETKI_MATRISI = [
   // 29.10.2026 (Orhan: "AHY tarafı kendi yaptığı işleri full görebilmeli, fiyat maaşlar ne varsa"): AHY Elektrik yönetim hesabı —
   // canlı kayıttan salt-okunur doğrulandı: id 359, info@ahyelektrik.com, admin, marka AHY; AHY markasında tek yönetim hesabı
   // (diğerleri saha personeli / UBS taşeron hesabı — değişmez; Emre Akdeğirmen dahil AHY backofisi fiyat görmez). Kapsam yalnız AHY.
-  // 01.11.2026 (Orhan): AHY yönetim hesabında maaş KAPALI (fiyat / mali tutar AHY kapsamında açık kalır)
-  { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true, maas: false },
+  // 01.11.2026'da maaş kapatılmıştı; 02.11.2026 (Orhan: "AHY kullanıcısına full yetki — yalnız AHY sahaları ve AHY'nin çalıştığı
+  // periyottaki eleman maaşları ve nakit akışları") → maaş AÇIK, kapsam yalnız AHY (mali_kapsam AHY: AHY kadrosu + AHY dönemi)
+  { id: 359, email: "info@ahyelektrik.com", ad: "AHY Elektrik (yönetim hesabı)", kapsam: "AHY", dogrulandi: true },
   // 30.10.2026 (Orhan): Nurcan Kuş ve Serdar Altınova — fiyat AÇIK, maaş KAPALI, fiyat değiştirme / ödeme / finans kaydı YOK.
   // Kimlik 29.10.2026 canlı salt-okunur kayıttan: id 2 nurcan.kus@ ve id 3 serdar.altinova@ (rollout_mudur, marka ERC; her
   // e-postada tek hesap). Veri kapsamları değişmez (mevcut rol / ekran kapsamı). Personel giriş-çıkış ve banka bilgisi mevcut
