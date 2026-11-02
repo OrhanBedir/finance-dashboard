@@ -5343,6 +5343,9 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
         const rows = [...grup.values()].map(g => {
           const cr = cariBul(g.ad);
           const mat = Number(cr?.pb?.TRY?.matrah || 0);
+          // 02.11.2026: hakediş esaslı cari (TEKNO_EMRAH, TEKNO_SEYFİ) fatura beklemez — borç onaylı hakediştir (cari penceresinde);
+          // paket kuralı tutarı bu taşeronla anlaşılmış fiyat değildir, toplamlara ve "fatura bekleyen"e girmez
+          if (cr?.cari_modeli === "HAKEDIS") return { ...g, cari: cr, hakedisCari: true, kuralBedel: g.bedel, bedel: 0, faturalanan: 0, bekleyen: 0, fazlaFatura: 0 };
           return { ...g, cari: cr, faturalanan: mat, bekleyen: Math.max(0, g.bedel - mat), fazlaFatura: Math.max(0, mat - g.bedel) };
         }).sort((a, b) => (b.bekleyen - a.bekleyen) || (b.bedel - a.bedel));
         if (rows.length === 0) return null;
@@ -5369,14 +5372,16 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                   headers: ["Taşeron (iş etiketi)", "Firma kartı", "İş Kalemi", "Hakediş Bedeli (KDV Hariç)", "Faturalanan Matrah (KDV Hariç)", "Fatura Bekleyen Hakediş (KDV Hariç)", "Kalan Fatura Borcu (KDV Dahil)"],
                   colWidths: [30, 30, 10, 20, 20, 22, 20],
                   numericCols: [3, 4, 5, 6],
-                  rows: rowsF.map(r => [r.ad, r.cari ? r.cari.ad : "eşleşen firma kartı yok", r.isSayisi || "", r.bedel, r.faturalanan, r.bekleyen, Number(r.cari?.pb?.TRY?.kalan || 0)]),
+                  rows: rowsF.map(r => r.hakedisCari
+                    ? [r.ad, `${r.cari.ad} (hakediş esaslı cari — fatura beklenmez)`, r.isSayisi || "", "", "", "", ""]
+                    : [r.ad, r.cari ? r.cari.ad : "eşleşen firma kartı yok", r.isSayisi || "", r.bedel, r.faturalanan, r.bekleyen, Number(r.cari?.pb?.TRY?.kalan || 0)]),
                   extraSheets: [{
                     sheetName: "Hakediş Saha Dökümü",
                     title: `${currentUser?.marka_ad || marka} — Taşeron Bedeli Saha Dökümü (fatura onayı için, KDV hariç)`,
                     headers: ["Taşeron", "Saha", "Paket / Kalem", "Adet", "Birim (KDV Hariç)", "Tutar (KDV Hariç)", "QC (Ana Kalemler)"],
                     colWidths: [30, 22, 36, 7, 16, 16, 15],
                     numericCols: [3, 4, 5],
-                    rows: rowsF.filter(r => (r.detay || []).length > 0).flatMap(r => [
+                    rows: rowsF.filter(r => !r.hakedisCari && (r.detay || []).length > 0).flatMap(r => [
                       ...r.detay.map(d => [r.ad, d.site || "", d.kalem || "", Number(d.adet || 0), Number(d.birim || 0), Number(d.tutar || 0), d.qc || ""]),
                       { cells: ["", `${r.ad} — HAKEDİŞ TOPLAMI (KDV HARİÇ)`, "", "", "", Number(r.bedel || 0), ""], bold: true, merge: [1, 4] },
                     ]),
@@ -5401,7 +5406,14 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                       <td style={tdS}>
                         <div style={{ fontWeight: 700 }}>{r.ad}</div>
                         <div style={{ fontSize: "10.5px", color: r.cari ? "#94a3b8" : "#b45309" }}>{r.cari ? `firma kartı: ${r.cari.ad}` : "⚠ eşleşen firma kartı yok — faturalar bu etikete bağlanamadı"}{r.isSayisi > 0 ? ` · ${r.isSayisi} iş kalemi` : ""}</div>
+                        {r.hakedisCari && <span title="Fatura yerine doğrulanmış iş ve onaylı hakediş üzerinden izlenir" style={{ display: "inline-block", marginTop: "3px", padding: "1px 7px", borderRadius: "999px", background: "#ede9fe", color: "#5b21b6", fontSize: "10.5px", fontWeight: 800 }}>Hakediş esaslı cari</span>}
                       </td>
+                      {r.hakedisCari ? (
+                        <td colSpan={4} style={{ ...tdS, fontSize: "11.5px", color: "#5b21b6" }}>
+                          Fatura beklenmez — borç onaylı hakediştir; iş, hakediş, avans ve mahsup cari penceresinde.
+                          {r.kuralBedel > 0 && <span style={{ color: "#94a3b8" }}> (Paket kuralı tutarı ₺{fmt(r.kuralBedel)} bu taşeronla anlaşılmış fiyat değildir, hesaba katılmadı.)</span>}
+                        </td>
+                      ) : <>
                       <td style={num}>
                         {r.bedel > 0 ? (
                           <button onClick={() => setBedelDetay({ ad: r.ad, bedel: r.bedel, detay: r.detay })} title="Hesap dökümünü görmek için tıklayın"
@@ -5413,9 +5425,10 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                       <td style={num}>{r.faturalanan > 0 ? `₺${fmt(r.faturalanan)}` : "—"}{r.fazlaFatura > 0.5 && <div style={{ fontSize: "10px", color: "#b45309" }}>hakedişten ₺{fmt(r.fazlaFatura)} fazla</div>}</td>
                       <td style={{ ...num, fontWeight: 800, color: r.bekleyen > 0 ? "#6d28d9" : "#15803d" }}>{r.bekleyen > 0 ? `₺${fmt(r.bekleyen)}` : "—"}</td>
                       <td style={{ ...num, color: Number(r.cari?.pb?.TRY?.kalan || 0) > 0 ? "#b45309" : "#94a3b8" }}>{r.cari ? `₺${fmt(r.cari.pb?.TRY?.kalan || 0)}` : "—"}</td>
+                      </>}
                       <td style={{ ...tdS, whiteSpace: "nowrap" }}>
                         {r.cari && <button onClick={() => cariAc(r.cari.anahtar)}
-                          style={{ padding: "6px 12px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>💸 Ödeme Gir</button>}
+                          style={{ padding: "6px 12px", background: r.hakedisCari ? "#5b21b6" : "#9d174d", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>{r.hakedisCari ? "🧾 Cariyi Aç" : "💸 Ödeme Gir"}</button>}
                       </td>
                     </tr>
                   ))}
