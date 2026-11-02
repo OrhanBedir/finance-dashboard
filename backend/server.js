@@ -7837,8 +7837,11 @@ app.post("/master/saha-kalemler/kaydet", authMiddleware, async (req, res) => {
 
     await client.query("COMMIT");
     for (const [fn, id] of boqLoglar) await fn(id);
+    // 02.11.2026: grid kaydı da Rollout satırını açar / boş alanlarını doldurur (önce yalnız "ekleme" ucu yapıyordu;
+    // BI0018_NR700_MWA gibi işler Günlük İş Girişi'nde olup Rollout'ta görünmüyordu). Hata kaydı engellemez.
+    const rolloutSync = await syncRolloutTargets([site]).catch((e) => ({ hata: e.message }));
     const esit = await rolloutTaseronEsitle([site], req, "Günlük İş Girişi (grid)").catch((e) => ({ hata: e.message, degisen: [] }));
-    res.json({ ok: true, guncellenen, eklenen, boq_surum: boqSurum, boq_uyari: boqUyari, taseron_esitleme: esit.degisen });
+    res.json({ ok: true, guncellenen, eklenen, boq_surum: boqSurum, boq_uyari: boqUyari, taseron_esitleme: esit.degisen, rollout: rolloutSync });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("SAHA KALEM KAYDET ERROR:", err.message);
@@ -8230,6 +8233,23 @@ app.get("/finance/supplier-advances", finansOkuma, async (req, res) => {
   }
 });
 
+// 02.11.2026 (Orhan): montaja girilen işte malzeme gelmiştir — fiilî montaj başlangıcı (Rollout "Installation Start Date",
+// installation_actual_start_date) dolu, malzeme geliş tarihi boşsa geliş tarihi montaj başlangıç günü yazılır. Yalnız BOŞ alan
+// doldurulur (elle girilen / HW Malzeme kabulünden gelen tarih ezilmez); ileri tarihli montaj tarihi kullanılmaz.
+// siteCodes verilirse yalnız o işler; boşsa tümü. Döner: güncellenen [{ id, site_code, eski, yeni }].
+async function malzemeTarihiMontajdan(db, siteCodes = null, req = null, kaynak = "Rollout") {
+  const kodlar = Array.isArray(siteCodes) ? siteCodes.map((x) => String(x || "").trim().toUpperCase()).filter(Boolean) : null;
+  if (kodlar && !kodlar.length) return [];
+  const r = await db.query(`UPDATE rollout_progress SET malzeme_gelis_tarihi = installation_actual_start_date::date, updated_at = NOW()
+      WHERE malzeme_gelis_tarihi IS NULL AND installation_actual_start_date IS NOT NULL
+        AND installation_actual_start_date::date <= (NOW() AT TIME ZONE 'Europe/Istanbul')::date
+        ${kodlar ? "AND UPPER(TRIM(site_code)) = ANY($1::text[])" : ""}
+      RETURNING id, site_code, to_char(malzeme_gelis_tarihi,'YYYY-MM-DD') AS yeni`, kodlar ? [kodlar] : []);
+  for (const x of r.rows) await islemGecmisiYaz(req || { user: { email: "sistem" } }, "rollout", x.id, "MALZEME_TARIHI_OTOMATIK",
+    { malzeme_gelis_tarihi: null }, { malzeme_gelis_tarihi: x.yeni }, `${x.site_code} · montaj başlangıcından otomatik (${kaynak})`).catch(() => {});
+  return r.rows;
+}
+
 async function syncRolloutTargets(siteCodesFilter = []) {
   const client = await pool.connect();
 
@@ -8308,12 +8328,19 @@ async function syncRolloutTargets(siteCodesFilter = []) {
       const itemCode = String(row.item_code || "").trim();
       const doneQty = Number(row.done_qty || 0);
 
-      if (!siteCode || doneQty <= 0) continue;
+      if (!siteCode) continue;
 
       const siteType = detectType(row);
       const validCodes = targetItemCodes[siteType] || [];
 
-      if (!validCodes.includes(itemCode)) continue;
+      // 02.11.2026: sabit kod listesi (2025 BoQ) yeni BoQ kodlarını (ör. 8812489291 NR700 band ilavesi) kaçırıyordu.
+      // Günlük İş Girişi'nde RF kurulum kalemi (kurulum / band ilavesi / modernizasyon / swap / söküm — taseronCozum.kalemKolu)
+      // olan iş Rollout'a da yazılır. As-built, TSSR, BTK, LOS gibi yalnız belge/izin kalemleri Rollout satırı AÇMAZ.
+      const rfKurulum = taseronCozum.kalemKolu(row.item_description) === "rf";
+      const eskiKural = doneQty > 0 && validCodes.includes(itemCode);
+      if (!rfKurulum && !eskiKural) continue;
+      // Eski kurala uyan kalem varsa site eski davranışla (malzeme OK + plan tarihi) işlenir
+      if (eskiKural && candidateMap.has(siteCode)) candidateMap.get(siteCode).eski_kural = true;
 
       if (!candidateMap.has(siteCode)) {
         candidateMap.set(siteCode, {
@@ -8326,9 +8353,13 @@ async function syncRolloutTargets(siteCodesFilter = []) {
           rf_subcon: row.subcon_name || "",
           onair_date: row.onair_date || null,
           plan_start_date: row.onair_date || today,
+          eski_kural: eskiKural,
         });
       }
     }
+    // 02.11.2026: yalnız yeni kuralla (RF kurulum kalemi) açılan işte malzeme durumu ve plan tarihi UYDURULMAZ:
+    // "OK" malzemeyi gelmiş gösterir (Malzeme sayacı), bugün tarihi de planlanmış gösterir — ikisi boş kalır.
+    for (const c of candidateMap.values()) if (!c.eski_kural) c.plan_start_date = c.onair_date || null;
 
     // 28.10.2026: RF taşeronu ilk satırdan değil ortak çözümden: RF iş kolunda tek taşeron → tam adı; birden fazla → boş
     // (kontrol gerekli, sessiz seçim yok). Mevcut kayıtta yalnız boşsa doldurulur; tam ad güncellemesi rolloutTaseronEsitle'de.
@@ -8380,7 +8411,7 @@ async function syncRolloutTargets(siteCodesFilter = []) {
             row.rf_subcon,
             row.plan_start_date,
             row.onair_date,
-            "OK",
+            row.eski_kural ? "OK" : null,
           ],
         );
 
@@ -8399,7 +8430,7 @@ async function syncRolloutTargets(siteCodesFilter = []) {
             bolge = COALESCE(NULLIF(bolge, ''), $5),
             il = COALESCE(NULLIF(il, ''), $6),
             rf_subcon = COALESCE(NULLIF(rf_subcon, ''), $7),
-            malzeme_status = COALESCE(NULLIF(malzeme_status, ''), 'OK'),
+            malzeme_status = CASE WHEN $9::boolean THEN COALESCE(NULLIF(malzeme_status, ''), 'OK') ELSE malzeme_status END,
             updated_at = NOW()
           WHERE id = $8
           `,
@@ -8412,6 +8443,7 @@ async function syncRolloutTargets(siteCodesFilter = []) {
             row.il,
             row.rf_subcon,
             old.id,
+            !!row.eski_kural,
           ],
         );
 
@@ -12663,7 +12695,9 @@ app.post("/rollout/upload", upload.single("file"), async (req, res) => {
       );
     }
 
-    res.json({ ok: true, count: allRows.length });
+    // 02.11.2026: Excel'le gelen montaj başlangıçları için boş malzeme geliş tarihlerini doldur
+    const malzOto = await malzemeTarihiMontajdan(pool, allRows.map((x) => x.site_code), req, "Rollout Excel yükleme").catch(() => []);
+    res.json({ ok: true, count: allRows.length, malzeme_tarihi_otomatik: malzOto.length });
   } catch (err) {
     console.error("ROLLOUT UPLOAD ERROR:", err);
     res.status(500).json({ error: err.message });
@@ -13174,6 +13208,9 @@ app.post("/rollout/update", authMiddleware, async (req, res) => {
     const fark = rolloutFark(eskiKayit, yeniKayit);
     if (!eskiKayit || fark.degisti)
       await islemGecmisiYaz(req, "rollout", result.rows[0].id, eskiKayit ? "DUZENLEME" : "OLUSTURMA", fark.eski, fark.yeni, data.site_code);
+    // 02.11.2026: montaj başlangıcı girildiyse ve malzeme geliş tarihi boşsa otomatik doldur
+    const malzOto = await malzemeTarihiMontajdan(pool, [data.site_code], req, "Rollout güncelle").catch(() => []);
+    if (malzOto.length) result.rows[0].malzeme_gelis_tarihi = malzOto[0].yeni;
     // Firma hesabı: başka firmanın iş koluna / ortak saha bilgisine ait gönderilen değişiklikler uygulanmadı
     const korunan = req.rolloutKorunan || [];
     res.json({ ok: true, row: req.markaRollout ? markaRolloutMaskele(req.markaRollout, [result.rows[0]])[0] : result.rows[0],
