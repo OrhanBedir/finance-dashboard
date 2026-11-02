@@ -11,6 +11,7 @@ import ReactCrop, { centerCrop, makeAspectCrop } from "react-image-crop";
 // lisans: src/data/tr-iller.LICENSE.txt). Uygulamaya gömülüdür; çalışma anında dış harita servisi/tile kullanılmaz.
 import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
+import { AtananIsModal, atananExcel, paraMetni } from "./atananIs.jsx"; // 02.11.2026: Teknocenter Atanan İş Tutarı (PR + PO → BoQ)
 import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
 import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
@@ -32346,6 +32347,20 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       .catch(() => {});
     return () => { iptal = true; };
   }, [_paketTaseron]);
+  // 02.11.2026 (Orhan): Teknocenter "Atanan İş Tutarı" — PR talebi olan tüm işler (fiziki / QC / PO şartı yok);
+  // fiyat önce doğrulanmış Huawei PO satırı, yoksa PR'daki BoQ sürümü. Kart, detay listesi ve Excel tek kaynaktan.
+  const _atananOrtak = isSubconUser && canonTaseron(userSubconName) === "tekno";
+  const [atananVeri, setAtananVeri] = useState(null);
+  const [atananHata, setAtananHata] = useState("");
+  const [atananModal, setAtananModal] = useState(false);
+  useEffect(() => {
+    if (!_atananOrtak) return;
+    let iptal = false;
+    fetchJson(`${API_BASE}/finance/atanan-is`)
+      .then(d => { if (iptal) return; if (d.ok) setAtananVeri(d); else setAtananHata(d.error || "Atanan iş hesaplanamadı"); })
+      .catch(e => { if (!iptal) setAtananHata(e.message || "Atanan iş hesaplanamadı"); });
+    return () => { iptal = true; };
+  }, [_atananOrtak]);
   // 14.10.2026 (Orhan): paket fiyatlı taşeron (FERRUMX) Şimşek'in HW PO fiyatlarını
   // görmez — özet kartındaki tutarlar yalnız kendi anlaşma paket fiyatlarıdır.
   // Fiziki = tüm paket kalemleri (QC OK + NOK); QC Onaylı = QC OK paketler
@@ -33040,7 +33055,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
   // Taşeron kartı HUNİ kurgusu (16.07.2026): Atanan (PO talebi) →
   // Fiziki Tamamlanan (günlük iş girişindeki done) → QC Onaylı → HW'ye Faturalanan.
   // Her aşama bir öncekinin içinden ilerler; yüzdeler aşamalar arası makası gösterir.
-  const _atanan  = (executiveSummary.assigned  || 0);
+  // Teknocenter: ortak hesabın TL toplamı; USD kalem varsa yalnız YÜZDE için ekrandaki kurla eklenir (tutar satırında ayrı gösterilir)
+  const _atanan  = _atananOrtak
+    ? (atananVeri ? Number(atananVeri.ozet?.toplam?.TRY || 0) + Number(atananVeri.ozet?.toplam?.USD || 0) * usdRate : 0)
+    : (executiveSummary.assigned  || 0);
   const _fiziki  = ahyLockedFiziki !== null ? ahyLockedFiziki : (executiveSummary.fiziki || 0);
   const _qcOk    = (executiveSummary.qcOk      || 0);
   const _fatura  = (executiveSummary.invoiced  || 0);
@@ -33085,13 +33103,44 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
         >
           {isSubconUser ? `${subconDisplayName} GENEL ÖZET` : "GENEL ÖZET"}
           <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px", letterSpacing: "0.2px", textTransform: "none" }}>
-            {_paketTaseron ? "Tutarlar KDV hariç · anlaşma paket fiyatları" : `Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
+            {_paketTaseron ? "Tutarlar KDV hariç · anlaşma paket fiyatları"
+              : _atananOrtak ? "Tutarlar KDV hariç · Atanan İş: PR miktarı × PO fiyatı (PO yoksa BoQ) · diğer satırlar: HW PO fiyatı × gerçekleşen miktar"
+              : `Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
           </div>
         </div>
 
         <div style={{ background: "#f9fafb" }}>
           {isSubconUser ? (
             <>
+              {_atananOrtak ? (
+                <div onClick={() => atananVeri && setAtananModal(true)} title={atananVeri ? "Kalem bazlı detay için tıklayın" : undefined}
+                  style={{ padding: "10px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", cursor: atananVeri ? "pointer" : "default" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ color: "#374151" }}>Atanan İş Tutarı (PR talebi){atananVeri && <span style={{ marginLeft: 6, fontSize: "11px" }}>🔍</span>}</div>
+                    <div style={{ fontWeight: 600, color: "#111827", textAlign: "right" }}>
+                      {atananVeri ? formatMoneyByCurrency(atananVeri.ozet?.firma_tutar?.TRY || 0, "TRY") : atananHata ? "—" : "hesaplanıyor…"}
+                      {Number(atananVeri?.ozet?.firma_tutar?.USD || 0) > 0 && <div style={{ fontSize: 11, color: "#6b7280" }}>+ {formatMoneyByCurrency(atananVeri.ozet.firma_tutar.USD, "USD")} (USD ayrı)</div>}
+                    </div>
+                  </div>
+                  {atananHata && <div style={{ fontSize: "10.5px", color: "#b91c1c" }}>{atananHata}</div>}
+                  {atananVeri && (() => {
+                    const o = atananVeri.ozet || {};
+                    return (
+                      <div style={{ fontSize: "10.5px", color: "#6b7280", marginTop: 2, lineHeight: 1.45 }}>
+                        <div>{o.kapsam?.kalem || 0} kalem · {o.kapsam?.is_kaydi || 0} iş kaydı · {o.kapsam?.fiziksel_saha || 0} fiziksel saha · {o.fiziki_baslamamis || 0} kalem fiziki başlamamış</div>
+                        <div><span style={{ color: "#047857" }}>PO fiyatıyla {paraMetni(o.po_fiyatli)}</span> ({o.po_kalem || 0} kalem) · <span style={{ color: "#b45309" }}>BoQ üzerinden geçici {paraMetni(o.boq_gecici)}</span> ({o.boq_kalem || 0} kalem, PO bekleniyor)</div>
+                        {(o.fiyatsiz?.kalem > 0 || o.miktar_supheli?.kalem > 0) && (
+                          <div style={{ color: "#b91c1c" }}>
+                            ⚠️ {o.fiyatsiz?.kalem > 0 ? `${o.fiyatsiz.kalem} kalemde fiyat doğrulanamadı — toplam eksik` : ""}
+                            {o.fiyatsiz?.kalem > 0 && o.miktar_supheli?.kalem > 0 ? " · " : ""}
+                            {o.miktar_supheli?.kalem > 0 ? `${o.miktar_supheli.kalem} kalemde miktar doğrulanamadı (toplama eklenmedi)` : ""}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
               <Row label={_paketTaseron ? "Atanan İş Tutarı (paket fiyatıyla)" : "Atanan İş Tutarı (PO talebi)"} value={_paketTaseron ? _pkFiziki : subconSummary.atananIs}
                 onClick={() => {
                   // Paket fiyatlı taşeron PO tutarını değil kendi alacağı bedeli görür
@@ -33148,6 +33197,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
                     rows: list,
                   });
                 }} />
+              )}
 
               {/* ── Hakediş Oranları: RF & Gizleme (paket fiyatlı taşeronda kırılım yok → gizli) ── */}
               {!_paketTaseron && <div style={{ padding:"12px 16px", borderBottom:"1px solid #e5e7eb", background:"#fff" }}>
@@ -34591,6 +34641,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       })()}
 
       {/* Excel görünümlü özet detay modalı (QC Tamamlanma / HW Fatura Onay Bekler) */}
+      {atananModal && atananVeri && (
+        <AtananIsModal veri={atananVeri} onClose={() => setAtananModal(false)}
+          onExcel={() => atananExcel(atananVeri, exportStandardExcel, "Teknocenter").catch(e => alert("Excel indirilemedi: " + e.message))} />
+      )}
       {ozetModal && (
         <div
           onClick={() => setOzetModal(null)}

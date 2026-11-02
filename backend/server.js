@@ -11484,6 +11484,34 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
 // görür (radyolu 52.000 / radyosuz 40.000 + LPRT/One Band ekstraları).
 // FERRUMX kapsamı hem "FERRUMX" (Şimşek'e direkt) hem "AHY_FERRUMX" (AHY
 // üzerinden) satırlarını içerir; kaynak her satırda ayrıca döner. (07.08.2026)
+// ── ATANAN İŞ TUTARI (02.11.2026, Orhan): Bölge Analizi kartı + detay listesi + Excel'in ORTAK kaynağı (atananIs.js) ──
+// Kapsam: oturumdaki firma (taşeron / alt marka) — sorgu parametresiyle değiştirilemez; yalnız admin ?taseron= ile bakabilir.
+// /finance altında olduğu için fiyat görme yetkisi olmayan hesap 403 alır (fiyat katmanı).
+const atananIs = require("./atananIs");
+app.get("/finance/atanan-is", authMiddleware, async (req, res) => {
+  try {
+    const k = taseronOkumaKapsami(req);
+    if (k.status) return res.status(k.status).json({ ok: false, error: k.hata });
+    let kapsam = k.kapsam;
+    if (!kapsam) {
+      if (!["admin", "platform_admin"].includes(String(req.user?.role || "").toLowerCase()))
+        return res.status(403).json({ ok: false, error: "Firma kapsamı yok" });
+      kapsam = String(req.query.taseron || "").trim();
+      if (!kapsam) return res.status(400).json({ ok: false, error: "taseron parametresi gerekli" });
+    }
+    const pay = altMarkaPayOf(kapsam.toLowerCase());
+    const d = await atananIs.yukle(pool, { eslesir: (ad) => subconRowMatches(kapsam, ad), pay: pay ?? 1, bolgeOf: getRegionFromSiteCode });
+    // Fiyat kaynağı değişiklik günlüğü (tablo varsa; yoksa sessizce atlanır) + kalemin önceki kaynakları
+    await atananIs.kaynakGecmisiYaz(pool, d.satirlar.filter((s) => s.durum !== "HARIC"), req.user?.email).catch((e) => console.error("ATANAN GECMIS:", e.message));
+    const gecmis = await atananIs.kaynakGecmisiOku(pool, d.satirlar.map((s) => s.id)).catch(() => new Map());
+    for (const s of d.satirlar) { const g = gecmis.get(s.id); if (g && g.length > 1) s.kaynak_gecmisi = g; }
+    res.json({ ok: true, kapsam, hakedis_orani_tanimli: pay !== null, ...d });
+  } catch (e) {
+    console.error("ATANAN IS:", e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get("/finance/subcon-paket-bedel", authMiddleware, async (req, res) => {
   try {
     const scopeName = subconScope(req) || String(req.query.sub || "").trim();
