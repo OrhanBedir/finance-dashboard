@@ -17,8 +17,9 @@ import { apiPost } from "../api";
 import { UYGULAMA_SURUM } from "../EkranHata";
 
 export default function LoginScreen({ onLoginSuccess }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  // 02.11.2026: yalnız yerel geliştirme — Expo start ortam değişkeniyle test hesabı ön doldurulur; üretim derlemesinde bu değişkenler yoktur
+  const [email, setEmail] = useState(process.env.EXPO_PUBLIC_TEST_EMAIL || "");
+  const [password, setPassword] = useState(process.env.EXPO_PUBLIC_TEST_PASSWORD || "");
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
 

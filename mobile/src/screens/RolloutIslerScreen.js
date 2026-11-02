@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal,
-  Alert, ActivityIndicator, Platform, SafeAreaView, RefreshControl, Linking,
+  Alert, ActivityIndicator, Platform, SafeAreaView, RefreshControl, Linking, AppState,
 } from "react-native";
 import { apiGet, apiPost } from "../api";
 import { fiiliBildir } from "./OperasyonScreens"; // 31.10.2026: issue / engel bildirimi (QC'den bağımsız fiilî durum)
+// 02.11.2026: çevrimdışı kuyruk (aynı istek anahtarıyla yeniden gönderim), inceleme listesi, otomatik yenileme
+import { kuyrukluGonder, kuyrukBosalt, kuyrukDurumu, kuyrukDinle, incelemeTemizle } from "../kuyruk";
+const YENILEME_MS = 45000; // ekran açıkken aralıklı yenileme (ücretli servis yok; mevcut REST uçları)
+const fmtZaman = (iso) => { if (!iso) return "—"; const t = new Date(iso); return isNaN(t) ? "—" : `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`; };
 
 /* ═══ ROLLOUT · İŞLERİM (Faz 1, 03.09.2026) ═══════════════════════════════
    Merkezden atanan işler (New Site Montaj, ENH, Survey, MW, On Air, Power,
@@ -44,6 +48,10 @@ export default function RolloutIslerScreen({ user, navigation }) {
   const [sekme, setSekme] = useState("bekleyen");
   const [bekleyen, setBekleyen] = useState([]);
   const [tamamlanan, setTamamlanan] = useState([]);
+  const [gecmis, setGecmis] = useState([]);               // iptal / başka ekibe aktarılan (02.11.2026)
+  const [senkron, setSenkron] = useState({ bekleyen: [], inceleme: [], son_sync: null, hata: null });
+  const [sahaSec, setSahaSec] = useState(null);           // çok sahalı atamada hangi iş için bildirim
+  const oncekiRef = useRef(null);                         // uygulama içi "yeni iş / plan değişti / aktarıldı" bildirimi için
   const [yukleniyor, setYukleniyor] = useState(true);
   const [yenileniyor, setYenileniyor] = useState(false);
   const [secili, setSecili] = useState(null);      // detay
@@ -59,17 +67,51 @@ export default function RolloutIslerScreen({ user, navigation }) {
   const yukle = useCallback(async (sessiz) => {
     if (!sessiz) setYukleniyor(true);
     try {
+      await kuyrukBosalt().catch(() => {});
       const d = await apiGet("/is-atama/benim");
-      if (d && d.ok) { setBekleyen(d.bekleyen || []); setTamamlanan(d.tamamlanan || []); }
-      else if (d?.error) Alert.alert("Hata", d.error);
-    } catch (e) { Alert.alert("Hata", e.message); }
-    finally { setYukleniyor(false); setYenileniyor(false); }
+      if (d && d.ok) {
+        const yeni = d.bekleyen || [];
+        // Uygulama içi bildirim (push altyapısı yok): önceki listeyle fark → "Yeni iş atandı" / "Plan değişti" / "Başka ekibe aktarıldı"
+        const onceki = oncekiRef.current;
+        if (onceki && sessiz) {
+          const yeniIs = yeni.filter((x) => !onceki.ids.has(x.id));
+          // yalnız PLAN alanları (tarih / saat / ekip) değiştiyse "plan değişti" — kendi başla / bitir işlemimiz updated_at'i değiştirir, bildirim sayılmaz
+          const planImza = (x) => `${x.plan_tarihi}|${x.plan_baslangic || ""}|${x.plan_bitis || ""}|${x.ekip_no || ""}`;
+          const degisen = yeni.filter((x) => onceki.ids.has(x.id) && onceki.guncel[x.id] && planImza(x) !== onceki.guncel[x.id]);
+          const giden = (d.gecmis || []).filter((x) => onceki.ids.has(x.id));
+          const m = [];
+          if (yeniIs.length) m.push(`Yeni iş atandı: ${yeniIs.map((x) => (x.site_codes || []).join(", ")).join(" · ")}`);
+          if (degisen.length) m.push(`Plan değişti: ${degisen.map((x) => `${(x.site_codes || []).join(", ")} → ${fmt(x.plan_tarihi)}`).join(" · ")}`);
+          if (giden.length) m.push(`${giden.map((x) => `${(x.site_codes || []).join(", ")}: ${x.durum_ad}`).join(" · ")}`);
+          if (m.length) Alert.alert("Plan güncellemesi", m.join("\n"));
+        }
+        oncekiRef.current = { ids: new Set(yeni.map((x) => x.id)), guncel: Object.fromEntries(yeni.map((x) => [x.id, `${x.plan_tarihi}|${x.plan_baslangic || ""}|${x.plan_bitis || ""}|${x.ekip_no || ""}`])) };
+        setBekleyen(yeni); setTamamlanan(d.tamamlanan || []); setGecmis(d.gecmis || []);
+        // açık detay varsa kuyruktan giden / ofiste değişen durum detayda da görünsün (gün kayıtları için detay ucu ayrıca okunur)
+        setSecili((sc) => { if (!sc) return sc; const g = [...yeni, ...(d.tamamlanan || [])].find((x) => x.id === sc.id); return g ? { ...sc, ...g, gunler: sc.gunler, sahalar: sc.sahalar } : sc; });
+        setSenkron((k) => ({ ...k, son_sync: d.sync_zamani || new Date().toISOString(), hata: null }));
+      }
+      else if (d?.error) { if (!sessiz) Alert.alert("Hata", d.error); setSenkron((k) => ({ ...k, hata: d.error })); }
+    } catch (e) { if (!sessiz) Alert.alert("Bağlantı", e.message); setSenkron((k) => ({ ...k, hata: "Bağlantı yok — son bilinen liste gösteriliyor" })); }
+    finally { setYukleniyor(false); setYenileniyor(false); const kd = await kuyrukDurumu(); setSenkron((k) => ({ ...k, bekleyen: kd.bekleyen, inceleme: kd.inceleme })); }
   }, []);
   useEffect(() => {
     yukle();
     const unsub = navigation.addListener("focus", () => yukle(true));
-    return unsub;
+    const unsubK = kuyrukDinle(async () => { const kd = await kuyrukDurumu(); setSenkron((k) => ({ ...k, bekleyen: kd.bekleyen, inceleme: kd.inceleme, son_sync: kd.son_sync || k.son_sync })); });
+    const app = AppState.addEventListener("change", (st) => { if (st === "active") yukle(true); }); // uygulama öne gelince
+    const zaman = setInterval(() => yukle(true), YENILEME_MS);                                  // ekran açıkken aralıklı
+    return () => { unsub(); unsubK(); app.remove(); clearInterval(zaman); };
   }, [navigation, yukle]);
+  // Kuyruklu gönderim ortak sarmalayıcı: çevrimdışıysa cihazda bekler; 409 inceleme ise kullanıcıya açık mesaj
+  const gonderVeyaKuyrukla = async (path, body, aciklama) => {
+    const r = await kuyrukluGonder(path, body, aciklama);
+    if (r.kuyrukta) { Alert.alert("Bağlantı yok", `"${aciklama}" cihazınızda kaydedildi; bağlantı gelince aynı kayıt olarak gönderilecek (ikinci kez kaydedilmez).`); return null; }
+    return r.sonuc;
+  };
+  // Çok sahalı eski atamalarda kullanıcı hangi iş için bildirdiğini seçer; iş kodu bazında fiilî bildirim de gider
+  const seciliKod = () => { const k = secili?.site_codes || []; return k.length <= 1 ? k[0] || null : sahaSec; };
+  const sahaGerekli = () => { if ((secili?.site_codes || []).length > 1 && !sahaSec) { Alert.alert("Saha seçin", "Bu atamada birden çok iş var — hangi iş için bildirim yaptığınızı seçin."); return true; } return false; };
 
   const detayAc = async (row) => {
     setSecili(row);
@@ -80,22 +122,39 @@ export default function RolloutIslerScreen({ user, navigation }) {
   };
 
   const basla = () => {
-    Alert.alert("İşe Başla", `${(secili.site_codes || []).join(", ")}\n${secili.kategori_ad}\n\nBaşlama saati kaydedilecek ve rollout verisine "aksiyon alındı" olarak işlenecek.`, [
+    if (sahaGerekli()) return;
+    const kod = seciliKod();
+    Alert.alert("İşe başladım", `${kod || (secili.site_codes || []).join(", ")}\n${secili.kategori_ad}\n\nBaşlama saati kaydedilecek; ofis haritasında "devam ediyor" görünür.`, [
       { text: "Vazgeç", style: "cancel" },
       { text: "Başla", onPress: async () => {
         setIslem(true);
         try {
-          const d = await apiPost(`/is-atama/${secili.id}/basla`, {}, true);
-          if (!d?.ok) throw new Error(d?.error || "Başlatılamadı");
-          setSecili(d.row); yukle(true);
-        } catch (e) { Alert.alert("Hata", e.message); }
+          const d = await gonderVeyaKuyrukla(`/is-atama/${secili.id}/basla`, {}, `İşe başladım · ${kod || ""}`);
+          if (d) { if ((secili.site_codes || []).length > 1 && kod) await gonderVeyaKuyrukla("/is-fiili/bildir", { is_atama_id: secili.id, site_code: kod, olay: "BASLADI" }, `Başladım · ${kod}`); setSecili(d.row); yukle(true); }
+        } catch (e) { Alert.alert(e.inceleme ? "İnceleme gerekiyor" : "Hata", e.message); yukle(true); }
+        finally { setIslem(false); }
+      } },
+    ]);
+  };
+  // Bugünü kapat · iş devam ediyor — işi TAMAMLAMAZ (sunucu: tamamlandi=false, sebep "Yarın devam" → DEVAM)
+  const gunuKapat = () => {
+    if (sahaGerekli()) return;
+    Alert.alert("Bugünü kapat", "İş devam ediyor olarak işaretlenecek; yarın tekrar 'İşe başladım' ile sürdürürsünüz.", [
+      { text: "Vazgeç", style: "cancel" },
+      { text: "Günü kapat", onPress: async () => {
+        setIslem(true);
+        try {
+          const d = await gonderVeyaKuyrukla(`/is-atama/${secili.id}/bitir`, { tamamlandi: false, sebep: "Yarın devam", calisanlar: secili.personeller || [] }, "Bugünü kapat · iş devam ediyor");
+          if (d) { setSecili(d.row); yukle(true); Alert.alert("Gün kapatıldı", "İş devam ediyor olarak kaldı."); }
+        } catch (e) { Alert.alert(e.inceleme ? "İnceleme gerekiyor" : "Hata", e.message); yukle(true); }
         finally { setIslem(false); }
       } },
     ]);
   };
 
-  const cikisAc = () => {
-    setTamamlandi(null); setQcOk(null); setNotu(""); setSebep("Yarın devam");
+  const cikisAc = (onSecim = null) => {
+    if (sahaGerekli()) return;
+    setTamamlandi(onSecim); setQcOk(null); setNotu(""); setSebep("Yarın devam");
     setCalisanlar((secili.personeller || []).map((p) => p.email));
     setCikis(true);
   };
@@ -106,21 +165,35 @@ export default function RolloutIslerScreen({ user, navigation }) {
     if (tamamlandi === false && sebep !== "Yarın devam" && !notu.trim()) return Alert.alert("Not gerekli", `"${sebep}" için kısa bir açıklama yazın; ofis ve Rollout Data'ya işlenecek.`);
     setIslem(true);
     try {
-      const d = await apiPost(`/is-atama/${secili.id}/bitir`, {
+      const kod = seciliKod();
+      const d = await gonderVeyaKuyrukla(`/is-atama/${secili.id}/bitir`, {
         tamamlandi, qc_tamamlandi: secili.qc_yazar ? qcOk : null, not: notu.trim() || null, sebep: tamamlandi === false ? sebep : null,
         calisanlar: (secili.personeller || []).filter((p) => calisanlar.includes(p.email)),
-      }, true);
-      if (!d?.ok) throw new Error(d?.error || "Kaydedilemedi");
+      }, tamamlandi ? `Fiziksel montaj tamamlandı · ${kod || ""}` : `Çıkış · ${kod || ""}`);
+      if (!d) { setCikis(false); return; }
+      if ((secili.site_codes || []).length > 1 && kod) await gonderVeyaKuyrukla("/is-fiili/bildir", { is_atama_id: secili.id, site_code: kod, olay: tamamlandi ? "TAMAMLANDI" : "BASLADI", aciklama: notu.trim() || null }, `Bildirim · ${kod}`);
       setCikis(false); setSecili(d.row); yukle(true);
       Alert.alert(
         d.durum === "TAMAMLANDI" ? "İş kapatıldı ✅" : d.durum === "QC_BEKLE" ? "Kaydedildi" : d.durum === "ARA_VERILDI" ? "Ara verildi ⏸" : "Gün kapatıldı",
         d.durum === "TAMAMLANDI" ? "Rollout verisi güncellendi." : d.durum === "QC_BEKLE" ? "Montaj bitti, QC bekliyor olarak işaretlendi." : d.durum === "ARA_VERILDI" ? "Sebep ve notunuz ofise ve Rollout Data'ya işlendi. İş bekleyen listenizde kalır; uygun olunca 'İşe Başla' ile devam edin." : "Yarın tekrar 'İşe Başla' ile devam edin.",
       );
-    } catch (e) { Alert.alert("Hata", e.message); }
+    } catch (e) { Alert.alert(e.inceleme ? "İnceleme gerekiyor" : "Hata", e.message); yukle(true); }
     finally { setIslem(false); }
   };
 
-  const liste = sekme === "bekleyen" ? bekleyen : tamamlanan;
+  const liste = sekme === "bekleyen" ? bekleyen : sekme === "tamamlanan" ? tamamlanan : [];
+  const SenkronSeridi = () => (
+    <View style={st.senkron}>
+      <Text style={st.senkronTxt}>
+        {senkron.bekleyen.length ? `⏳ Gönderim bekliyor (${senkron.bekleyen.length})` : "✓ Senkronize"} · Son güncelleme {fmtZaman(senkron.son_sync)}{senkron.hata ? ` · ⚠ ${senkron.hata}` : ""}
+      </Text>
+      {senkron.inceleme.length > 0 && senkron.inceleme.map((x) => (
+        <TouchableOpacity key={x.id} style={st.incelemeKutu} onPress={() => Alert.alert("İnceleme gerekiyor", `${x.aciklama}\n${x.neden}\n\nKayıt kaybolmadı; ofis değerlendirecek.`, [{ text: "Listeden kaldır", onPress: () => incelemeTemizle(x.id) }, { text: "Kapat" }])}>
+          <Text style={st.incelemeTxt}>⚠ İnceleme gerekiyor: {x.aciklama} — {x.neden}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
   const acikMi = (r) => !["TAMAMLANDI", "IPTAL"].includes(r.durum);
 
   const Rozet = ({ durum }) => {
@@ -144,11 +217,23 @@ export default function RolloutIslerScreen({ user, navigation }) {
           </View>
         </View>
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          <SenkronSeridi />
           <View style={st.kart}>
             <View style={st.satirArasi}>
-              <Text style={st.kartBaslik}>Plan: {fmt(s.plan_tarihi)}</Text>
+              <Text style={st.kartBaslik}>Plan: {fmt(s.plan_tarihi)}{s.plan_baslangic ? ` ${fmtSaat(s.plan_baslangic)}–${fmtSaat(s.plan_bitis)}` : ""}{s.plan_bitis && fmt(s.plan_bitis) !== fmt(s.plan_baslangic) ? ` (… ${fmt(s.plan_bitis)})` : ""}</Text>
               <Rozet durum={s.durum} />
             </View>
+            {s.geciken ? <Text style={[st.kucuk, { color: "#b45309", fontWeight: "700" }]}>⏰ Plan tarihi geçti — iş hâlâ açık (Geciken / devam eden)</Text> : null}
+            {(s.site_codes || []).length > 1 && acikMi(s) ? (
+              <View style={{ marginTop: 8 }}>
+                <Text style={st.kucuk}>Bu atamada birden çok iş var — bildirim yapacağınız işi seçin:</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                  {(s.site_codes || []).map((k) => (
+                    <TouchableOpacity key={k} onPress={() => setSahaSec(k)} style={[st.chip, sahaSec === k && st.chipOk]}><Text style={[st.chipTxt, sahaSec === k && st.chipTxtOn]}>{k}</Text></TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : null}
             {s.atayan_not ? (
               <View style={st.notKutu}>
                 <Text style={st.notBaslik}>📝 Atayan notu · {s.atayan_ad || String(s.atayan_email || "").split("@")[0]}</Text>
@@ -207,13 +292,21 @@ export default function RolloutIslerScreen({ user, navigation }) {
 
           {acikMi(s) && s.durum !== "BASLADI" && (
             <TouchableOpacity style={[st.anaBtn, { backgroundColor: "#16a34a" }]} onPress={basla} disabled={islem} activeOpacity={0.85}>
-              {islem ? <ActivityIndicator color="#fff" /> : <Text style={st.anaBtnTxt}>▶ İşe Başla{s.durum === "DEVAM" ? " (yeni gün)" : s.durum === "ARA_VERILDI" ? " (devam)" : ""}</Text>}
+              {islem ? <ActivityIndicator color="#fff" /> : <Text style={st.anaBtnTxt}>▶ İşe başladım{s.durum === "DEVAM" ? " (yeni gün)" : s.durum === "ARA_VERILDI" ? " (devam)" : ""}</Text>}
             </TouchableOpacity>
           )}
           {s.durum === "BASLADI" && (
-            <TouchableOpacity style={[st.anaBtn, { backgroundColor: "#d97706" }]} onPress={cikisAc} disabled={islem} activeOpacity={0.85}>
-              <Text style={st.anaBtnTxt}>■ Çıkış Yap</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity style={[st.anaBtn, { backgroundColor: "#1d4ed8" }]} onPress={gunuKapat} disabled={islem} activeOpacity={0.85}>
+                <Text style={st.anaBtnTxt}>🌙 Bugünü kapat · iş devam ediyor</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[st.anaBtn, { backgroundColor: "#15803d" }]} onPress={() => cikisAc(true)} disabled={islem} activeOpacity={0.85}>
+                <Text style={st.anaBtnTxt}>✓ Fiziksel montaj tamamlandı</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[st.anaBtn, { backgroundColor: "#d97706" }]} onPress={() => cikisAc(false)} disabled={islem} activeOpacity={0.85}>
+                <Text style={st.anaBtnTxt}>⏸ Ara ver / sebep bildir</Text>
+              </TouchableOpacity>
+            </>
           )}
           {/* 31.10.2026: issue / engel bildirimi — işi kapatmaz, QC'ye yazmaz; haritada ve haftalık planda "⚠ Issue" etiketi olur */}
           {acikMi(s) && (
@@ -221,8 +314,9 @@ export default function RolloutIslerScreen({ user, navigation }) {
               onPress={() => Alert.prompt
                 ? Alert.prompt("Issue / engel bildir", "Kısa açıklama (ör. eksik malzeme, erişim yok):", async (txt) => {
                     if (!txt || !txt.trim()) return;
-                    try { for (const kod of s.site_codes || []) await fiiliBildir(s.id, kod, "ISSUE", { issue_turu: "Saha issue", aciklama: txt.trim() }); Alert.alert("Bildirildi", "Issue ofise iletildi; iş açık kalır."); }
-                    catch (e) { Alert.alert("Hata", e.message); }
+                    if (sahaGerekli()) return;
+                    try { const kod = seciliKod(); const r = await gonderVeyaKuyrukla("/is-fiili/bildir", { is_atama_id: s.id, site_code: kod, olay: "ISSUE", issue_turu: "Saha issue", aciklama: txt.trim() }, `Issue · ${kod || ""}`); if (r) Alert.alert("Bildirildi", "Issue ofise iletildi; iş açık kalır."); }
+                    catch (e) { Alert.alert(e.inceleme ? "İnceleme gerekiyor" : "Hata", e.message); }
                   })
                 : Alert.alert("Issue / engel", "Issue bildirimi için Çıkış Yap → Devam ediyor → sebep seçin.")}>
               <Text style={[st.anaBtnTxt, { color: "#dc2626" }]}>⚠ Issue / engel bildir</Text>
@@ -309,8 +403,9 @@ export default function RolloutIslerScreen({ user, navigation }) {
           <Text style={st.sub}>Size atanan saha işleri</Text>
         </View>
       </View>
+      <SenkronSeridi />
       <View style={st.sekmeRow}>
-        {[["bekleyen", `Bekleyen (${bekleyen.length})`], ["tamamlanan", `Tamamlanan (${tamamlanan.length})`]].map(([k, t]) => (
+        {[["bekleyen", `Bekleyen (${bekleyen.length})`], ["tamamlanan", `Tamamlanan (${tamamlanan.length})`], ["gecmis", `Geçmiş (${gecmis.length})`]].map(([k, t]) => (
           <TouchableOpacity key={k} style={[st.sekme, sekme === k && st.sekmeOn]} onPress={() => setSekme(k)}>
             <Text style={[st.sekmeTxt, sekme === k && st.sekmeTxtOn]}>{t}</Text>
           </TouchableOpacity>
@@ -319,7 +414,15 @@ export default function RolloutIslerScreen({ user, navigation }) {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={yenileniyor} onRefresh={() => { setYenileniyor(true); yukle(true); }} />}>
         {yukleniyor ? <ActivityIndicator style={{ marginTop: 30 }} color="#1E3A5F" /> : null}
-        {!yukleniyor && liste.length === 0 && (
+        {sekme === "gecmis" && gecmis.map((g) => (
+          <View key={g.id} style={[st.isKart, { opacity: 0.8 }]}>
+            <View style={st.satirArasi}><Text style={st.isKategori}>{g.kategori_ikon} {g.kategori_ad}</Text><View style={[st.rozet, { backgroundColor: "#fee2e2" }]}><Text style={[st.rozetTxt, { color: "#b91c1c" }]}>{g.durum_ad}</Text></View></View>
+            <Text style={st.siteKod}>{(g.site_codes || []).join(" · ")}</Text>
+            <Text style={st.kucuk}>Plan {fmt(g.plan_tarihi)} · {fmt(g.updated_at)} {fmtSaat(g.updated_at)}</Text>
+          </View>
+        ))}
+        {sekme === "gecmis" && !gecmis.length && !yukleniyor && <View style={st.bos}><Text style={st.bosTxt}>İptal edilen / aktarılan iş yok</Text></View>}
+        {!yukleniyor && sekme !== "gecmis" && liste.length === 0 && (
           <View style={st.bos}>
             <Text style={st.bosTxt}>{sekme === "bekleyen" ? "Bekleyen iş yok" : "Tamamlanan iş yok"}</Text>
             <Text style={st.bosAlt}>{sekme === "bekleyen" ? "Ofis iş atadığında burada görünür. Aşağı çekerek yenileyin." : "Son 60 günde kapattığınız işler burada listelenir."}</Text>
@@ -332,7 +435,8 @@ export default function RolloutIslerScreen({ user, navigation }) {
               <Rozet durum={r.durum} />
             </View>
             <Text style={st.siteKod}>{(r.site_codes || []).join(" · ")}</Text>
-            <Text style={st.kucuk}>Plan {fmt(r.plan_tarihi)} · {(r.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ")}{r.bolge ? ` · ${r.bolge}` : ""}</Text>
+            <Text style={st.kucuk}>Plan {fmt(r.plan_tarihi)}{r.plan_baslangic ? ` ${fmtSaat(r.plan_baslangic)}` : ""} · {(r.personeller || []).map((p) => String(p.ad || "").split(" ")[0]).join(", ")}{r.bolge ? ` · ${r.bolge}` : ""}</Text>
+            {r.geciken ? <Text style={[st.kucuk, { color: "#b45309", fontWeight: "700" }]}>⏰ Geciken / devam eden — plan tarihi geçti</Text> : null}
             {r.durdurma_sebebi && r.durum === "ARA_VERILDI" ? <Text style={[st.kucuk, { color: "#b91c1c", fontWeight: "700" }]}>⏸ {r.durdurma_sebebi}</Text> : null}
             {r.atayan_not ? <Text style={st.notOnizleme} numberOfLines={2}>📝 {r.atayan_not}</Text> : null}
             {r.kategori === "CLEANUP" && Array.isArray(r.cleanup) && r.cleanup.length > 0 && (
@@ -346,6 +450,9 @@ export default function RolloutIslerScreen({ user, navigation }) {
 }
 
 const st = StyleSheet.create({
+  senkron: { marginHorizontal: 16, marginTop: 8, backgroundColor: "#f1f5f9", borderRadius: 10, padding: 8 },
+  senkronTxt: { fontSize: 12, color: "#334155", fontWeight: "600" },
+  incelemeKutu: { marginTop: 6, backgroundColor: "#fee2e2", borderRadius: 8, padding: 8 }, incelemeTxt: { fontSize: 12, color: "#991b1b", fontWeight: "700" },
   safe: { flex: 1, backgroundColor: "#f1f5f9" },
   header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: "#1E3A5F" },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
