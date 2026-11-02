@@ -45,6 +45,27 @@ async function semaKur(pool) {
     await q(`ALTER TABLE marka_taseron_odeme ADD COLUMN IF NOT EXISTS ${s}`);
   // Taşeron olmayan tedarikçi (otel, nakliyeci, malzemeci…) firma kartı: iş girişi / iş atama taşeron listelerine çıkmaz
   await q(`ALTER TABLE subcons ADD COLUMN IF NOT EXISTS tedarikci_turu TEXT`);
+  // 02.11.2026 HAKEDİŞ ESASLI CARİ (TEKNO_EMRAH, TEKNO_SEYFİ): fatura yerine onaylı hakediş borç sayılır. cari_modeli='HAKEDIS'.
+  await q(`ALTER TABLE subcons ADD COLUMN IF NOT EXISTS cari_modeli TEXT`);
+  // Eski "Diğer Ödeme" (cashflow_odeme) kaydının taşeron avansına aktarımı: kayıt SİLİNMEZ, aktarıldı işaretlenir ve nakit
+  // akışı/özet/P&L okumaları onu atlar (aynı para taşeron ödemesi olarak bir kez sayılır).
+  for (const x of ["aktarim_log_id INTEGER", "aktarim_tarihi TIMESTAMP", "aktarim_eden TEXT"]) await q(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS ${x}`);
+  // Taşeron birim fiyatı (müşteri BoQ/PO'dan AYRI): yalnız açıkça tanımlanan fiyat kullanılır; değişiklik yeni satırdır.
+  await q(`CREATE TABLE IF NOT EXISTS taseron_fiyat (id SERIAL PRIMARY KEY, firma_kod TEXT NOT NULL, tedarikci_id INTEGER,
+    item_code TEXT NOT NULL, aciklama TEXT, birim TEXT, birim_fiyat NUMERIC NOT NULL, para_birimi TEXT DEFAULT 'TRY',
+    gecerlilik_bas DATE NOT NULL, gecerlilik_bit DATE, kaynak TEXT, durum TEXT DEFAULT 'AKTIF', olusturan TEXT, created_at TIMESTAMP DEFAULT NOW(),
+    iptal_eden TEXT, iptal_tarihi TIMESTAMP, iptal_neden TEXT)`);
+  await q(`CREATE INDEX IF NOT EXISTS taseron_fiyat_idx ON taseron_fiyat (firma_kod, item_code)`);
+  // Hakediş belgesi + kalemleri: kalem fiyatı onay anındaki görüntüdür (sonraki fiyat değişikliği eski hakedişi değiştirmez)
+  await q(`CREATE TABLE IF NOT EXISTS taseron_hakedis_belge (id SERIAL PRIMARY KEY, firma_kod TEXT NOT NULL, tedarikci_id INTEGER NOT NULL,
+    donem TEXT, hakedis_tarihi DATE, durum TEXT NOT NULL DEFAULT 'TASLAK', toplam NUMERIC DEFAULT 0, para_birimi TEXT DEFAULT 'TRY',
+    aciklama TEXT, idem_key TEXT, olusturan TEXT, created_at TIMESTAMP DEFAULT NOW(), onaylayan TEXT, onay_tarihi TIMESTAMP,
+    iptal_eden TEXT, iptal_tarihi TIMESTAMP, iptal_neden TEXT)`);
+  await q(`CREATE UNIQUE INDEX IF NOT EXISTS taseron_hakedis_belge_idem_uq ON taseron_hakedis_belge (idem_key) WHERE idem_key IS NOT NULL`);
+  await q(`CREATE TABLE IF NOT EXISTS taseron_hakedis_kalem (id SERIAL PRIMARY KEY, belge_id INTEGER NOT NULL, master_works_id INTEGER NOT NULL,
+    site_code TEXT, fiziksel_id TEXT, item_code TEXT, aciklama TEXT, miktar NUMERIC NOT NULL, birim_fiyat NUMERIC NOT NULL,
+    tutar NUMERIC NOT NULL, para_birimi TEXT DEFAULT 'TRY', fiyat_id INTEGER, fiyat_kaynak TEXT)`);
+  await q(`CREATE INDEX IF NOT EXISTS taseron_hakedis_kalem_mw_idx ON taseron_hakedis_kalem (master_works_id)`);
 }
 
 function kur(app, c) {
@@ -94,9 +115,9 @@ function kur(app, c) {
   // ── FİRMA KARTI REHBERİ ───────────────────────────────────────────────────────────────────────────────────────────
   async function rehberOku(db) {
     const r = await db.query(`SELECT s.id, s.subcon_name, s.gorunen_ad, s.unvan, s.ana_firma, COALESCE(s.aktif,true) AS aktif,
-        s.tedarikci_turu, s.kaynak, COALESCE((SELECT ARRAY_AGG(t.ad ORDER BY t.ad) FROM subcon_takma_ad t WHERE t.subcon_id = s.id), '{}') AS takma
+        s.tedarikci_turu, s.kaynak, s.cari_modeli, COALESCE((SELECT ARRAY_AGG(t.ad ORDER BY t.ad) FROM subcon_takma_ad t WHERE t.subcon_id = s.id), '{}') AS takma
       FROM subcons s`).catch(() => db.query(`SELECT s.id, s.subcon_name, NULL AS gorunen_ad, NULL AS unvan, NULL AS ana_firma, true AS aktif,
-        NULL AS tedarikci_turu, NULL AS kaynak, '{}'::text[] AS takma FROM subcons s`));
+        NULL AS tedarikci_turu, NULL AS kaynak, NULL AS cari_modeli, '{}'::text[] AS takma FROM subcons s`));
     const byId = new Map(), adIdx = new Map();
     for (const s of r.rows) {
       s.adlar = [...new Set([s.subcon_name, s.gorunen_ad, s.unvan, ...(s.takma || [])].filter((x) => temiz(x)))];
@@ -168,6 +189,7 @@ function kur(app, c) {
         cari.set(k.anahtar, { anahtar: k.anahtar, id: k.id, kimlik: k.durum, ad: s ? kartAd(s) : k.ad, unvan: s?.unvan || null,
           etiketler: s ? s.adlar : [k.ad], etiket_katla: s ? s.katlar : [katla(k.ad)], ana_firma: s?.ana_firma || null,
           tur: s?.tedarikci_turu || (s ? "TASERON" : null), aktif: s ? s.aktif !== false : true,
+          cari_modeli: String(s?.cari_modeli || "").toUpperCase() === "HAKEDIS" ? "HAKEDIS" : "FATURA", hakedisler: [],
           adaylar: (k.adaylar || []).map((x) => ({ id: x, ad: kartAd(R.byId.get(x)), unvan: R.byId.get(x)?.unvan || null })),
           pb: {}, faturalar: [], hareketler: [], uyarilar: [] });
       }
@@ -176,6 +198,14 @@ function kur(app, c) {
       return c0;
     };
     const pbOf = (c0, pb) => c0.pb[pb] || (c0.pb[pb] = pbBos());
+    // 02.11.2026: hakediş esaslı cari kartları (bu firmanın kapsamında, aktif) faturası/hareketi olmasa da listede görünür
+    for (const s of R.byId.values()) if (String(s.cari_modeli || "").toUpperCase() === "HAKEDIS" && s.aktif !== false && kartKapsamda(s, M))
+      satir({ anahtar: `id:${Number(s.id)}`, id: Number(s.id), durum: "KART" });
+    // Onaylı hakedişler (borç). TASLAK ve İPTAL borç değildir; yalnız listede durumuyla görünür.
+    const hk = M === "SIMSEK" ? [] : (await db.query(`SELECT b.id, b.tedarikci_id, b.donem, to_char(b.hakedis_tarihi,'YYYY-MM-DD') AS tarih, b.durum,
+        COALESCE(b.toplam,0) AS toplam, UPPER(COALESCE(b.para_birimi,'TRY')) AS pb, b.aciklama, b.olusturan, b.onaylayan,
+        to_char(b.onay_tarihi,'YYYY-MM-DD HH24:MI') AS onay_tarihi, b.iptal_neden, (SELECT COUNT(*)::int FROM taseron_hakedis_kalem k WHERE k.belge_id = b.id) AS kalem_sayisi
+      FROM taseron_hakedis_belge b WHERE UPPER(b.firma_kod) = $1 ORDER BY b.hakedis_tarihi NULLS LAST, b.id`, [M]).catch(() => ({ rows: [] }))).rows;
 
     // Log dağılımı (AKTİF) fatura bazında — faturadaki ödenen tutarın kaynağını ayırmak için
     const logDag = new Map();
@@ -262,11 +292,28 @@ function kur(app, c) {
       for (const o of ortak) { const f = c0.faturalar.find((x) => x.id === Number(o.fatura_id)); if (f) c0.hareketler.push({ kaynak: "ORTAK", id: Number(o.odeme_id), no: `O-${o.odeme_id}`,
         tarih: o.tarih, tur: "FATURA_ODEME", islem_turu: "ORTAK", tutar: r2(o.tutar), pb: f.pb, avans_tutar: 0, dagilim: [{ fatura_id: f.id, fatura_no: f.fatura_no, odeme: r2(o.tutar) }],
         aciklama: "Ortak ödeme kaydı (araç kirası ekranı)", durum: "AKTIF", yeni_kayit: false }); }
+      // Hakediş esaslı cari: onaylı hakediş borçtur; açık avans tarih sırasıyla (eskiden yeniye) hakedişe mahsup edilir.
+      // Mahsup HESAPLANIR (ayrı kayıt/nakit çıkışı yok); her bakiye hareketlerden yeniden üretilebilir.
+      if (c0.id) for (const h of hk.filter((x) => Number(x.tedarikci_id) === c0.id)) {
+        c0.hakedisler.push({ ...h, toplam: r2(h.toplam) });
+        if (h.durum === "ONAYLI") { const P = pbOf(c0, h.pb); P.hakedis = r2((P.hakedis || 0) + Number(h.toplam)); }
+      }
       for (const [pb, P] of Object.entries(c0.pb)) {
         for (const k of Object.keys(P)) P[k] = r2(P[k]);
         P.nakit = r2(P.nakit + c0.hareketler.filter((h) => h.kaynak === "ORTAK" && h.pb === pb).reduce((s, h) => s + h.tutar, 0));
         P.gecerli = r2(P.fatura - P.iade); // geçerli toplam fatura: GELEN − iade (KDV dahil ödenecek)
         P.avans_acik = r2(P.avans_olusan - P.mahsup);
+        if (P.hakedis > 0.009) {
+          P.hakedis_mahsup = r2(Math.min(Math.max(0, P.avans_acik), P.hakedis));
+          P.hakedis_kalan = r2(P.hakedis - P.hakedis_mahsup);
+          P.avans_acik = r2(P.avans_acik - P.hakedis_mahsup);
+          P.kalan = r2(P.kalan + P.hakedis_kalan);
+          // Hakediş bazında karşılanma (FIFO, onay tarihine göre) — ekranda "ne kadarı ödendi" sütunu
+          let kalanMahsup = P.hakedis_mahsup;
+          for (const h of c0.hakedisler.filter((x) => x.durum === "ONAYLI" && x.pb === pb)) {
+            h.karsilanan = r2(Math.min(kalanMahsup, h.toplam)); h.kalan = r2(h.toplam - h.karsilanan); kalanMahsup = r2(kalanMahsup - h.karsilanan);
+          }
+        } else { P.hakedis = P.hakedis || 0; P.hakedis_mahsup = 0; P.hakedis_kalan = 0; }
         P.alacak = r2(P.avans_acik + P.iade_alacak + P.fazla_odeme);
         P.net = r2(P.kalan - P.alacak);
         if (P.avans_acik < -0.009) c0.uyarilar.push({ tip: "AVANS_EKSI", mesaj: `${pb}: mahsup edilen tutar açık avansı ${tl(-P.avans_acik)} aşıyor — kayıtları kontrol edin` });
@@ -438,7 +485,8 @@ function kur(app, c) {
   app.get("/finance/marka-cari/liste", okuKapi, async (req, res) => {
     try {
       const v = await cariHesapla(pool, req.cariFirma);
-      const rows = [...v.cari.values()].map((c0) => ({ anahtar: c0.anahtar, id: c0.id, ad: c0.ad, unvan: c0.unvan, kimlik: c0.kimlik, tur: c0.tur,
+      const rows = [...v.cari.values()].map((c0) => ({ anahtar: c0.anahtar, id: c0.id, ad: c0.ad, unvan: c0.unvan, kimlik: c0.kimlik, tur: c0.tur, cari_modeli: c0.cari_modeli,
+        hakedis_sayisi: (c0.hakedisler || []).filter((h) => h.durum === "ONAYLI").length,
         etiketler: c0.etiketler, etiket_katla: c0.etiket_katla, adaylar: c0.adaylar, pb: c0.pb, fatura_sayisi: c0.faturalar.length,
         hareket_sayisi: c0.hareketler.length, uyari_sayisi: c0.uyarilar.length,
         son_odeme: c0.hareketler.find((h) => h.durum === "AKTIF" && h.islem_turu !== "MAHSUP")?.tarih || null }))
@@ -695,6 +743,8 @@ function kur(app, c) {
       for (const c0 of liste) for (const pb of Object.keys(c0.pb).length ? Object.keys(c0.pb) : ["TRY"]) {
         const ol = [];
         for (const f of c0.faturalar.filter((x) => x.pb === pb)) ol.push({ t: f.fatura_tarihi || f.giris_tarihi, s: 0, a: f.tur === "GELEN" ? "Fatura" : "İade faturası", n: f.fatura_no, b: f.tur === "GELEN" ? f.toplam : 0, al: f.tur === "GELEN" ? 0 : f.toplam, ack: f.note || "" });
+        // 02.11.2026: hakediş esaslı cari — onaylı hakediş borçtur (fatura değildir); taslak / iptal ekstreye girmez
+        for (const h of (c0.hakedisler || []).filter((x) => x.durum === "ONAYLI" && x.pb === pb)) ol.push({ t: h.tarih, s: 0, a: "Onaylı hakediş", n: `H-${h.id}`, b: h.toplam, al: 0, ack: `${h.kalem_sayisi} kalem · onay ${h.onaylayan || "—"} ${h.onay_tarihi || ""}${h.aciklama ? " · " + h.aciklama : ""}` });
         for (const h of c0.hareketler.filter((x) => x.pb === pb && x.durum === "AKTIF")) {
           if (h.islem_turu === "MAHSUP") ol.push({ t: h.tarih, s: 1, a: TUR.MAHSUP, n: h.no, b: 0, al: 0, ack: h.dagilim.map((d) => `${d.fatura_no}: ${tl(d.odeme)}`).join(", ") });
           else ol.push({ t: h.tarih, s: 1, a: TUR[h.tur] || h.tur, n: h.no, b: 0, al: h.tutar, ack: [h.aciklama, h.referans && `ref ${h.referans}`].filter(Boolean).join(" · ") });
@@ -708,8 +758,8 @@ function kur(app, c) {
       sayfa("Cari Ekstre", `${firmaAd} — Tedarikçi Cari Ekstresi${anahtar ? ` · ${liste[0].ad}` : ""} (${bugunTR().split("-").reverse().join(".")})`,
         [["Tedarikçi", 34], ["PB", 6], ["Tarih", 12], ["İşlem", 26], ["Belge / İşlem No", 18], ["Borç (fatura)", 15], ["Alacak (ödeme/iade)", 17], ["Bakiye", 15], ["Açıklama", 50]], ekstre, [5, 6, 7]);
       // 2) Özet
-      sayfa("Özet", `${firmaAd} — Cari Özet`, [["Tedarikçi", 34], ["Firma kartı", 12], ["PB", 6], ["Toplam fatura (gelen)", 18], ["İade", 12], ["Faturalara uygulanan ödeme/mahsup", 20], ["Kalan fatura borcu", 16], ["Açık avans / alacak", 16], ["Net cari bakiye", 15], ["Ödenen nakit", 14]],
-        liste.flatMap((c0) => Object.entries(c0.pb).map(([pb, P]) => [c0.ad, c0.kimlik === "KART" ? "Var" : c0.kimlik === "BELIRSIZ" ? "Belirsiz" : "Yok", pb, P.fatura, P.iade, P.uygulanan, P.kalan, P.alacak, P.net, P.nakit])), [3, 4, 5, 6, 7, 8, 9]);
+      sayfa("Özet", `${firmaAd} — Cari Özet`, [["Tedarikçi", 34], ["Firma kartı", 12], ["PB", 6], ["Toplam fatura (gelen)", 18], ["İade", 12], ["Faturalara uygulanan ödeme/mahsup", 20], ["Onaylı hakediş", 15], ["Hakedişe mahsup", 15], ["Kalan borç (fatura + hakediş)", 18], ["Açık avans / alacak", 16], ["Net cari bakiye", 15], ["Ödenen nakit", 14], ["Cari modeli", 16]],
+        liste.flatMap((c0) => Object.entries(c0.pb).map(([pb, P]) => [c0.ad, c0.kimlik === "KART" ? "Var" : c0.kimlik === "BELIRSIZ" ? "Belirsiz" : "Yok", pb, P.fatura, P.iade, P.uygulanan, P.hakedis || 0, P.hakedis_mahsup || 0, P.kalan, P.alacak, P.net, P.nakit, c0.cari_modeli === "HAKEDIS" ? "Hakediş esaslı" : "Faturalı"])), [3, 4, 5, 6, 7, 8, 9, 10, 11]);
       // 3) Açık faturalar (FIFO sırası)
       sayfa("Açık Faturalar", `${firmaAd} — Açık Faturalar (FIFO sırası) · ${FIFO_KURAL}`, [["Tedarikçi", 34], ["Fatura No", 18], ["Fatura tarihi", 12], ["Vade", 12], ["PB", 6], ["Matrah", 14], ["KDV", 12], ["Toplam (ödenecek)", 16], ["Uygulanan ödeme", 15], ["Bağlı iade", 12], ["Kalan", 14], ["Not", 30]],
         liste.flatMap((c0) => c0.faturalar.filter((f) => f.tur === "GELEN" && f.acik > 0.009).map((f) => [c0.ad, f.fatura_no, f.fatura_tarihi || "", f.vade_tarihi || "", f.pb, f.matrah, f.kdv, f.toplam, f.odenen, f.iade_bagli, f.acik, f.arac ? "Araç kirası — ödeme ekranından" : ""])), [5, 6, 7, 8, 9, 10]);
@@ -725,6 +775,224 @@ function kur(app, c) {
       res.setHeader("Content-Disposition", `attachment; filename="${dosya}"`);
       await wb.xlsx.write(res); res.end();
     } catch (e) { console.error("[cari excel]", e.message); if (!res.headersSent) hata(res, 500, "Excel hazırlanamadı"); }
+  });
+
+  // ══ HAKEDİŞ ESASLI CARİ (02.11.2026, Orhan — TEKNO_EMRAH, TEKNO_SEYFİ) ═════════════════════════════════════════════
+  // Fatura zorunlu değil: borç = ONAYLI hakediş. Hakediş, fiziki tamamlanan (master_works.tamamlanan_qty) ve kalem taşeronu bu
+  // kartın adlarından biri olan kalemlerden kurulur; PR / iş ataması tek başına hakediş DEĞİLDİR. Fiyat yalnız taseron_fiyat
+  // (bu firmanın taşeron fiyatı) — Huawei PO / BoQ satış fiyatı taşeron hakedişi sayılmaz; fiyatı olmayan kalem hakedişe
+  // GİRMEZ ("Taşeron fiyatı tanımlanmadı" listesi). Onaylı hakedişin kalem fiyatı sabittir (sonraki fiyat değişikliği eski
+  // hakedişi değiştirmez). Bu model yasal belge yükümlülüğünün yerine geçmez; muhasebe belgeleri ayrı süreçte yürür.
+  const hakedisKart = (R, M, anahtar) => {
+    const m = /^id:(\d+)$/.exec(String(anahtar || "")); const s = m ? R.byId.get(Number(m[1])) : null;
+    if (!s || s.aktif === false || !kartKapsamda(s, M)) return null;
+    return s;
+  };
+  async function fiyatBul(db, M, tid, kod, tarih) {
+    const r = await db.query(`SELECT id, birim_fiyat, UPPER(COALESCE(para_birimi,'TRY')) AS pb, birim, kaynak, to_char(gecerlilik_bas,'YYYY-MM-DD') AS bas, tedarikci_id
+      FROM taseron_fiyat WHERE UPPER(firma_kod) = $1 AND item_code = $2 AND COALESCE(durum,'AKTIF') = 'AKTIF'
+        AND (tedarikci_id = $3 OR tedarikci_id IS NULL) AND gecerlilik_bas <= $4::date AND (gecerlilik_bit IS NULL OR gecerlilik_bit >= $4::date)
+      ORDER BY (tedarikci_id IS NULL), gecerlilik_bas DESC, id DESC`, [M, String(kod || "").trim(), tid, tarih]);
+    if (!r.rows.length) return null;
+    const ilk = r.rows[0];
+    // Aynı öncelik + aynı geçerlilik gününde farklı fiyat → belirsiz (ilk bulunan seçilmez)
+    const es = r.rows.filter((x) => (x.tedarikci_id === null) === (ilk.tedarikci_id === null) && x.bas === ilk.bas);
+    if (es.some((x) => Math.abs(Number(x.birim_fiyat) - Number(ilk.birim_fiyat)) > 0.009 || x.pb !== ilk.pb)) return { belirsiz: true, adaylar: es };
+    return { id: ilk.id, fiyat: Number(ilk.birim_fiyat), pb: ilk.pb, birim: ilk.birim, kaynak: ilk.kaynak, bas: ilk.bas, ozel: ilk.tedarikci_id !== null };
+  }
+  // Kartın gerçekleşen işleri: kalem bazında PR (done_qty), fiziki (tamamlanan_qty), hakedişe girmiş miktar, kalan ve fiyat
+  async function hakedisIsleri(db, M, s, tarih) {
+    const adlar = s.katlar;
+    const r = await db.query(`SELECT m.id, UPPER(TRIM(m.site_code)) AS site_code, TRIM(COALESCE(m.item_code,'')) AS item_code, m.item_description,
+        COALESCE(m.done_qty,0)::numeric AS pr_qty, COALESCE(m.tamamlanan_qty,0)::numeric AS fiziki_qty, m.subcon_name, m.qc_durum,
+        to_char(m.created_at,'YYYY-MM-DD') AS giris
+      FROM master_works m WHERE m.subcon_name IS NOT NULL ORDER BY m.site_code, m.id`);
+    const kalemler = r.rows.filter((x) => adlar.includes(katla(x.subcon_name)));
+    const ids = kalemler.map((x) => Number(x.id));
+    const kullanilan = new Map();
+    if (ids.length) {
+      const k = await db.query(`SELECT k.master_works_id AS id, SUM(k.miktar)::numeric AS m FROM taseron_hakedis_kalem k JOIN taseron_hakedis_belge b ON b.id = k.belge_id
+        WHERE b.durum <> 'IPTAL' AND k.master_works_id = ANY($1::int[]) GROUP BY 1`, [ids]);
+      k.rows.forEach((x) => kullanilan.set(Number(x.id), Number(x.m)));
+    }
+    const out = [];
+    for (const x of kalemler) {
+      const giren = kullanilan.get(Number(x.id)) || 0;
+      const fiyat = x.item_code ? await fiyatBul(db, M, s.id, x.item_code, tarih) : null;
+      const kalan = r2(Math.max(0, Number(x.fiziki_qty) - giren));
+      out.push({ master_works_id: Number(x.id), site_code: x.site_code, fiziksel_id: String(x.site_code).split("_")[0], item_code: x.item_code,
+        aciklama: x.item_description, etiket: x.subcon_name, pr_qty: Number(x.pr_qty), fiziki_qty: Number(x.fiziki_qty), hakediste: giren, kalan,
+        qc: x.qc_durum || null, giris: x.giris,
+        fiyat: fiyat && !fiyat.belirsiz ? fiyat : null, fiyat_durum: !fiyat ? "TANIMSIZ" : fiyat.belirsiz ? "BELIRSIZ" : "VAR",
+        tutar: fiyat && !fiyat.belirsiz ? r2(kalan * fiyat.fiyat) : null });
+    }
+    return out;
+  }
+  app.get("/finance/marka-cari/hakedis/isler", okuKapi, async (req, res) => {
+    try {
+      const M = req.cariFirma; if (M === "SIMSEK") return hata(res, 400, "Hakediş esaslı cari yalnız alt marka firmalarında");
+      const R = await rehberOku(pool); const s = hakedisKart(R, M, req.query.tedarikci);
+      if (!s) return hata(res, 404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
+      const tarih = tarihMi(req.query.tarih) ? req.query.tarih : bugunTR();
+      const isler = await hakedisIsleri(pool, M, s, tarih);
+      const fiyatGor = req.izinler?.fiyat_goruntule !== false;
+      const rows = fiyatGor ? isler : isler.map((x) => ({ ...x, fiyat: null, tutar: null }));
+      const ozet = { kalem: rows.length, is_kodu: new Set(rows.map((x) => x.site_code)).size, saha: new Set(rows.map((x) => x.fiziksel_id)).size,
+        fiziki_kalem: rows.filter((x) => x.fiziki_qty > 0).length, hakedise_hazir: rows.filter((x) => x.kalan > 0.009 && x.fiyat_durum === "VAR").length,
+        fiyat_bekleyen: rows.filter((x) => x.kalan > 0.009 && x.fiyat_durum !== "VAR").length,
+        hazir_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.kalan > 0.009 && x.tutar ? x.tutar : 0), 0)) : null,
+        // Planlanan (PR/talep) ve fiziki gerçekleşen iş bedeli — yalnız taşeron fiyatı tanımlı kalemlerden; fiyatsız kalem SAYILMAZ
+        plan_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.fiyat ? x.pr_qty * x.fiyat.fiyat : 0), 0)) : null,
+        fiziki_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.fiyat ? x.fiziki_qty * x.fiyat.fiyat : 0), 0)) : null,
+        fiyatsiz_kalem: rows.filter((x) => x.fiyat_durum !== "VAR").length };
+      res.json({ ok: true, firma: M, tedarikci: { id: s.id, ad: kartAd(s) }, tarih, ozet, rows });
+    } catch (e) { console.error("[hakedis isler]", e.message); hata(res, 500, "İş listesi alınamadı"); }
+  });
+  // Hakediş taslağı: seçilen kalemlerin KALAN fiziki miktarı, tanımlı taşeron fiyatıyla. Fiyatsız/belirsiz kalem reddedilir.
+  app.post("/finance/marka-cari/hakedis", yazKapi, async (req, res) => {
+    const M = req.cariFirma, b = req.body || {};
+    const idem = temiz(b.idem_key, 120);
+    if (idem.length < 8) return hata(res, 400, "İşlem anahtarı eksik (sayfayı yenileyin)");
+    const tarih = tarihMi(b.tarih) ? b.tarih : bugunTR();
+    const sec = Array.isArray(b.master_works_ids) ? [...new Set(b.master_works_ids.map(Number).filter(Boolean))] : [];
+    if (!sec.length) return hata(res, 400, "Hakedişe girecek kalem seçin");
+    const sonuc = await islem(res, async (db) => {
+      await kilitle(db, "hakedis-idem", idem);
+      const ex = (await db.query(`SELECT id FROM taseron_hakedis_belge WHERE idem_key = $1`, [idem])).rows[0];
+      if (ex) return { tekrar: true, belge_id: ex.id };
+      const R = await rehberOku(db); const s = hakedisKart(R, M, b.tedarikci);
+      if (!s) throw hataK(404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
+      await kilitle(db, "hakedis", M, String(s.id));
+      const isler = await hakedisIsleri(db, M, s, tarih);
+      const secilen = isler.filter((x) => sec.includes(x.master_works_id));
+      if (secilen.length !== sec.length) throw hataK(409, "Seçilen kalemlerden biri bu taşerona ait değil");
+      const sorun = secilen.filter((x) => x.kalan <= 0.009 || x.fiyat_durum !== "VAR");
+      if (sorun.length) throw hataK(409, `Hakedişe giremeyen kalem: ${sorun.map((x) => `${x.site_code} ${x.item_code} (${x.kalan <= 0.009 ? "kalan fiziki miktar yok" : x.fiyat_durum === "BELIRSIZ" ? "fiyat belirsiz" : "taşeron fiyatı tanımlanmadı"})`).join(", ")}`, { sorunlu: sorun.map((x) => x.master_works_id) });
+      const pbs = [...new Set(secilen.map((x) => x.fiyat.pb))];
+      if (pbs.length > 1) throw hataK(409, "Farklı para birimli kalemler aynı hakedişe girmez");
+      const toplam = r2(secilen.reduce((t, x) => t + x.tutar, 0));
+      const bl = (await db.query(`INSERT INTO taseron_hakedis_belge (firma_kod, tedarikci_id, donem, hakedis_tarihi, durum, toplam, para_birimi, aciklama, idem_key, olusturan)
+        VALUES ($1,$2,$3,$4,'TASLAK',$5,$6,$7,$8,$9) RETURNING id`, [M, s.id, tarih.slice(0, 7), tarih, toplam, pbs[0], temiz(b.aciklama, 500) || null, idem, kim(req)])).rows[0];
+      for (const x of secilen) await db.query(`INSERT INTO taseron_hakedis_kalem (belge_id, master_works_id, site_code, fiziksel_id, item_code, aciklama, miktar, birim_fiyat, tutar, para_birimi, fiyat_id, fiyat_kaynak)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [bl.id, x.master_works_id, x.site_code, x.fiziksel_id, x.item_code, x.aciklama, x.kalan, x.fiyat.fiyat, x.tutar, x.fiyat.pb, x.fiyat.id, x.fiyat.kaynak || null]);
+      await islemGecmisiYaz(req, "taseron_hakedis", bl.id, "OLUSTURMA", null, { firma: M, tedarikci_id: s.id, tedarikci: kartAd(s), toplam, para_birimi: pbs[0], kalem: secilen.length, durum: "TASLAK" }, temiz(b.aciklama, 500) || null);
+      return { tekrar: false, belge_id: bl.id, toplam, kalem: secilen.length };
+    });
+    if (sonuc) res.json({ ok: true, ...sonuc });
+  });
+  app.get("/finance/marka-cari/hakedis/:id", okuKapi, async (req, res) => {
+    try {
+      const b = (await pool.query(`SELECT * FROM taseron_hakedis_belge WHERE id=$1 AND UPPER(firma_kod)=$2`, [Number(req.params.id), req.cariFirma])).rows[0];
+      if (!b) return hata(res, 404, "Hakediş bu firmada bulunamadı");
+      const k = (await pool.query(`SELECT * FROM taseron_hakedis_kalem WHERE belge_id=$1 ORDER BY site_code, id`, [b.id])).rows;
+      const g = (await pool.query(`SELECT tip, yeni, aciklama, kullanici, to_char(created_at,'YYYY-MM-DD HH24:MI') AS zaman FROM islem_gecmisi WHERE modul='taseron_hakedis' AND kayit_id=$1 ORDER BY id`, [b.id])).rows;
+      const fiyatGor = req.izinler?.fiyat_goruntule !== false;
+      res.json({ ok: true, belge: fiyatGor ? b : { ...b, toplam: null }, kalemler: fiyatGor ? k : k.map((x) => ({ ...x, birim_fiyat: null, tutar: null })), gecmis: g });
+    } catch (e) { hata(res, 500, "Hakediş alınamadı"); }
+  });
+  // Onay: TASLAK → ONAYLI (borç olur; nakit çıkışı OLUŞMAZ). İptal: kayıt silinmez, İPTAL olur, kalemler yeniden hakedişe girebilir.
+  async function hakedisDurum(req, res, yeni) {
+    const M = req.cariFirma, id = Number(req.params.id), neden = temiz(req.body?.neden, 500);
+    if (yeni === "IPTAL" && !neden) return hata(res, 400, "İptal nedeni zorunlu");
+    const sonuc = await islem(res, async (db) => {
+      const b = (await db.query(`SELECT * FROM taseron_hakedis_belge WHERE id=$1 AND UPPER(firma_kod)=$2 FOR UPDATE`, [id, M])).rows[0];
+      if (!b) throw hataK(404, "Hakediş bu firmada bulunamadı");
+      if (b.durum === yeni) return { zaten: true };
+      if (yeni === "ONAYLI" && b.durum !== "TASLAK") throw hataK(409, `Yalnız taslak hakediş onaylanır (durum: ${b.durum})`);
+      if (yeni === "IPTAL" && b.durum === "IPTAL") return { zaten: true };
+      if (yeni === "ONAYLI") await db.query(`UPDATE taseron_hakedis_belge SET durum='ONAYLI', onaylayan=$2, onay_tarihi=NOW() WHERE id=$1`, [id, kim(req)]);
+      else await db.query(`UPDATE taseron_hakedis_belge SET durum='IPTAL', iptal_eden=$2, iptal_tarihi=NOW(), iptal_neden=$3 WHERE id=$1`, [id, kim(req), neden]);
+      await islemGecmisiYaz(req, "taseron_hakedis", id, yeni === "ONAYLI" ? "ONAY" : "IPTAL", { durum: b.durum }, { durum: yeni, toplam: Number(b.toplam) }, neden || null);
+      return { zaten: false };
+    });
+    if (sonuc) res.json({ ok: true, ...sonuc });
+  }
+  app.post("/finance/marka-cari/hakedis/:id/onay", yazKapi, (req, res) => hakedisDurum(req, res, "ONAYLI"));
+  app.post("/finance/marka-cari/hakedis/:id/iptal", yazKapi, (req, res) => hakedisDurum(req, res, "IPTAL"));
+
+  // Taşeron fiyatları: liste (fiyat görme izni) / tanım (ödeme yazarı + fiyat değiştirme izni). Değişiklik = yeni satır;
+  // eski satır silinmez, tanımlı fiyat yalnız iptal edilebilir (gerekçeli). Onaylı hakedişin kalem fiyatı etkilenmez.
+  app.get("/finance/marka-cari/fiyat", okuKapi, async (req, res) => {
+    try {
+      const r = await pool.query(`SELECT f.*, to_char(f.gecerlilik_bas,'YYYY-MM-DD') AS bas, to_char(f.gecerlilik_bit,'YYYY-MM-DD') AS bit FROM taseron_fiyat f
+        WHERE UPPER(f.firma_kod)=$1 ORDER BY f.item_code, f.gecerlilik_bas DESC, f.id DESC`, [req.cariFirma]);
+      res.json({ ok: true, rows: r.rows });
+    } catch (e) { hata(res, 500, "Fiyatlar alınamadı"); }
+  });
+  app.post("/finance/marka-cari/fiyat", yazKapi, async (req, res) => {
+    try {
+      const M = req.cariFirma, b = req.body || {};
+      if (req.izinler?.fiyat_degistirme === false) return hata(res, 403, "Fiyat değiştirme yetkiniz yok");
+      const kod = temiz(b.item_code, 40), fiyat = r2(b.birim_fiyat), pb = String(b.para_birimi || "TRY").toUpperCase();
+      if (!kod) return hata(res, 400, "Kalem kodu gerekli");
+      if (!(fiyat > 0)) return hata(res, 400, "Birim fiyat sıfırdan büyük olmalı");
+      if (!PARA.includes(pb)) return hata(res, 400, "Geçersiz para birimi");
+      if (!tarihMi(b.gecerlilik_bas)) return hata(res, 400, "Geçerlilik başlangıç tarihi gerekli");
+      const kaynak = temiz(b.kaynak, 300); if (!kaynak) return hata(res, 400, "Fiyatın kaynağı / anlaşma açıklaması gerekli");
+      let tid = null;
+      if (b.tedarikci) { const R = await rehberOku(pool); const s = hakedisKart(R, M, b.tedarikci); if (!s) return hata(res, 404, "Tedarikçi bu firmanın kayıtlarında bulunamadı"); tid = s.id; }
+      const r = await pool.query(`INSERT INTO taseron_fiyat (firma_kod, tedarikci_id, item_code, aciklama, birim, birim_fiyat, para_birimi, gecerlilik_bas, gecerlilik_bit, kaynak, olusturan)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [M, tid, kod, temiz(b.aciklama, 300) || null, temiz(b.birim, 20) || null, fiyat, pb, b.gecerlilik_bas, tarihMi(b.gecerlilik_bit) ? b.gecerlilik_bit : null, kaynak, kim(req)]);
+      await islemGecmisiYaz(req, "taseron_fiyat", r.rows[0].id, "OLUSTURMA", null, { firma: M, tedarikci_id: tid, item_code: kod, birim_fiyat: fiyat, para_birimi: pb, gecerlilik_bas: b.gecerlilik_bas, kaynak }, null);
+      res.json({ ok: true, id: r.rows[0].id });
+    } catch (e) { console.error("[taseron fiyat]", e.message); hata(res, 500, "Fiyat kaydedilemedi"); }
+  });
+
+  // ══ ESKİ "DİĞER ÖDEME" KAYDININ TAŞERON AVANSINA AKTARIMI ══════════════════════════════════════════════════════════
+  // Yeni nakit çıkışı OLUŞMAZ: aynı tarih/tutarla taşeron avansı (taseron_odeme_log + marka_taseron_odeme) yazılır ve eski
+  // cashflow_odeme satırı SİLİNMEDEN aktarim_log_id ile işaretlenir; nakit akışı / özet / P&L okumaları işaretli satırı atlar.
+  // Tekrar çalıştırma ikinci hareket üretmez (satır kilidi + aktarim_log_id + idem_key). Geri alma: avans İPTAL, işaret kalkar.
+  app.get("/finance/marka-cari/aktarim/adaylar", yazKapi, async (req, res) => {
+    try {
+      const M = req.cariFirma; if (M === "SIMSEK") return hata(res, 400, "Yalnız alt marka firmalarında");
+      const r = await pool.query(`SELECT id, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, aciklama, donem, aktarim_log_id, to_char(aktarim_tarihi,'YYYY-MM-DD HH24:MI') AS aktarim_tarihi, aktarim_eden
+        FROM cashflow_odeme WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND UPPER(COALESCE(kategori,'')) = 'DIGER' ORDER BY tarih, id`, [M]);
+      res.json({ ok: true, rows: r.rows });
+    } catch (e) { hata(res, 500, "Adaylar alınamadı"); }
+  });
+  app.post("/finance/marka-cari/aktarim", yazKapi, async (req, res) => {
+    const M = req.cariFirma, b = req.body || {};
+    if (M === "SIMSEK") return hata(res, 400, "Yalnız alt marka firmalarında");
+    const cfId = Number(b.cashflow_id); if (!cfId) return hata(res, 400, "Aktarılacak ödeme kaydı seçin");
+    const gerekce = temiz(b.gerekce, 500); if (!gerekce) return hata(res, 400, "Aktarım gerekçesi zorunlu");
+    const sonuc = await islem(res, async (db) => {
+      const cf = (await db.query(`SELECT id, kategori, to_char(tarih,'YYYY-MM-DD') AS tarih, tutar, aciklama, donem, aktarim_log_id, UPPER(COALESCE(marka,'ERC')) AS marka FROM cashflow_odeme WHERE id=$1 FOR UPDATE`, [cfId])).rows[0];
+      if (!cf || cf.marka !== M) throw hataK(404, "Ödeme kaydı bu firmada bulunamadı");
+      if (cf.aktarim_log_id) return { tekrar: true, log_id: cf.aktarim_log_id };
+      if (String(cf.kategori || "").toUpperCase() !== "DIGER") throw hataK(409, "Yalnız 'Diğer Ödeme' kayıtları aktarılır");
+      const R = await rehberOku(db); const s = hakedisKart(R, M, b.tedarikci);
+      if (!s) throw hataK(404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
+      const idem = `cf-aktarim-${cf.id}`;
+      const ex = (await db.query(`SELECT id FROM taseron_odeme_log WHERE idem_key=$1`, [idem])).rows[0];
+      if (ex) { await db.query(`UPDATE cashflow_odeme SET aktarim_log_id=$2 WHERE id=$1`, [cf.id, ex.id]); return { tekrar: true, log_id: ex.id }; }
+      const ad = kartAd(s), ack = `${cf.aciklama || "Taşeron avansı"} · Diğer Ödeme #${cf.id}'den aktarıldı`;
+      const log = (await db.query(`INSERT INTO taseron_odeme_log (firma, tutar, tarih, aciklama, dagilim, avans_tutar, tedarikci_id, firma_kod, idem_key,
+          durum, islem_turu, yontem, kasadan_dus, para_birimi, created_by) VALUES ($1,$2,$3,$4,'[{"fatura_no":"AVANS (hakediş bekleniyor)","avans":true}]',$2,$5,$6,$7,'AKTIF','AVANS','KASA',true,'TRY',$8) RETURNING id`,
+        [ad, Number(cf.tutar), cf.tarih, ack, s.id, M, idem, kim(req)])).rows[0];
+      await db.query(`INSERT INTO marka_taseron_odeme (marka, taseron_adi, tip, tutar, tarih, aciklama, odeme_log_id, tedarikci_id, kasadan_dus, durum)
+        VALUES ($1,$2,'AVANS',$3,$4,$5,$6,$7,true,'AKTIF')`, [M, ad, Number(cf.tutar), cf.tarih, ack, log.id, s.id]);
+      await db.query(`UPDATE cashflow_odeme SET aktarim_log_id=$2, aktarim_tarihi=NOW(), aktarim_eden=$3 WHERE id=$1`, [cf.id, log.id, kim(req)]);
+      const iz = { cashflow_id: cf.id, tarih: cf.tarih, tutar: Number(cf.tutar), eski_kategori: "DIGER", eski_aciklama: cf.aciklama, yeni: `Taşeron avansı · ${ad}`, odeme_log_id: log.id };
+      await islemGecmisiYaz(req, "cashflow_odeme", cf.id, "TASERON_AKTARIM", { kategori: "DIGER", aktarim_log_id: null }, { aktarim_log_id: log.id, tedarikci: ad }, gerekce);
+      await islemGecmisiYaz(req, "tedarikci_odeme", log.id, "AKTARIM", null, iz, gerekce);
+      return { tekrar: false, log_id: log.id, ...iz };
+    });
+    if (sonuc) res.json({ ok: true, ...sonuc });
+  });
+  app.post("/finance/marka-cari/aktarim/:id/geri-al", yazKapi, async (req, res) => {
+    const M = req.cariFirma, neden = temiz(req.body?.neden, 500);
+    if (!neden) return hata(res, 400, "Geri alma nedeni zorunlu");
+    const sonuc = await islem(res, async (db) => {
+      const cf = (await db.query(`SELECT id, aktarim_log_id, UPPER(COALESCE(marka,'ERC')) AS marka FROM cashflow_odeme WHERE id=$1 FOR UPDATE`, [Number(req.params.id)])).rows[0];
+      if (!cf || cf.marka !== M) throw hataK(404, "Ödeme kaydı bu firmada bulunamadı");
+      if (!cf.aktarim_log_id) return { zaten: true };
+      await db.query(`UPDATE taseron_odeme_log SET durum='IPTAL', iptal_neden=$2, iptal_tarihi=NOW(), iptal_eden=$3, idem_key = idem_key || '-geri-' || id WHERE id=$1`, [cf.aktarim_log_id, neden, kim(req)]);
+      await db.query(`UPDATE marka_taseron_odeme SET durum='IPTAL', iptal_neden=$2, iptal_tarihi=NOW(), iptal_eden=$3 WHERE odeme_log_id=$1`, [cf.aktarim_log_id, neden, kim(req)]);
+      await db.query(`UPDATE cashflow_odeme SET aktarim_log_id=NULL, aktarim_tarihi=NULL, aktarim_eden=NULL WHERE id=$1`, [cf.id]);
+      await islemGecmisiYaz(req, "cashflow_odeme", cf.id, "TASERON_AKTARIM_GERI", { aktarim_log_id: cf.aktarim_log_id }, { aktarim_log_id: null }, neden);
+      return { zaten: false };
+    });
+    if (sonuc) res.json({ ok: true, ...sonuc });
   });
 
   return { cariHesapla, rehberOku, katla, fifoDagit };

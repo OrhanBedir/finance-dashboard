@@ -9800,7 +9800,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
         WHERE o.created_at >= $1::date AND o.created_at < $2::date GROUP BY 1`, [DEVIR, SON]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, SUM(tutar) AS t
         FROM cashflow_odeme
-        WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1`, [marka]).catch(() => ({ rows: [] })),
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND aktarim_log_id IS NULL GROUP BY 1`, [marka]).catch(() => ({ rows: [] })), // 02.11.2026: taşeron avansına aktarılan satır taşeron ödemesinde sayılır
       // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı.
       // Fatura girişindeki "Ödenen Tutar" da gerçek ödemedir (11.08.2026):
       // gider, panel Ödenen'iyle aynı kaynaktan beslenir; çift sayım koruması
@@ -10337,7 +10337,7 @@ async function markaNakitSatirlari(marka, req) {
           ar.plaka, c.donem, CASE c.kategori WHEN 'ARAC_DEPOZITO' THEN 'DEPOZITO' WHEN 'ARAC' THEN 'KIRA' END AS islem_turu,
           c.arac_id, 'manuel' AS kaynak, c.id AS kaynak_id, ar.kiralama_firmasi AS tedarikci
         FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
-        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1`, [marka]).catch(() => ({ rows: [] })),
+        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1 AND c.aktarim_log_id IS NULL`, [marka]).catch(() => ({ rows: [] })), // 02.11.2026: taşeron avansına aktarılan "Diğer Ödeme" satırı (aynı para) Taşeron Ödemeleri'nde görünür
       // Taşeron ödemeleri: AVANSLAR kasadaki nakitten çıkar (kasadan düşer).
       // FATURA ödemeleri: FIRMA modelinde (AHY eski kurgu) markanın kendi ödemesi → kasadan DÜŞMEZ;
       // PROJE modelinde (TEKNO, 19.10.2026) gerçek ödeme proje fonundan → ödeme tarihinde, ödenen
@@ -12055,7 +12055,7 @@ app.get("/finance/marka-pl", authMiddleware, async (req, res) => {
         WHERE o.created_at >= $1::date AND o.created_at < $2::date GROUP BY 1`, [DEVIR, SON]).catch(() => ({ rows: [] })),
       pool.query(`SELECT to_char(tarih,'YYYY-MM') AS ay, kategori, SUM(tutar) AS t
         FROM cashflow_odeme
-        WHERE UPPER(COALESCE(marka,'ERC')) = $1 GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })),
+        WHERE UPPER(COALESCE(marka,'ERC')) = $1 AND aktarim_log_id IS NULL GROUP BY 1,2`, [marka]).catch(() => ({ rows: [] })), // 02.11.2026: aktarılan satır hariç
       // Taşeron ödemeleri (avans + fatura ödemesi) — nakit akışıyla tutarlı.
       // Fatura girişindeki "Ödenen Tutar" da gerçek ödemedir (11.08.2026):
       // gider, panel Ödenen'iyle aynı kaynaktan beslenir; çift sayım koruması
@@ -20397,6 +20397,9 @@ async function ensureCashflowOdemeTable() {
   await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS marka TEXT DEFAULT 'ERC'`);
   // 16.10.2026 (Orhan): araç kirası / depozito manuel girişleri araç kimliğine bağlanır (plaka zorunlu)
   await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS arac_id INTEGER`).catch(() => {});
+  // 02.11.2026: taşeron avansına aktarım işareti (tedarikciCari.js) — okumalar "aktarim_log_id IS NULL" ister; kolon her zaman var olmalı
+  for (const x of ["aktarim_log_id INTEGER", "aktarim_tarihi TIMESTAMP", "aktarim_eden TEXT"])
+    await pool.query(`ALTER TABLE cashflow_odeme ADD COLUMN IF NOT EXISTS ${x}`).catch(() => {});
 }
 
 app.get("/finance/cashflow-odeme", requireFinanceAuth, async (req, res) => {
@@ -20523,7 +20526,7 @@ app.get("/finance/marka-odeme", authMiddleware, async (req, res) => {
       `SELECT c.id, c.kategori, TO_CHAR(c.tarih,'YYYY-MM-DD') AS tarih, c.tutar, c.donem, c.aciklama, c.arac_id, ar.plaka,
               NOT ${markaOdemeBagliSql} AS silinebilir
          FROM cashflow_odeme c LEFT JOIN araclar ar ON ar.id = c.arac_id
-        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1 AND UPPER(c.kategori) = ANY($2::text[])
+        WHERE UPPER(COALESCE(c.marka,'ERC')) = $1 AND UPPER(c.kategori) = ANY($2::text[]) AND c.aktarim_log_id IS NULL
           AND EXTRACT(YEAR FROM c.tarih) = $3 AND EXTRACT(MONTH FROM c.tarih) = $4
         ORDER BY c.tarih, c.id`, [marka, MARKA_ODEME_KATEGORI, yil, ay]);
     const kap = markaOdemeAracKapsam(req, marka);
@@ -20561,10 +20564,12 @@ app.delete("/finance/marka-odeme/:id", authMiddleware, async (req, res) => {
   try {
     if (!MARKA_KASA_ROLLER.includes(String(req.user?.role || "").toLowerCase())) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     const k = await pool.query(
-      `SELECT c.id, UPPER(COALESCE(c.marka,'ERC')) AS marka, UPPER(c.kategori) AS kategori, ${markaOdemeBagliSql} AS bagli
+      `SELECT c.id, UPPER(COALESCE(c.marka,'ERC')) AS marka, UPPER(c.kategori) AS kategori, ${markaOdemeBagliSql} AS bagli, c.aktarim_log_id
          FROM cashflow_odeme c WHERE c.id = $1`, [req.params.id]);
     const o = k.rows[0];
     if (!o || o.marka === "ERC" || !altMarkaMi(o.marka)) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    // 02.11.2026: taşeron avansına aktarılmış kayıt silinmez (aktarım izi) — önce cari ekranından aktarım geri alınır
+    if (o.aktarim_log_id) return res.status(409).json({ ok: false, error: "Bu ödeme taşeron carisine aktarılmış — silinemez; gerekiyorsa aktarımı geri alın" });
     if (!MARKA_ODEME_KATEGORI.includes(o.kategori) || o.bagli)
       return res.status(400).json({ ok: false, error: "Bu ödeme başka bir modülden otomatik oluştu — buradan silinemez" });
     await pool.query(`DELETE FROM cashflow_odeme WHERE id = $1`, [o.id]);
@@ -20576,7 +20581,8 @@ app.delete("/finance/cashflow-odeme/:id", requireFinanceAuth, async (req, res) =
   try {
     // Çek/senet ödemeleri otomatik kayıttır — buradan silinemez; Çek & Senet
     // panelinden "Geri Al" ile kaldırılır (aynı anda belge de BEKLIYOR'a döner).
-    const k = await pool.query(`SELECT kategori FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
+    const k = await pool.query(`SELECT kategori, aktarim_log_id FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
+    if (k.rows[0]?.aktarim_log_id) return res.status(409).json({ ok: false, error: "Bu ödeme taşeron carisine aktarılmış — silinemez" });
     if (k.rows[0]?.kategori === "CEKSENET")
       return res.status(400).json({ ok: false, error: "Çek/Senet ödemesi buradan silinemez — Çek & Senet panelinden Geri Al kullanın" });
     await pool.query(`DELETE FROM cashflow_odeme WHERE id=$1`, [req.params.id]);
@@ -28136,6 +28142,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS ekipler (
 )`).catch(() => {})
   .then(() => pool.query(`CREATE TABLE IF NOT EXISTS subcons (id SERIAL PRIMARY KEY, subcon_name TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`).catch(() => {}))
   .then(() => orgEkip.semaKur(pool)) // 28.10.2026: firma bağı, ekip şefi, üyelik geçmişi
+  .then(() => ensureCashflowOdemeTable().catch((e) => console.error("[cashflow şema]", e.message))) // 02.11.2026: aktarım kolonları açılışta hazır
   .then(() => tedarikciCari.semaKur(pool)); // 29.10.2026: tedarikçi cari kolonları (subcons hazır olduktan sonra)
 // Ekip adı (örn. "ENH Ekibi") + üye bazlı araç ataması (araç kişiye yazılır)
 pool.query(`ALTER TABLE ekipler ADD COLUMN IF NOT EXISTS ad TEXT`).catch(() => {});

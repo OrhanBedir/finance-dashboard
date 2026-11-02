@@ -4240,6 +4240,168 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
 /* Geniş ödeme penceresi: sol — arama, unvan, cari özet, açık faturalar (FIFO sırası, isteğe bağlı fatura seçimi);
    sağ — işlem türü, tutar / para birimi, tarih, yöntem / kasa, açıklama, dekont, DAĞITIM ÖNİZLEMESİ, kaydet;
    alt — seçilen tedarikçinin ödeme / avans / mahsup geçmişi (iptal = ters işlem, kayıt silinmez). */
+/* 02.11.2026 HAKEDİŞ ESASLI CARİ (TEKNO_EMRAH, TEKNO_SEYFİ): fatura yerine doğrulanmış iş + onaylı hakediş.
+   Özet (plan / fiziki / onaylı hakediş / ödeme / mahsup / kalan borç / açık avans / net), gerçekleşen kalemler (seçip
+   hakediş taslağı), hakedişler (onay / iptal), fiyatı tanımsız kalemler ve eski "Diğer Ödeme" aktarımı. Hesap sunucuda. */
+function CariHakedisBolumu({ marka, cari, yazabilir, onDegisti }) {
+  const [is, setIs] = useState(null);
+  const [hata, setHata] = useState("");
+  const [secili, setSecili] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [mesaj, setMesaj] = useState(null);
+  const [aday, setAday] = useState([]);
+  const [idem, setIdem] = useState(() => odmIdem("hakedis"));
+  const yukle = async () => {
+    try { const j = await cariIstek(`hakedis/isler?tedarikci=${encodeURIComponent(cari.anahtar)}`, { marka }); setIs(j); setHata(""); }
+    catch (e) { setIs(null); setHata(e.message); }
+    if (yazabilir) { try { const a = await cariIstek("aktarim/adaylar", { marka }); setAday(a.rows || []); } catch { setAday([]); } }
+  };
+  useEffect(() => { setSecili([]); yukle(); }, [cari?.anahtar]);
+  const P = (cari?.pb || {}).TRY || {};
+  const ozet = is?.ozet || {};
+  const rows = is?.rows || [];
+  const hazir = rows.filter((r) => r.kalan > 0.009 && r.fiyat_durum === "VAR");
+  const fiyatsiz = rows.filter((r) => r.kalan > 0.009 && r.fiyat_durum !== "VAR");
+  const kartKatla = (t) => String(t || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C");
+  const adParca = kartKatla(cari.ad).replace(/^TEKNO[_\s-]*/, "").split(/[\s_]+/)[0];
+  const ilgiliAday = aday.filter((a) => !a.aktarim_log_id && adParca && kartKatla(a.aciklama).includes(adParca));
+  const aktarilmis = aday.filter((a) => a.aktarim_log_id && adParca && kartKatla(a.aciklama).includes(adParca));
+  const kart = (baslik, deger, renk, alt) => (
+    <div style={{ flex: "1 1 150px", background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", padding: "8px 10px", minWidth: 0 }}>
+      <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>{baslik}</div>
+      <div style={{ fontSize: "15px", fontWeight: 800, color: renk }}>{deger}</div>
+      {alt && <div style={{ fontSize: "10.5px", color: "#94a3b8" }}>{alt}</div>}
+    </div>);
+  const tutarYaz = (v) => (v === null || v === undefined ? "—" : cariPara(v, "TRY"));
+  const taslak = async () => {
+    if (!secili.length || busy) return;
+    setBusy(true); setMesaj(null);
+    try {
+      const j = await cariIstek("hakedis", { method: "POST", marka, govde: { tedarikci: cari.anahtar, master_works_ids: secili, idem_key: idem } });
+      setMesaj({ tip: "ok", metin: j.tekrar ? "Bu hakediş zaten oluşturulmuştu — ikinci kayıt yok." : `Hakediş taslağı #${j.belge_id} oluşturuldu (${j.kalem} kalem, ${cariPara(j.toplam)}). Onaylanınca borç olur.` });
+      setSecili([]); setIdem(odmIdem("hakedis")); await yukle(); onDegisti && onDegisti();
+    } catch (e) { setMesaj({ tip: "hata", metin: e.message }); } finally { setBusy(false); }
+  };
+  const durum = async (h, yeni) => {
+    let neden = null;
+    if (yeni === "iptal") { neden = window.prompt(`Hakediş #${h.id} (${cariPara(h.toplam)}) iptal edilsin mi?\nKayıt silinmez; İPTAL olur ve kalemleri yeniden hakedişe girebilir.\n\nİptal nedeni:`); if (!neden || !neden.trim()) return; }
+    else if (!window.confirm(`Hakediş #${h.id} — ${cariPara(h.toplam)} onaylansın mı?\nOnaylı hakediş taşerona borç olur; nakit çıkışı OLUŞMAZ. Açık avans varsa otomatik mahsup edilir.`)) return;
+    try { await cariIstek(`hakedis/${h.id}/${yeni}`, { method: "POST", marka, govde: neden ? { neden } : {} }); await yukle(); onDegisti && onDegisti(); }
+    catch (e) { setMesaj({ tip: "hata", metin: e.message }); }
+  };
+  const fiyatTanimla = async (r) => {
+    const f = window.prompt(`${r.item_code} — ${r.aciklama}\n${cari.ad} için taşeron birim fiyatı (₺, KDV hariç):\n(Huawei PO / BoQ satış fiyatı değil; taşeronla anlaşılan fiyat)`);
+    if (!f) return;
+    const kaynak = window.prompt("Fiyatın kaynağı / anlaşma (ör. 'Orhan Bedir ile 01.11.2026 sözlü anlaşma', 'Teknocenter taşeron fiyat listesi 31.10.2026'):");
+    if (!kaynak || !kaynak.trim()) return;
+    const bas = window.prompt("Geçerlilik başlangıcı (YYYY-AA-GG):", "2026-10-15");
+    if (!bas) return;
+    try {
+      await cariIstek("fiyat", { method: "POST", marka, govde: { tedarikci: cari.anahtar, item_code: r.item_code, aciklama: r.aciklama, birim_fiyat: String(odmSayi(f)), para_birimi: "TRY", gecerlilik_bas: bas, kaynak } });
+      await yukle();
+    } catch (e) { alert(e.message); }
+  };
+  const aktar = async (a) => {
+    const gerekce = window.prompt(`"${a.aciklama}" (${cariTarih(a.tarih)} · ${cariPara(a.tutar)}) ${cari.ad} carisine TAŞERON AVANSI olarak bağlansın mı?\nYeni ödeme oluşmaz; kayıt Diğer Ödemeler'den Taşeron Ödemeleri'ne geçer, nakit toplamı değişmez.\n\nAktarım gerekçesi:`, "Ödeme taşerona yapılmış avanstır; Diğer Ödeme olarak girilmişti");
+    if (!gerekce || !gerekce.trim()) return;
+    try { const j = await cariIstek("aktarim", { method: "POST", marka, govde: { cashflow_id: a.id, tedarikci: cari.anahtar, gerekce } }); setMesaj({ tip: "ok", metin: j.tekrar ? "Bu kayıt zaten aktarılmıştı — ikinci hareket oluşmadı." : `Aktarıldı: ${cariPara(a.tutar)} → ${cari.ad} taşeron avansı (Ö-${j.log_id}).` }); await yukle(); onDegisti && onDegisti(); }
+    catch (e) { setMesaj({ tip: "hata", metin: e.message }); }
+  };
+  const thH = { padding: "6px 8px", fontSize: "10.5px", fontWeight: 800, color: "#64748b", textTransform: "uppercase", textAlign: "left", background: "#f8fafc", position: "sticky", top: 0 };
+  const tdH = { padding: "6px 8px", fontSize: "12px", color: "#334155", borderBottom: "1px solid #f1f5f9" };
+  return (
+    <div style={{ background: "#faf5ff", border: "1.5px solid #ddd6fe", borderRadius: "14px", padding: "12px 14px", marginBottom: "12px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "6px" }}>
+        <div style={{ fontWeight: 800, color: "#5b21b6", fontSize: "14px" }}>🧾 Hakediş esaslı cari — {cari.ad}</div>
+        <div style={{ fontSize: "11px", color: "#6d28d9" }}>Fatura zorunlu değil: borç = onaylı hakediş. Muhasebe belgeleri ayrı süreçte yürür.</div>
+      </div>
+      {hata && <div style={{ color: "#b91c1c", fontSize: "12px", marginTop: "6px" }}>{hata}</div>}
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" }}>
+        {kart("Planlanan iş (PR)", tutarYaz(ozet.plan_tutar), "#475569", "fiyatı tanımlı kalemler · borç değildir")}
+        {kart("Fiziki gerçekleşen", tutarYaz(ozet.fiziki_tutar), "#1e3a5f", `${ozet.fiziki_kalem || 0} kalem · ${ozet.saha || 0} saha / ${ozet.is_kodu || 0} iş`)}
+        {kart("Onaylı hakediş", cariPara(P.hakedis || 0), "#5b21b6", "taşerona borç")}
+        {kart("Toplam ödeme", cariPara(P.nakit || 0), "#0f766e", "avans + ödeme (gerçek)")}
+        {kart("Hakedişe mahsup", cariPara(P.hakedis_mahsup || 0), "#15803d", "nakit çıkışı değildir")}
+        {kart("Kalan hakediş borcu", cariPara(P.hakedis_kalan || 0), (P.hakedis_kalan || 0) > 0 ? "#b45309" : "#15803d", "ödenecek")}
+        {kart("Açık avans", cariPara(P.avans_acik || 0), "#0e7490", "henüz mahsup edilmedi")}
+        {kart("Net cari", cariPara(P.net || 0), (P.net || 0) > 0 ? "#b45309" : (P.net || 0) < 0 ? "#0e7490" : "#15803d",
+          (P.net || 0) > 0 ? `${cari.ad} alacaklı (biz borçluyuz)` : (P.net || 0) < 0 ? `${cari.ad} borçlu (fazla ödeme/avans)` : "bakiye sıfır")}
+      </div>
+      {mesaj && <div style={{ marginTop: "8px", padding: "8px 10px", borderRadius: "8px", fontSize: "12.5px", fontWeight: 700, background: mesaj.tip === "ok" ? "#dcfce7" : "#fee2e2", color: mesaj.tip === "ok" ? "#166534" : "#b91c1c" }}>{mesaj.metin}</div>}
+
+      {(ilgiliAday.length > 0 || aktarilmis.length > 0) && (
+        <div style={{ marginTop: "10px", background: "#fff", border: "1.5px dashed #c4b5fd", borderRadius: "10px", padding: "8px 10px" }}>
+          <div style={{ fontSize: "12px", fontWeight: 800, color: "#5b21b6", marginBottom: "4px" }}>Eski "Diğer Ödeme" kayıtları (açıklamasında {cari.ad} geçen)</div>
+          {ilgiliAday.map((a) => (
+            <div key={a.id} style={{ display: "flex", gap: "8px", alignItems: "center", fontSize: "12px", padding: "3px 0", flexWrap: "wrap" }}>
+              <span style={{ minWidth: "82px" }}>{cariTarih(a.tarih)}</span><b style={{ minWidth: "90px" }}>{cariPara(a.tutar)}</b><span style={{ flex: 1 }}>{a.aciklama} <span style={{ color: "#94a3b8" }}>#{a.id}</span></span>
+              {yazabilir && <button onClick={() => aktar(a)} style={{ padding: "3px 9px", background: "#5b21b6", color: "#fff", border: "none", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>Taşeron avansına bağla</button>}
+            </div>))}
+          {aktarilmis.map((a) => (
+            <div key={a.id} style={{ fontSize: "11.5px", color: "#15803d", padding: "2px 0" }}>✓ {cariTarih(a.tarih)} · {cariPara(a.tutar)} · {a.aciklama} — aktarıldı (Ö-{a.aktarim_log_id}, {a.aktarim_eden || "—"})</div>))}
+          <div style={{ fontSize: "10.5px", color: "#94a3b8", marginTop: "3px" }}>Aday listesi açıklama metnine göre gösterilir; hangi kaydın bağlanacağına siz karar verirsiniz.</div>
+        </div>)}
+
+      <div style={{ marginTop: "10px", background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap", borderBottom: "1px solid #e2e8f0" }}>
+          <b style={{ fontSize: "12.5px", color: "#0f172a" }}>Saha / iş / kalem ({rows.length}) — PR, fiziki ve hakedişe giren miktar ayrı</b>
+          {yazabilir && <button disabled={!secili.length || busy} onClick={taslak} style={{ padding: "5px 11px", background: secili.length ? "#5b21b6" : "#cbd5e1", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: secili.length ? "pointer" : "default" }}>{busy ? "Kaydediliyor…" : `Seçilenlerden hakediş taslağı (${secili.length})`}</button>}
+        </div>
+        <div style={{ overflowX: "auto", maxHeight: "300px", overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              <th style={thH}>{yazabilir && hazir.length > 0 && <input type="checkbox" checked={secili.length === hazir.length && hazir.length > 0} onChange={(e) => setSecili(e.target.checked ? hazir.map((r) => r.master_works_id) : [])} />}</th>
+              <th style={thH}>Saha / iş kodu</th><th style={thH}>Kalem</th><th style={{ ...thH, textAlign: "right" }}>PR</th><th style={{ ...thH, textAlign: "right" }}>Fiziki</th>
+              <th style={{ ...thH, textAlign: "right" }}>Hakedişte</th><th style={{ ...thH, textAlign: "right" }}>Kalan</th><th style={{ ...thH, textAlign: "right" }}>Taşeron fiyatı</th><th style={{ ...thH, textAlign: "right" }}>Tutar</th><th style={thH}>QC</th>
+            </tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={10} style={{ ...tdH, textAlign: "center", color: "#94a3b8" }}>{is ? "Bu taşerona bağlı kalem yok" : "Yükleniyor…"}</td></tr>}
+              {rows.map((r) => {
+                const secilebilir = r.kalan > 0.009 && r.fiyat_durum === "VAR";
+                return (
+                  <tr key={r.master_works_id} style={{ background: secili.includes(r.master_works_id) ? "#f5f3ff" : undefined }}>
+                    <td style={tdH}>{yazabilir && secilebilir && <input type="checkbox" checked={secili.includes(r.master_works_id)} onChange={(e) => setSecili((x) => e.target.checked ? [...x, r.master_works_id] : x.filter((y) => y !== r.master_works_id))} />}</td>
+                    <td style={{ ...tdH, whiteSpace: "nowrap" }}><b>{r.fiziksel_id}</b><div style={{ fontSize: "10.5px", color: "#64748b" }}>{r.site_code}</div></td>
+                    <td style={tdH}><span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: "11px" }}>{r.item_code}</span><div style={{ fontSize: "11px", color: "#64748b" }}>{r.aciklama}</div></td>
+                    <td style={{ ...tdH, textAlign: "right" }}>{r.pr_qty}</td>
+                    <td style={{ ...tdH, textAlign: "right", fontWeight: 700 }}>{r.fiziki_qty}</td>
+                    <td style={{ ...tdH, textAlign: "right" }}>{r.hakediste || "—"}</td>
+                    <td style={{ ...tdH, textAlign: "right", fontWeight: 700, color: r.kalan > 0 ? "#5b21b6" : "#94a3b8" }}>{r.kalan}</td>
+                    <td style={{ ...tdH, textAlign: "right", whiteSpace: "nowrap" }}>{r.fiyat ? <span title={`Kaynak: ${r.fiyat.kaynak || "—"} · geçerli ${cariTarih(r.fiyat.bas)}'den`}>{cariPara(r.fiyat.fiyat, r.fiyat.pb)}</span>
+                      : <span style={{ color: "#b45309", fontWeight: 700 }}>{r.fiyat_durum === "BELIRSIZ" ? "Fiyat belirsiz" : "Taşeron fiyatı tanımlanmadı"}{yazabilir && r.fiyat_durum === "TANIMSIZ" && <button onClick={() => fiyatTanimla(r)} style={{ marginLeft: "6px", padding: "1px 7px", fontSize: "10.5px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "6px", cursor: "pointer", color: "#9a3412", fontWeight: 700 }}>Fiyat tanımla</button>}</span>}</td>
+                    <td style={{ ...tdH, textAlign: "right", whiteSpace: "nowrap" }}>{r.tutar !== null && r.tutar !== undefined && r.kalan > 0 ? cariPara(r.tutar) : "—"}</td>
+                    <td style={tdH}>{r.qc || "—"}</td>
+                  </tr>);
+              })}
+            </tbody>
+          </table>
+        </div>
+        {fiyatsiz.length > 0 && <div style={{ padding: "6px 10px", fontSize: "11px", color: "#9a3412", background: "#fff7ed", borderTop: "1px solid #fed7aa" }}>⚠ Fiyat onayı bekleyen {fiyatsiz.length} kalem hakedişe giremez ve tutarlara eklenmez (sıfır sayılmaz). Taşeron fiyatı Huawei PO / BoQ satış fiyatından otomatik alınmaz.</div>}
+      </div>
+
+      <div style={{ marginTop: "10px", background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ padding: "8px 10px", fontSize: "12.5px", fontWeight: 800, color: "#0f172a", borderBottom: "1px solid #e2e8f0" }}>Hakedişler ({(cari.hakedisler || []).length})</div>
+        {(cari.hakedisler || []).length === 0 ? <div style={{ ...tdH, color: "#94a3b8" }}>Henüz hakediş yok</div> : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th style={thH}>No</th><th style={thH}>Tarih</th><th style={thH}>Durum</th><th style={{ ...thH, textAlign: "right" }}>Kalem</th><th style={{ ...thH, textAlign: "right" }}>Tutar</th><th style={{ ...thH, textAlign: "right" }}>Mahsup edilen</th><th style={{ ...thH, textAlign: "right" }}>Kalan</th><th style={thH}>Onay</th><th style={thH}></th></tr></thead>
+            <tbody>{(cari.hakedisler || []).map((h) => (
+              <tr key={h.id} style={{ opacity: h.durum === "IPTAL" ? .55 : 1 }}>
+                <td style={tdH}>H-{h.id}</td><td style={tdH}>{cariTarih(h.tarih)}</td>
+                <td style={tdH}><span style={{ fontSize: "10.5px", fontWeight: 800, padding: "1px 6px", borderRadius: "6px", background: h.durum === "ONAYLI" ? "#dcfce7" : h.durum === "TASLAK" ? "#fef3c7" : "#f1f5f9", color: h.durum === "ONAYLI" ? "#166534" : h.durum === "TASLAK" ? "#92400e" : "#64748b" }}>{h.durum === "ONAYLI" ? "Onaylı" : h.durum === "TASLAK" ? "Taslak · onay bekliyor" : `İptal${h.iptal_neden ? ` — ${h.iptal_neden}` : ""}`}</span></td>
+                <td style={{ ...tdH, textAlign: "right" }}>{h.kalem_sayisi}</td>
+                <td style={{ ...tdH, textAlign: "right", fontWeight: 700 }}>{cariPara(h.toplam, h.pb)}</td>
+                <td style={{ ...tdH, textAlign: "right" }}>{h.durum === "ONAYLI" ? cariPara(h.karsilanan || 0, h.pb) : "—"}</td>
+                <td style={{ ...tdH, textAlign: "right" }}>{h.durum === "ONAYLI" ? cariPara(h.kalan ?? h.toplam, h.pb) : "—"}</td>
+                <td style={{ ...tdH, fontSize: "11px" }}>{h.onaylayan ? `${h.onaylayan} · ${h.onay_tarihi}` : "—"}</td>
+                <td style={{ ...tdH, whiteSpace: "nowrap" }}>{yazabilir && h.durum === "TASLAK" && <button onClick={() => durum(h, "onay")} style={{ padding: "3px 9px", background: "#166534", color: "#fff", border: "none", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", marginRight: "4px" }}>Onayla</button>}
+                  {yazabilir && h.durum !== "IPTAL" && <button onClick={() => durum(h, "iptal")} style={{ padding: "3px 9px", background: "#fff", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>İptal</button>}</td>
+              </tr>))}</tbody>
+          </table>)}
+      </div>
+    </div>
+  );
+}
+
 function CariOdemePenceresi({ marka, markaAd, baslangic, onClose, onDone }) {
   const bugunS = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const [sec, setSec] = useState(baslangic || "");
@@ -4536,6 +4698,10 @@ function CariOdemePenceresi({ marka, markaAd, baslangic, onClose, onDone }) {
           </div>
         </div>
 
+        {/* 02.11.2026: hakediş esaslı cari bölümü (yalnız cari_modeli = HAKEDIS kartlarda) */}
+        {cari && cari.cari_modeli === "HAKEDIS" && (
+          <div style={{ padding: "0 14px" }}><CariHakedisBolumu marka={marka} cari={cari} yazabilir={yazabilir} onDegisti={() => { yukle(); onDone && onDone(); }} /></div>
+        )}
         {/* ALT — ödeme / avans geçmişi */}
         {cari && (
           <div style={{ padding: "0 14px 16px" }}>
@@ -5013,9 +5179,9 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
     <div style={{ padding: "24px", maxWidth: "1200px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
         <div>
-          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🔧 {markaAd} — Taşeron Faturaları</h2>
+          <h2 style={{ margin: "0 0 4px", fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🔧 {markaAd} — Taşeron ve Tedarikçi Carileri</h2>
           <div style={{ fontSize: "13px", color: "#64748b" }}>
-            RF montaj taşeronları + konaklama, vinç, nakliye — {markaAd}'ye fatura ile yapılan tüm işler; ödemeler nakit akışına düşer
+            RF montaj taşeronları + konaklama, vinç, nakliye — faturalı tedarikçiler ve hakediş esaslı taşeron carileri; ödemeler nakit akışına düşer
           </div>
         </div>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
@@ -5053,7 +5219,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
       {/* ── Tedarikçi cari hesapları (firma kartı bazında; fatura borcu ↔ ödeme ↔ avans) ── */}
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
         <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-          <span>🏦 Tedarikçi Cari Hesapları ({cariL.rows.length}) — kesilmiş fatura borcu ve ödemeler</span>
+          <span>🏦 Taşeron ve Tedarikçi Carileri ({cariL.rows.length}) — fatura ya da onaylı hakediş borcu ve ödemeler</span>
           {cariL.sorunlar.length > 0 && <button onClick={() => setSorunAcik((v) => !v)} style={{ background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "8px", padding: "4px 10px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>⚠ Kimlik / veri sorunları ({cariL.sorunlar.length}) {sorunAcik ? "▲" : "▼"}</button>}
         </div>
         {sorunAcik && (
@@ -5071,7 +5237,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               <th style={thF}>Tedarikçi</th>
-              <th style={{ ...thF, textAlign: "right" }}>Geçerli Fatura</th>
+              <th style={{ ...thF, textAlign: "right" }}>Geçerli Fatura / Onaylı Hakediş</th>
               <th style={{ ...thF, textAlign: "right" }}>Uygulanan Ödeme</th>
               <th style={{ ...thF, textAlign: "right" }}>Kalan Fatura Borcu</th>
               <th style={{ ...thF, textAlign: "right" }}>Açık Avans / Alacak</th>
@@ -5086,9 +5252,10 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                 const hucre = (alan, renk) => pbs.length ? pbs.map(([pb, P]) => <div key={pb} style={{ color: typeof renk === "function" ? renk(P[alan]) : renk }}>{Number(P[alan] || 0) ? cariPara(P[alan], pb) : "—"}</div>) : "—";
                 return (
                   <tr key={r.anahtar}>
-                    <td style={tdS}><div style={{ fontWeight: 700 }}>{r.ad}<CariKimlikRozet kimlik={r.kimlik} /></div>
+                    <td style={tdS}><div style={{ fontWeight: 700 }}>{r.ad}<CariKimlikRozet kimlik={r.kimlik} />
+                      {r.cari_modeli === "HAKEDIS" && <span title="Fatura yerine doğrulanmış iş ve onaylı hakediş üzerinden izlenir" style={{ marginLeft: "6px", fontSize: "10px", fontWeight: 800, padding: "1px 6px", borderRadius: "6px", background: "#ede9fe", color: "#5b21b6", whiteSpace: "nowrap" }}>Hakediş esaslı cari</span>}</div>
                       {r.unvan && r.unvan !== r.ad && <div style={{ fontSize: "10.5px", color: "#94a3b8" }}>{r.unvan}</div>}</td>
-                    <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap" }}>{hucre("gecerli", "#1e3a5f")}</td>
+                    <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap" }}>{r.cari_modeli === "HAKEDIS" ? hucre("hakedis", "#5b21b6") : hucre("gecerli", "#1e3a5f")}</td>
                     <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap" }}>{hucre("uygulanan", "#15803d")}</td>
                     <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap", fontWeight: 800 }}>{hucre("kalan", (v) => v > 0 ? "#b45309" : "#15803d")}</td>
                     <td style={{ ...tdS, textAlign: "right", whiteSpace: "nowrap" }}>{hucre("alacak", "#0e7490")}</td>
@@ -5106,7 +5273,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
         </div>
         <TabloAcKapa id="cari" count={cariL.rows.length} />
         <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
-          Kalan fatura borcu yalnız kesilmiş faturalardandır (fatura toplamı = KDV dahil ödenecek tutar; tevkifatlı faturada tevkifat düşülmüş). Faturası gelmemiş hakediş bu borca eklenmez — aşağıdaki hakediş tablosunda ayrı izlenir. Açık avans faturaya mahsup edilene kadar alacaktır; net cari = kalan fatura borcu − açık avans/alacak. Ödemeler nakit akışına bir kez düşer.
+          Hakediş esaslı carilerde (mor etiket) borç = onaylı hakediştir; açık avans tarih sırasıyla hakedişe mahsup edilir, mahsup yeni nakit çıkışı değildir. Faturalı tedarikçilerde kalan fatura borcu yalnız kesilmiş faturalardandır (fatura toplamı = KDV dahil ödenecek tutar; tevkifatlı faturada tevkifat düşülmüş). Faturası gelmemiş hakediş bu borca eklenmez — aşağıdaki hakediş tablosunda ayrı izlenir. Açık avans faturaya mahsup edilene kadar alacaktır; net cari = kalan fatura borcu − açık avans/alacak. Ödemeler nakit akışına bir kez düşer.
         </div>
       </div>
 
