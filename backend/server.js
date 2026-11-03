@@ -3912,10 +3912,12 @@ async function boqSecimHazirla(req, { surum, kod, site, gerekce, kapsam, surumDe
   const snap = await boqKatalog.prSnapshot(pool, { surum: S.kod, kod, bolge, kapsam });
   if (!snap.ok) return { ok: false, http: 400, hata: snap.hata };
   const oneri = await boqKatalog.surumOner(pool, site);
-  const aykiri = !!(oneri.onerilen && oneri.onerilen !== S.kod);
+  // 03.11.2026: enerji kalemi ENH malzeme geliş tarihine, diğerleri RF tarihine göre değerlendirilir
+  const ko = boqKatalog.kalemOnerisi(oneri, (await boqKatalog.kalemKapsamlari(pool, [kod])).get(String(kod || "").trim()) || "RF");
+  const aykiri = !!(ko.onerilen && ko.onerilen !== S.kod);
   const kullanici = String(req.user?.email || optionalAuth(req)?.email || "").toLowerCase();
   if (aykiri && !String(gerekce || "").trim()) {
-    return { ok: false, http: 400, hata: `Malzeme geliş tarihine göre önerilen sürüm ${boqKatalog.surumBul(oneri.onerilen).kisa}; ${S.kisa} seçimi için gerekçe zorunlu.`, oneri };
+    return { ok: false, http: 400, hata: `${ko.kapsam === "ENH" ? "Enerji kalemi " + kod + ": ENH malzeme" : "Malzeme"} geliş tarihine göre önerilen sürüm ${boqKatalog.surumBul(ko.onerilen).kisa}; ${S.kisa} seçimi için gerekçe zorunlu.`, oneri };
   }
   if (aykiri && !BOQ_ICE_ALMA_ROLLER.concat(["direktor", "genel_mudur", "rollout_mudur", "pm", "bolge_mudur", "muhasebe"]).includes(String(req.user?.role || "").toLowerCase()))
     return { ok: false, http: 403, hata: "Tarihe aykırı BoQ sürümü seçme yetkiniz yok — yönetici seçebilir." };
@@ -3923,7 +3925,7 @@ async function boqSecimHazirla(req, { surum, kod, site, gerekce, kapsam, surumDe
     : { boq_surum: S.kod, boq_bolge: null, boq_birim: null, boq_para_birimi: null, boq_birim_fiyat: null, boq_aciklama: null, boq_secim_gerekce: String(gerekce || "").trim() || null, boq_secim_kullanici: kullanici || null, boq_secim_zaman: new Date() };
   return { ok: true, snapshot, uyari: snap.uyari || (snap.fiyat_yok ? `${kod} için ${S.kisa} kataloğunda fiyat yazmıyor` : ""), aykiri, oneri,
     log: async (masterId) => { try { await pool.query(`INSERT INTO boq_secim_log (site_code, item_code, master_id, surum, onerilen_surum, oneri_gerekce, aykiri, gerekce, kullanici) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [site, kod, masterId || null, S.kod, oneri.onerilen, oneri.gerekce, aykiri, String(gerekce || "").trim() || null, kullanici || null]); } catch (e) { console.error("boq_secim_log:", e.message); } } };
+      [site, kod, masterId || null, S.kod, ko.onerilen, ko.gerekce, aykiri, String(gerekce || "").trim() || null, kullanici || null]); } catch (e) { console.error("boq_secim_log:", e.message); } } };
 }
 const BOQ_SNAP_KOLON = ["boq_surum", "boq_bolge", "boq_birim", "boq_para_birimi", "boq_birim_fiyat", "boq_aciklama", "boq_secim_gerekce", "boq_secim_kullanici", "boq_secim_zaman"];
 const boqSnapDegerler = (snap) => BOQ_SNAP_KOLON.map((k) => (snap ? snap[k] ?? null : null));
@@ -3938,7 +3940,11 @@ app.get("/boq/surum-oneri", authMiddleware, async (req, res) => {
     if (!site) return res.status(400).json({ ok: false, error: "site zorunlu" });
     const kp = await sahaKapsamKontrol(req, site);
     if (!kp.ok) return res.status(kp.http).json({ ok: false, error: kp.error });
-    res.json({ ok: true, ...(await boqKatalog.surumOner(pool, site)), surumler: boqKatalog.SURUMLER });
+    const oneri = await boqKatalog.surumOner(pool, site);
+    // 03.11.2026: ?kodlar= verilirse kalem bazında öneri (enerji kalemi → ENH tarihi) — kayıt öncesi ekran kontrolü
+    const kodlar = String(req.query.kodlar || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 200);
+    const kalemler = kodlar.length ? [...(await boqKatalog.kalemKapsamlari(pool, kodlar)).entries()].map(([kod, kapsam]) => ({ kod, ...boqKatalog.kalemOnerisi(oneri, kapsam) })) : undefined;
+    res.json({ ok: true, ...oneri, kalemler, surumler: boqKatalog.SURUMLER });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.get("/boq/katalog", authMiddleware, async (req, res) => {
@@ -11461,6 +11467,17 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
         WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [markaProfil(marka).onek]);
       bedelMap = ahyTaseronBedel(det.rows.filter(x => !icEtiket.has(String(x.subcon || "").toUpperCase())));
     } catch (e) { console.error("TASERON BEDEL ERROR:", e.message); }
+    // 02.11.2026 (Orhan): firmanın taşeron fiyatı tanımlıysa (Teknocenter: 01.11.2026 paket işçilik listesi; EMRAH/SEYFİ 15–31.10
+    // paket kuralı) hakediş bedeli o fiyatla, İŞ TARİHİNE göre hesaplanır; fiyatı olmayan kalem sayılmaz ve ayrıca bildirilir.
+    const fiyatKaynak = {};
+    for (const e of r.rows.filter(e => !icEtiket.has(String(e.subcon || "").toUpperCase()))) {
+      try {
+        const tb = await cariPanel.taseronBedeli(pool, marka, e.subcon);
+        if (!tb) continue;
+        bedelMap[e.subcon] = { bedel: tb.bedel, detay: tb.detay };
+        fiyatKaynak[e.subcon] = { kaynak: "TASERON_FIYAT", kart: tb.kart, fiyatsiz: tb.fiyatsiz, paket_dahil: tb.paket_dahil };
+      } catch (err) { console.error("TASERON FIYAT BEDEL:", e.subcon, err.message); }
+    }
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
     const disRows = r.rows.filter(e => !icEtiket.has(String(e.subcon || "").toUpperCase()));
@@ -11469,7 +11486,8 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
     res.json({ ok: true, marka, kur,
       ekipler: disRows.map(e => ({ ...e,
         bedel: Math.round(bedelMap[e.subcon]?.bedel || 0),
-        bedel_detay: bedelMap[e.subcon]?.detay || [] })),
+        bedel_detay: bedelMap[e.subcon]?.detay || [],
+        fiyat_kaynagi: fiyatKaynak[e.subcon] || { kaynak: "PAKET_KURALI" } })),
       kendi_ekipler: icListe.map(ek => {
         const satirlar = icRows.filter(e => ek.etiketler.includes(String(e.subcon || "").toUpperCase()));
         const top = (k) => satirlar.reduce((sm, e) => sm + Number(e[k] || 0), 0);
