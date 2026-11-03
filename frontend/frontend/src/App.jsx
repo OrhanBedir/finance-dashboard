@@ -4295,7 +4295,7 @@ function CariHakedisBolumu({ marka, cari, yazabilir, onDegisti }) {
   const ozet = is?.ozet || {};
   const rows = is?.rows || [];
   const hazir = rows.filter((r) => r.kalan > 0.009 && r.fiyat_durum === "VAR");
-  const fiyatsiz = rows.filter((r) => r.kalan > 0.009 && r.fiyat_durum !== "VAR");
+  const fiyatsiz = rows.filter((r) => r.kalan > 0.009 && !["VAR", "PAKET"].includes(r.fiyat_durum)); // pakete dahil kalem fiyat beklemez
   const kartKatla = (t) => String(t || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C");
   const adParca = kartKatla(cari.ad).replace(/^TEKNO[_\s-]*/, "").split(/[\s_]+/)[0];
   const ilgiliAday = aday.filter((a) => !a.aktarim_log_id && adParca && kartKatla(a.aciklama).includes(adParca));
@@ -4401,7 +4401,9 @@ function CariHakedisBolumu({ marka, cari, yazabilir, onDegisti }) {
                     <td style={{ ...tdH, textAlign: "right", fontWeight: 700 }}>{r.fiziki_qty}</td>
                     <td style={{ ...tdH, textAlign: "right" }}>{r.hakediste || "—"}</td>
                     <td style={{ ...tdH, textAlign: "right", fontWeight: 700, color: r.kalan > 0 ? "#5b21b6" : "#94a3b8" }}>{r.kalan}</td>
-                    <td style={{ ...tdH, textAlign: "right", whiteSpace: "nowrap" }}>{r.fiyat ? <span title={`Kaynak: ${r.fiyat.kaynak || "—"} · geçerli ${cariTarih(r.fiyat.bas)}'den`}>{cariPara(r.fiyat.fiyat, r.fiyat.pb)}</span>
+                    <td style={{ ...tdH, textAlign: "right", whiteSpace: "nowrap" }}>{r.fiyat?.paket ? <span title={`Paket fiyatı (iş kodu başına) · kaynak: ${r.fiyat.kaynak || "—"} · geçerli ${cariTarih(r.fiyat.bas)}'den`}><b>{cariPara(r.fiyat.paket.bedel, r.fiyat.pb)}</b><div style={{ fontSize: "10px", color: "#5b21b6", fontWeight: 700 }}>{r.fiyat.paket.ad} paket</div></span>
+                      : r.fiyat_durum === "PAKET" ? <span style={{ color: "#64748b", fontSize: "11px" }} title="Bu kalemin bedeli iş kodunun paket fiyatındadır">{r.paket_dahil?.ad} pakete dahil</span>
+                      : r.fiyat ? <span title={`Kaynak: ${r.fiyat.kaynak || "—"} · geçerli ${cariTarih(r.fiyat.bas)}'den`}>{cariPara(r.fiyat.fiyat, r.fiyat.pb)}</span>
                       : <span style={{ color: "#b45309", fontWeight: 700 }}>{r.fiyat_durum === "BELIRSIZ" ? "Fiyat belirsiz" : "Taşeron fiyatı tanımlanmadı"}{yazabilir && r.fiyat_durum === "TANIMSIZ" && <button onClick={() => fiyatTanimla(r)} style={{ marginLeft: "6px", padding: "1px 7px", fontSize: "10.5px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: "6px", cursor: "pointer", color: "#9a3412", fontWeight: 700 }}>Fiyat tanımla</button>}</span>}</td>
                     <td style={{ ...tdH, textAlign: "right", whiteSpace: "nowrap" }}>{r.tutar !== null && r.tutar !== undefined && r.kalan > 0 ? cariPara(r.tutar) : "—"}</td>
                     <td style={tdH}>{r.qc || "—"}</td>
@@ -5338,6 +5340,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
           g.isSayisi += Number(e.is_sayisi || 0);
           g.bedel += Number(e.bedel || 0);
           g.detay = g.detay.concat(e.bedel_detay || []);
+          if (e.fiyat_kaynagi?.kaynak === "TASERON_FIYAT") g.fk = e.fiyat_kaynagi; // 02.11.2026: firma taşeron fiyat listesiyle
           grup.set(k, g);
         });
         const rows = [...grup.values()].map(g => {
@@ -5406,6 +5409,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                       <td style={tdS}>
                         <div style={{ fontWeight: 700 }}>{r.ad}</div>
                         <div style={{ fontSize: "10.5px", color: r.cari ? "#94a3b8" : "#b45309" }}>{r.cari ? `firma kartı: ${r.cari.ad}` : "⚠ eşleşen firma kartı yok — faturalar bu etikete bağlanamadı"}{r.isSayisi > 0 ? ` · ${r.isSayisi} iş kalemi` : ""}</div>
+                        {!r.hakedisCari && r.fk && <div style={{ fontSize: "10.5px", color: "#065f46" }}>taşeron fiyat listesiyle, iş tarihine göre{r.fk.fiyatsiz > 0 && <span style={{ color: "#b45309", fontWeight: 700 }}> · ⚠ {r.fk.fiyatsiz} kalemde taşeron fiyatı tanımsız (bedele eklenmedi)</span>}</div>}
                         {r.hakedisCari && <span title="Fatura yerine doğrulanmış iş ve onaylı hakediş üzerinden izlenir" style={{ display: "inline-block", marginTop: "3px", padding: "1px 7px", borderRadius: "999px", background: "#ede9fe", color: "#5b21b6", fontSize: "10.5px", fontWeight: 800 }}>Hakediş esaslı cari</span>}
                       </td>
                       {r.hakedisCari ? (

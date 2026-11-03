@@ -11461,6 +11461,17 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
         WHERE UPPER(TRIM(COALESCE(m.subcon_name,''))) LIKE $1 || '\\_%'`, [markaProfil(marka).onek]);
       bedelMap = ahyTaseronBedel(det.rows.filter(x => !icEtiket.has(String(x.subcon || "").toUpperCase())));
     } catch (e) { console.error("TASERON BEDEL ERROR:", e.message); }
+    // 02.11.2026 (Orhan): firmanın taşeron fiyatı tanımlıysa (Teknocenter: 01.11.2026 paket işçilik listesi; EMRAH/SEYFİ 15–31.10
+    // paket kuralı) hakediş bedeli o fiyatla, İŞ TARİHİNE göre hesaplanır; fiyatı olmayan kalem sayılmaz ve ayrıca bildirilir.
+    const fiyatKaynak = {};
+    for (const e of r.rows.filter(e => !icEtiket.has(String(e.subcon || "").toUpperCase()))) {
+      try {
+        const tb = await cariPanel.taseronBedeli(pool, marka, e.subcon);
+        if (!tb) continue;
+        bedelMap[e.subcon] = { bedel: tb.bedel, detay: tb.detay };
+        fiyatKaynak[e.subcon] = { kaynak: "TASERON_FIYAT", kart: tb.kart, fiyatsiz: tb.fiyatsiz, paket_dahil: tb.paket_dahil };
+      } catch (err) { console.error("TASERON FIYAT BEDEL:", e.subcon, err.message); }
+    }
     let kur = 0;
     try { kur = Number(await getTcmbUsdTrySellingRate()) || 0; } catch {}
     const disRows = r.rows.filter(e => !icEtiket.has(String(e.subcon || "").toUpperCase()));
@@ -11469,7 +11480,8 @@ app.get("/finance/marka-taseron-hakedis", authMiddleware, async (req, res) => {
     res.json({ ok: true, marka, kur,
       ekipler: disRows.map(e => ({ ...e,
         bedel: Math.round(bedelMap[e.subcon]?.bedel || 0),
-        bedel_detay: bedelMap[e.subcon]?.detay || [] })),
+        bedel_detay: bedelMap[e.subcon]?.detay || [],
+        fiyat_kaynagi: fiyatKaynak[e.subcon] || { kaynak: "PAKET_KURALI" } })),
       kendi_ekipler: icListe.map(ek => {
         const satirlar = icRows.filter(e => ek.etiketler.includes(String(e.subcon || "").toUpperCase()));
         const top = (k) => satirlar.reduce((sm, e) => sm + Number(e[k] || 0), 0);

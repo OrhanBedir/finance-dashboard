@@ -800,14 +800,39 @@ function kur(app, c) {
     if (es.some((x) => Math.abs(Number(x.birim_fiyat) - Number(ilk.birim_fiyat)) > 0.009 || x.pb !== ilk.pb)) return { belirsiz: true, adaylar: es };
     return { id: ilk.id, fiyat: Number(ilk.birim_fiyat), pb: ilk.pb, birim: ilk.birim, kaynak: ilk.kaynak, bas: ilk.bas, ozel: ilk.tedarikci_id !== null };
   }
+  // 02.11.2026 (Orhan) PAKET FİYATI: iş kodu (site_code) başına tek bedel — antenli / antensiz / triple (teknolojiden bağımsız).
+  // Fiyat taseron_fiyat'ta item_code = PAKET_ANTENLI | PAKET_ANTENSIZ | PAKET_TRIPLE olarak tanımlanır. Bedeli iş kodunun ana
+  // paket kalemi taşır; aynı iş kodunun diğer kalemleri (RRU söküm, etiket, TK plaka, teşvik, One Band…) pakete dahildir.
+  // Paket fiyatı tanımlı değilse kalem bazlı fiyat aynen geçerlidir (diğer firmalar / faturalı tedarikçiler etkilenmez).
+  const PAKET_RE = { TRIPLE: /triple band/i, ANTENLI: /\bwith antenna/i, ANTENSIZ: /\bwithout antenna/i };
+  const paketTipi = (siteCode, ks) => {
+    if (/_TRP/i.test(siteCode) || ks.some((x) => PAKET_RE.TRIPLE.test(x.item_description || ""))) return "TRIPLE";
+    if (ks.some((x) => PAKET_RE.ANTENLI.test(x.item_description || ""))) return "ANTENLI";
+    if (ks.some((x) => PAKET_RE.ANTENSIZ.test(x.item_description || ""))) return "ANTENSIZ";
+    return null;
+  };
+  const PAKET_AD = { ANTENLI: "Antenli", ANTENSIZ: "Antensiz", TRIPLE: "Triple" };
+  // Değer: paket ana kalemi miktar payı kadar paket bedeli (tam miktar = tam bedel), diğerleri miktar × birim fiyat
+  const kalemDeger = (x, qty) => !x.fiyat ? 0 : x.fiyat.paket
+    ? r2(x.fiyat.paket.bedel * Math.min(Math.max(0, qty), x.fiyat.paket.adet) / x.fiyat.paket.adet) : r2(qty * x.fiyat.fiyat);
   // Kartın gerçekleşen işleri: kalem bazında PR (done_qty), fiziki (tamamlanan_qty), hakedişe girmiş miktar, kalan ve fiyat
   async function hakedisIsleri(db, M, s, tarih) {
     const adlar = s.katlar;
-    const r = await db.query(`SELECT m.id, UPPER(TRIM(m.site_code)) AS site_code, TRIM(COALESCE(m.item_code,'')) AS item_code, m.item_description,
+    // 02.11.2026: fiyat İŞ TARİHİNE göre seçilir (hakediş günü değil) — fiilî montaj bitişi → başlangıcı → tamamlanma → iş girişi
+    const isSql = (rp) => `SELECT m.id, UPPER(TRIM(m.site_code)) AS site_code, TRIM(COALESCE(m.item_code,'')) AS item_code, m.item_description,
         COALESCE(m.done_qty,0)::numeric AS pr_qty, COALESCE(m.tamamlanan_qty,0)::numeric AS fiziki_qty, m.subcon_name, m.qc_durum,
-        to_char(m.created_at,'YYYY-MM-DD') AS giris
-      FROM master_works m WHERE m.subcon_name IS NOT NULL ORDER BY m.site_code, m.id`);
+        to_char(m.created_at,'YYYY-MM-DD') AS giris, ${rp ? "to_char(COALESCE(rp.installation_actual_end_date, rp.installation_actual_start_date, rp.tamamlanma_tarihi), 'YYYY-MM-DD')" : "NULL"} AS montaj
+      FROM master_works m ${rp ? "LEFT JOIN rollout_progress rp ON UPPER(TRIM(rp.site_code)) = UPPER(TRIM(m.site_code))" : ""}
+      WHERE m.subcon_name IS NOT NULL ORDER BY m.site_code, m.id`;
+    const r = await db.query(isSql(true)).catch(() => db.query(isSql(false)));
     const kalemler = r.rows.filter((x) => adlar.includes(katla(x.subcon_name)));
+    // İş kodunun tarihi: fiilî montaj tarihi, yoksa iş kodundaki en erken iş girişi; hiçbiri yoksa hakediş günü
+    const isTarihi = new Map();
+    for (const sc of new Set(kalemler.map((x) => x.site_code))) {
+      const ks = kalemler.filter((x) => x.site_code === sc);
+      const t = ks.find((x) => x.montaj)?.montaj || ks.map((x) => x.giris).filter(Boolean).sort()[0];
+      if (t) isTarihi.set(sc, t);
+    }
     const ids = kalemler.map((x) => Number(x.id));
     const kullanilan = new Map();
     if (ids.length) {
@@ -815,16 +840,38 @@ function kur(app, c) {
         WHERE b.durum <> 'IPTAL' AND k.master_works_id = ANY($1::int[]) GROUP BY 1`, [ids]);
       k.rows.forEach((x) => kullanilan.set(Number(x.id), Number(x.m)));
     }
+    // İş kodu başına paket: tip + tanımlı paket fiyatı varsa ana kalem bedeli taşır, diğerleri pakete dahil
+    const paketler = new Map();
+    for (const sc of [...new Set(kalemler.map((x) => x.site_code))]) {
+      const ks = kalemler.filter((x) => x.site_code === sc);
+      const tip = paketTipi(sc, ks); if (!tip) continue;
+      const pf = await fiyatBul(db, M, s.id, `PAKET_${tip}`, isTarihi.get(sc) || tarih);
+      if (!pf) continue;
+      const re = PAKET_RE[tip];
+      const adaylar = ks.filter((x) => re.test(x.item_description || ""));
+      const ana = (adaylar.length ? adaylar : [...ks].sort((a, b) => Math.max(Number(a.pr_qty), Number(a.fiziki_qty)) - Math.max(Number(b.pr_qty), Number(b.fiziki_qty)) || Number(a.id) - Number(b.id)))[0];
+      paketler.set(sc, { tip, pf, ana_id: Number(ana.id), adet: Math.max(Number(ana.pr_qty), Number(ana.fiziki_qty), 1) });
+    }
     const out = [];
     for (const x of kalemler) {
       const giren = kullanilan.get(Number(x.id)) || 0;
-      const fiyat = x.item_code ? await fiyatBul(db, M, s.id, x.item_code, tarih) : null;
       const kalan = r2(Math.max(0, Number(x.fiziki_qty) - giren));
-      out.push({ master_works_id: Number(x.id), site_code: x.site_code, fiziksel_id: String(x.site_code).split("_")[0], item_code: x.item_code,
+      const pk = paketler.get(x.site_code);
+      let fiyat, durum, paket_dahil = null;
+      if (pk && pk.pf.belirsiz) { fiyat = null; durum = "BELIRSIZ"; }
+      else if (pk && pk.ana_id === Number(x.id)) {
+        fiyat = { ...pk.pf, fiyat: r2(pk.pf.fiyat / pk.adet), paket: { tip: pk.tip, ad: PAKET_AD[pk.tip], bedel: pk.pf.fiyat, adet: pk.adet } }; durum = "VAR";
+      } else if (pk) { fiyat = null; durum = "PAKET"; paket_dahil = { tip: pk.tip, ad: PAKET_AD[pk.tip], ana_master_works_id: pk.ana_id }; }
+      else {
+        const f = x.item_code ? await fiyatBul(db, M, s.id, x.item_code, isTarihi.get(x.site_code) || tarih) : null;
+        fiyat = f && !f.belirsiz ? f : null; durum = !f ? "TANIMSIZ" : f.belirsiz ? "BELIRSIZ" : "VAR";
+      }
+      const satir = { master_works_id: Number(x.id), site_code: x.site_code, fiziksel_id: String(x.site_code).split("_")[0], item_code: x.item_code,
         aciklama: x.item_description, etiket: x.subcon_name, pr_qty: Number(x.pr_qty), fiziki_qty: Number(x.fiziki_qty), hakediste: giren, kalan,
-        qc: x.qc_durum || null, giris: x.giris,
-        fiyat: fiyat && !fiyat.belirsiz ? fiyat : null, fiyat_durum: !fiyat ? "TANIMSIZ" : fiyat.belirsiz ? "BELIRSIZ" : "VAR",
-        tutar: fiyat && !fiyat.belirsiz ? r2(kalan * fiyat.fiyat) : null });
+        qc: x.qc_durum || null, giris: x.giris, is_tarihi: isTarihi.get(x.site_code) || tarih, is_tarihi_kaynak: x.montaj ? "montaj" : "iş girişi",
+        fiyat, fiyat_durum: durum, paket_dahil };
+      satir.tutar = fiyat ? kalemDeger(satir, kalan) : null;
+      out.push(satir);
     }
     return out;
   }
@@ -839,12 +886,13 @@ function kur(app, c) {
       const rows = fiyatGor ? isler : isler.map((x) => ({ ...x, fiyat: null, tutar: null }));
       const ozet = { kalem: rows.length, is_kodu: new Set(rows.map((x) => x.site_code)).size, saha: new Set(rows.map((x) => x.fiziksel_id)).size,
         fiziki_kalem: rows.filter((x) => x.fiziki_qty > 0).length, hakedise_hazir: rows.filter((x) => x.kalan > 0.009 && x.fiyat_durum === "VAR").length,
-        fiyat_bekleyen: rows.filter((x) => x.kalan > 0.009 && x.fiyat_durum !== "VAR").length,
+        fiyat_bekleyen: rows.filter((x) => x.kalan > 0.009 && !["VAR", "PAKET"].includes(x.fiyat_durum)).length,
         hazir_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.kalan > 0.009 && x.tutar ? x.tutar : 0), 0)) : null,
         // Planlanan (PR/talep) ve fiziki gerçekleşen iş bedeli — yalnız taşeron fiyatı tanımlı kalemlerden; fiyatsız kalem SAYILMAZ
-        plan_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.fiyat ? x.pr_qty * x.fiyat.fiyat : 0), 0)) : null,
-        fiziki_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + (x.fiyat ? x.fiziki_qty * x.fiyat.fiyat : 0), 0)) : null,
-        fiyatsiz_kalem: rows.filter((x) => x.fiyat_durum !== "VAR").length };
+        plan_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + kalemDeger(x, x.pr_qty), 0)) : null,
+        fiziki_tutar: fiyatGor ? r2(rows.reduce((t, x) => t + kalemDeger(x, x.fiziki_qty), 0)) : null,
+        paket_dahil_kalem: rows.filter((x) => x.fiyat_durum === "PAKET").length,
+        fiyatsiz_kalem: rows.filter((x) => !["VAR", "PAKET"].includes(x.fiyat_durum)).length };
       res.json({ ok: true, firma: M, tedarikci: { id: s.id, ad: kartAd(s) }, tarih, ozet, rows });
     } catch (e) { console.error("[hakedis isler]", e.message); hata(res, 500, "İş listesi alınamadı"); }
   });
@@ -866,15 +914,15 @@ function kur(app, c) {
       const isler = await hakedisIsleri(db, M, s, tarih);
       const secilen = isler.filter((x) => sec.includes(x.master_works_id));
       if (secilen.length !== sec.length) throw hataK(409, "Seçilen kalemlerden biri bu taşerona ait değil");
-      const sorun = secilen.filter((x) => x.kalan <= 0.009 || x.fiyat_durum !== "VAR");
-      if (sorun.length) throw hataK(409, `Hakedişe giremeyen kalem: ${sorun.map((x) => `${x.site_code} ${x.item_code} (${x.kalan <= 0.009 ? "kalan fiziki miktar yok" : x.fiyat_durum === "BELIRSIZ" ? "fiyat belirsiz" : "taşeron fiyatı tanımlanmadı"})`).join(", ")}`, { sorunlu: sorun.map((x) => x.master_works_id) });
+      const sorun = secilen.filter((x) => x.kalan <= 0.009 || x.fiyat_durum !== "VAR"); // pakete dahil kalem ayrıca girmez
+      if (sorun.length) throw hataK(409, `Hakedişe giremeyen kalem: ${sorun.map((x) => `${x.site_code} ${x.item_code} (${x.kalan <= 0.009 ? "kalan fiziki miktar yok" : x.fiyat_durum === "BELIRSIZ" ? "fiyat belirsiz" : x.fiyat_durum === "PAKET" ? "pakete dahil — bedeli iş kodunun ana kaleminde" : "taşeron fiyatı tanımlanmadı"})`).join(", ")}`, { sorunlu: sorun.map((x) => x.master_works_id) });
       const pbs = [...new Set(secilen.map((x) => x.fiyat.pb))];
       if (pbs.length > 1) throw hataK(409, "Farklı para birimli kalemler aynı hakedişe girmez");
       const toplam = r2(secilen.reduce((t, x) => t + x.tutar, 0));
       const bl = (await db.query(`INSERT INTO taseron_hakedis_belge (firma_kod, tedarikci_id, donem, hakedis_tarihi, durum, toplam, para_birimi, aciklama, idem_key, olusturan)
         VALUES ($1,$2,$3,$4,'TASLAK',$5,$6,$7,$8,$9) RETURNING id`, [M, s.id, tarih.slice(0, 7), tarih, toplam, pbs[0], temiz(b.aciklama, 500) || null, idem, kim(req)])).rows[0];
       for (const x of secilen) await db.query(`INSERT INTO taseron_hakedis_kalem (belge_id, master_works_id, site_code, fiziksel_id, item_code, aciklama, miktar, birim_fiyat, tutar, para_birimi, fiyat_id, fiyat_kaynak)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [bl.id, x.master_works_id, x.site_code, x.fiziksel_id, x.item_code, x.aciklama, x.kalan, x.fiyat.fiyat, x.tutar, x.fiyat.pb, x.fiyat.id, x.fiyat.kaynak || null]);
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [bl.id, x.master_works_id, x.site_code, x.fiziksel_id, x.item_code, x.aciklama, x.kalan, x.fiyat.fiyat, x.tutar, x.fiyat.pb, x.fiyat.id, (x.fiyat.paket ? `${x.fiyat.paket.ad} paket ${x.fiyat.paket.bedel} / iş kodu — ` : "") + (x.fiyat.kaynak || "") || null]);
       await islemGecmisiYaz(req, "taseron_hakedis", bl.id, "OLUSTURMA", null, { firma: M, tedarikci_id: s.id, tedarikci: kartAd(s), toplam, para_birimi: pbs[0], kalem: secilen.length, durum: "TASLAK" }, temiz(b.aciklama, 500) || null);
       return { tekrar: false, belge_id: bl.id, toplam, kalem: secilen.length };
     });
@@ -995,7 +1043,23 @@ function kur(app, c) {
     if (sonuc) res.json({ ok: true, ...sonuc });
   });
 
-  return { cariHesapla, rehberOku, katla, fifoDagit };
+  // 02.11.2026: Taşeron Hakedişi (yeşil bölüm) için firma kartının taşeron fiyatıyla iş bedeli — fiziki miktar × iş tarihindeki
+  // taşeron fiyatı (paket ya da kalem). Firmada hiç taşeron fiyatı tanımlı değilse null (eski hesap kuralı aynen kalır).
+  async function taseronBedeli(db, M, etiket) {
+    const v = (await db.query(`SELECT 1 FROM taseron_fiyat WHERE UPPER(firma_kod)=$1 AND COALESCE(durum,'AKTIF')='AKTIF' LIMIT 1`, [M]).catch(() => ({ rows: [] }))).rows.length;
+    if (!v) return null;
+    const R = await rehberOku(db); const k = katla(etiket);
+    const s = [...R.byId.values()].find((x) => x.aktif !== false && kartKapsamda(x, M) && (x.katlar || []).includes(k));
+    if (!s) return null;
+    const isler = (await hakedisIsleri(db, M, s, bugunTR())).filter((x) => katla(x.etiket) === k);
+    const fizikiler = isler.filter((x) => x.fiziki_qty > 0);
+    const detay = fizikiler.filter((x) => x.fiyat).map((x) => ({ site: x.site_code, kalem: x.fiyat.paket ? `${x.aciklama} (${x.fiyat.paket.ad} paket)` : x.aciklama,
+      adet: x.fiyat.paket ? 1 : x.fiziki_qty, birim: x.fiyat.paket ? x.fiyat.paket.bedel : x.fiyat.fiyat, tutar: kalemDeger(x, x.fiziki_qty), qc: x.qc || "", tarih: x.is_tarihi }));
+    return { kart: kartAd(s), bedel: r2(detay.reduce((t, d) => t + d.tutar, 0)), detay,
+      fiyatsiz: fizikiler.filter((x) => !["VAR", "PAKET"].includes(x.fiyat_durum)).length, paket_dahil: fizikiler.filter((x) => x.fiyat_durum === "PAKET").length };
+  }
+
+  return { cariHesapla, rehberOku, katla, fifoDagit, taseronBedeli };
 }
 
 module.exports = { semaKur, kur, katla };
