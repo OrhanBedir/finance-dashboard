@@ -518,6 +518,26 @@ function kur(app, c) {
     } catch (e) { console.error("[cari liste]", e.message); hata(res, 500, "Cari liste alınamadı"); }
   });
 
+  // 03.11.2026 (Orhan): cari satırındaki "Fatura" düğmesi — yalnız BU cariye bağlı kayıtlı faturalar (cariHesapla'nın kimlik
+  // eşleşmesi: seçilmiş firma kartı ya da doğrulanmış ad / takma ad; benzer ad birleştirilmez) + belge yolu. Firma kapsamı
+  // (okuKapi + firmaSql) sunucuda; tutar alanı fatura_toplam adıyla fiyat gizliliği filtresine tabidir. Hakediş kaydı fatura sayılmaz.
+  app.get("/finance/marka-cari/faturalar", okuKapi, async (req, res) => {
+    try {
+      const M = req.cariFirma;
+      const v = await cariHesapla(pool, M);
+      const c0 = v.bul(req.query.tedarikci);
+      if (!c0) return hata(res, 404, "Tedarikçi bu firmanın kayıtlarında bulunamadı");
+      const ids = (c0.faturalar || []).map((f) => Number(f.id));
+      const b = ids.length ? (await pool.query(`SELECT id, belge_path FROM invoice_entries WHERE id = ANY($1::int[]) AND ${firmaSql(M, "firma")}`, [ids])).rows : [];
+      const yol = new Map(b.map((x) => [Number(x.id), x.belge_path || null]));
+      const faturalar = (c0.faturalar || []).filter((f) => yol.has(Number(f.id))).map((f) => ({
+        id: f.id, fatura_no: f.fatura_no, fatura_tarihi: f.fatura_tarihi, vade_tarihi: f.vade_tarihi, tur: f.tur, pb: f.pb, kalem: f.kalem,
+        fatura_toplam: f.toplam, belge_path: yol.get(Number(f.id)) }))
+        .sort((x, y) => String(y.fatura_tarihi || "").localeCompare(String(x.fatura_tarihi || "")) || y.id - x.id);
+      res.json({ ok: true, firma: M, tedarikci: { anahtar: c0.anahtar, ad: c0.ad, unvan: c0.unvan || null, cari_modeli: c0.cari_modeli || null }, faturalar });
+    } catch (e) { console.error("[cari faturalar]", e.message); hata(res, 500, "Faturalar alınamadı"); }
+  });
+
   // Tek tedarikçinin cari özeti, açık faturaları ve ödeme / avans geçmişi
   app.get("/finance/marka-cari/ozet", okuKapi, async (req, res) => {
     try {

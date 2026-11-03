@@ -13,7 +13,7 @@ import TR_ILLER from "./data/tr-iller.geo.json";
 import { fiyatsizKalemler, fiyatsizOzet, fiyatsizListe, kalemAnahtari, LISTE_SUTUNLARI } from "./bolgeFiyatsiz.js";
 import { AtananIsModal, atananExcel, paraMetni, tlMetni, kurMetni } from "./atananIs.jsx"; // 02.11.2026: Teknocenter Atanan İş Tutarı (PR + PO → BoQ)
 import { StokDefteriPanel, StokBenimPanel } from "./MalzemeStok.jsx"; // 29.10.2026: sarf malzeme stok defteri
-import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
+import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFiltreUygula, sutunFiltreSayisi, sutunSecenekleri, rolloutMilestone, ROLLOUT_SUTUNLAR, HuniIkon } from "./RolloutSutunFiltre.jsx"; // 02.11.2026: Rollout sütun filtresi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK, planAdayi, planAdayUygun } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
@@ -4116,6 +4116,71 @@ const CariKimlikRozet = ({ kimlik, stil }) => kimlik === "KART" ? null : (
     {kimlik === "BELIRSIZ" ? "⚠ kimlik belirsiz" : "⚠ firma kartı yok"}</span>
 );
 
+// 03.11.2026 (Orhan): cari satırındaki "Fatura" penceresi — yalnız bu cariye bağlı kayıtlı faturalar (sunucu: cari kimlik
+// eşleşmesi + firma kapsamı). Belge, mevcut fatura ekranlarıyla aynı yoldan (belge_path) yeni sekmede açılır; belge üretilmez.
+// Türkçe iyelik eki: 1'i 2'si 3'ü 4'ü 5'i 6'sı 7'si 8'i 9'u 10'u 20'si 30'u 40'ı 50'si 60'ı 70'i 80'i 90'ı 100'ü 1000'i 0'ı
+function sayiEki(n) {
+  const x = Math.abs(Math.trunc(Number(n) || 0));
+  const bir = ["ı", "i", "si", "ü", "ü", "i", "sı", "si", "i", "u"], on = ["", "u", "si", "u", "ı", "si", "ı", "i", "i", "ı"];
+  if (x === 0) return "’ı";
+  if (x % 10) return "’" + bir[x % 10];
+  if (x % 100) return "’" + on[(x % 100) / 10];
+  if (x % 1000) return "’ü";
+  return "’i";
+}
+const faturaBelgeUrl = (p) => (p && String(p).startsWith("http") ? p : `${API_BASE.replace(/\/api$/, "")}/fatura-belgeler/${p}`);
+function CariFaturaPenceresi({ marka, cari, onClose }) {
+  const [veri, setVeri] = useState(null);
+  const [hata, setHata] = useState("");
+  const sira = useRef(0);
+  useEffect(() => {
+    const n = ++sira.current; setVeri(null); setHata("");
+    cariIstek(`faturalar?tedarikci=${encodeURIComponent(cari.anahtar)}`, { marka })
+      .then((j) => { if (n === sira.current) setVeri(j); })
+      .catch((e) => { if (n === sira.current) setHata(e.message); });
+  }, [cari.anahtar, marka]);
+  useEffect(() => { const k = (e) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
+  const liste = veri?.faturalar || [];
+  const hakedis = (veri?.tedarikci?.cari_modeli || cari.cari_modeli) === "HAKEDIS";
+  const turAd = (t) => (t === "IADE" ? "İade faturası" : t === "GELEN" ? "" : t || "");
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label={`${cari.ad} faturaları`} onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(760px, 100%)", maxHeight: "85vh", overflow: "auto", padding: "16px 18px", textAlign: "left" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b", letterSpacing: "0.05em" }}>KAYITLI FATURALAR</div>
+            <h3 style={{ margin: "2px 0 0", fontSize: "16px", color: "#0f172a", overflowWrap: "anywhere" }}>{cari.ad}</h3>
+            {cari.unvan && cari.unvan !== cari.ad && <div style={{ fontSize: "12px", color: "#64748b", overflowWrap: "anywhere" }}>{cari.unvan}</div>}
+          </div>
+          <button type="button" onClick={onClose} autoFocus style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "5px 10px", cursor: "pointer", fontWeight: 700 }}>Kapat ✕</button>
+        </div>
+        {hata ? <div role="alert" style={{ marginTop: "12px", color: "#b91c1c", fontSize: "13px" }}>Faturalar alınamadı: {hata}</div>
+          : !veri ? <div role="status" style={{ marginTop: "12px", color: "#64748b", fontSize: "13px" }}>Faturalar yükleniyor…</div>
+          : !liste.length ? (
+            <div style={{ marginTop: "14px", padding: "16px", borderRadius: "10px", background: "#f8fafc", color: "#475569", fontSize: "13px", textAlign: "center" }}>
+              <b>Kayıtlı fatura bulunmuyor.</b>
+              {hakedis && <div style={{ marginTop: "4px", fontSize: "12px" }}>Bu cari hakediş esaslıdır; borç yapılan işin bedelinden izlenir. Hakediş kayıtları fatura değildir.</div>}
+            </div>)
+          : (
+            <div style={{ marginTop: "12px", display: "grid", gap: "8px" }}>
+              <div style={{ fontSize: "12px", color: "#64748b" }}>{liste.length} fatura · yeniden eskiye</div>
+              {liste.map((f) => (
+                <div key={f.id} style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", border: "1.5px solid #e5e7eb", borderRadius: "10px", padding: "10px 12px" }}>
+                  <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, color: "#0f172a", fontSize: "13.5px", overflowWrap: "anywhere" }}>{f.fatura_no || `#${f.id}`}{turAd(f.tur) && <span style={{ marginLeft: "6px", fontSize: "10.5px", fontWeight: 800, padding: "1px 6px", borderRadius: "6px", background: "#fef3c7", color: "#92400e" }}>{turAd(f.tur)}</span>}</div>
+                    <div style={{ fontSize: "12px", color: "#64748b" }}>{cariTarih(f.fatura_tarihi)}{f.vade_tarihi ? ` · vade ${cariTarih(f.vade_tarihi)}` : ""}</div>
+                  </div>
+                  {f.fatura_toplam !== undefined && f.fatura_toplam !== null && <div style={{ fontWeight: 800, color: "#1e3a5f", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{cariPara(f.fatura_toplam, f.pb || "TRY")}</div>}
+                  {f.belge_path
+                    ? <a href={faturaBelgeUrl(f.belge_path)} target="_blank" rel="noopener noreferrer" style={{ padding: "7px 12px", background: "#1e3a5f", color: "#fff", borderRadius: "8px", fontSize: "12.5px", fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}>📄 Belgeyi aç</a>
+                    : <span style={{ padding: "6px 10px", background: "#f1f5f9", color: "#64748b", borderRadius: "8px", fontSize: "12px", fontWeight: 700, whiteSpace: "nowrap" }}>Fatura belgesi eklenmemiş</span>}
+                </div>))}
+            </div>)}
+      </div>
+    </div>, document.body);
+}
+
 /* Faturanın işlem geçmişi (giriş, düzenleme, tedarikçi seçimi, silme) — yalnız kendi firmasının faturası */
 const FATURA_GECMIS_TIP = { OLUSTURMA: "Giriş", DUZENLEME: "Düzenleme", SILME: "Silme", TEDARIKCI_KIMLIK: "Tedarikçi kartı seçildi" };
 const FATURA_GECMIS_ALAN = { fatura_no: "Fatura no", fatura_tarihi: "Fatura tarihi", vade_tarihi: "Vade", tedarikci: "Tedarikçi", tedarikci_id: "Firma kartı", rf_montaj_firma: "RF montaj firma",
@@ -5126,6 +5191,10 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
   const [tabloAcik, setTabloAcik] = useState({});
   // 03.11.2026: cari tablosu masaüstünde tam genişlik; 1200 pikselin altında (mobil / dar tablet) her tedarikçi kart olarak gösterilir
   const CARI_KART_SINIR = 1200;
+  // 03.11.2026: cari tablosu ad filtresi (aç / kapa; kapatmak aramayı silmez) + Fatura penceresi
+  const [cariFiltreAcik, setCariFiltreAcik] = useState(false);
+  const [cariAra, setCariAra] = useState("");
+  const [faturaPencere, setFaturaPencere] = useState(null);
   const [cariDar, setCariDar] = useState(typeof window !== "undefined" && window.innerWidth < CARI_KART_SINIR);
   useEffect(() => { const f = () => setCariDar(window.innerWidth < CARI_KART_SINIR); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
   const tabloKes = (id, list) => (tabloAcik[id] ? list : list.slice(0, TABLO_LIMIT));
@@ -5226,6 +5295,9 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
   };
   if (loading) return <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>Yükleniyor…</div>;
   if (err) return <div style={{ padding: "40px", textAlign: "center", color: "#b91c1c" }}>{err}</div>;
+  // 03.11.2026: cari ad filtresi — görünen ad ve ticari unvan; Türkçe harf / büyük-küçük duyarsız (_ktl). Sıralama aynı kalır.
+  const _cariQ = _ktl(cariAra);
+  const cariGorunen = _cariQ ? cariL.rows.filter((r) => [r.ad, r.unvan].some((x) => _ktl(x).includes(_cariQ))) : cariL.rows;
   const thS = { padding: "9px 12px", textAlign: "left", fontSize: "11px", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #e2e8f0", textTransform: "uppercase", letterSpacing: "0.4px", whiteSpace: "nowrap" };
   const thF = { ...thS, position: "sticky", top: 0, zIndex: 2, background: "#f8fafc" };
   const tdS = { padding: "10px 12px", fontSize: "13px", color: "#374151", borderBottom: "1px solid #f1f5f9" };
@@ -5278,7 +5350,16 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
       <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderRadius: "14px", overflow: "hidden", marginBottom: "20px" }}>
         <div style={{ padding: "12px 16px", background: "#9d174d", color: "#fff", fontSize: "14px", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
           <span>🏦 Taşeron ve Tedarikçi Carileri ({cariL.rows.length}) — fatura ya da yapılan iş bedeli borcu ve ödemeler</span>
-          {cariL.sorunlar.length > 0 && <button onClick={() => setSorunAcik((v) => !v)} style={{ background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "8px", padding: "4px 10px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>⚠ Kimlik / veri sorunları ({cariL.sorunlar.length}) {sorunAcik ? "▲" : "▼"}</button>}
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            {cariL.sorunlar.length > 0 && <button onClick={() => setSorunAcik((v) => !v)} style={{ background: "#fef3c7", color: "#92400e", border: "none", borderRadius: "8px", padding: "4px 10px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>⚠ Kimlik / veri sorunları ({cariL.sorunlar.length}) {sorunAcik ? "▲" : "▼"}</button>}
+            <button type="button" onClick={() => setCariFiltreAcik((v) => !v)} aria-pressed={cariFiltreAcik} aria-controls="cari-filtre-alani"
+              title={cariFiltreAcik ? "Filtre alanını kapat (arama korunur)" : "Tedarikçi / taşeron adına göre filtrele"}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 11px", borderRadius: "8px", fontSize: "12.5px", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+                background: cariFiltreAcik || cariAra.trim() ? "#fff" : "rgba(255,255,255,0.12)", color: cariFiltreAcik || cariAra.trim() ? "#9d174d" : "#fff", border: "1.5px solid rgba(255,255,255,0.7)" }}>
+              <HuniIkon /> Filtreler
+              {cariAra.trim() && <span aria-label="1 etkin filtre" style={{ minWidth: "18px", height: "18px", borderRadius: "9px", background: "#9d174d", color: "#fff", fontSize: "11px", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>1</span>}
+            </button>
+          </div>
         </div>
         {sorunAcik && (
           <div style={{ padding: "10px 16px", background: "#fffbeb", borderBottom: "1px solid #fde68a", maxHeight: "260px", overflowY: "auto" }}>
@@ -5291,9 +5372,23 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
             ))}
           </div>
         )}
+        {cariFiltreAcik && (
+          <div id="cari-filtre-alani" style={{ padding: "10px 16px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", textAlign: "left" }}>
+            <label style={{ position: "relative", flex: "1 1 260px", maxWidth: "440px", display: "flex", alignItems: "center" }}>
+              <span style={{ position: "absolute", left: "10px", color: "#64748b", display: "inline-flex" }} aria-hidden="true"><HuniIkon /></span>
+              <input type="search" value={cariAra} onChange={(e) => setCariAra(e.target.value)} autoFocus placeholder="Tedarikçi / taşeron adı ara…" aria-label="Tedarikçi / taşeron adı ara"
+                style={{ width: "100%", padding: "8px 10px 8px 32px", border: "1.5px solid #cbd5e1", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box", background: "#fff" }} />
+            </label>
+            <button type="button" onClick={() => setCariAra("")} disabled={!cariAra}
+              style={{ padding: "7px 12px", border: "1.5px solid #cbd5e1", background: "#fff", color: cariAra ? "#1e3a5f" : "#94a3b8", borderRadius: "9px", fontSize: "12.5px", fontWeight: 700, cursor: cariAra ? "pointer" : "default" }}>Temizle</button>
+            <span role="status" style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600 }}>
+              {cariAra.trim() ? `${cariL.rows.length} kayıttan ${cariGorunen.length}${sayiEki(cariGorunen.length)} gösteriliyor` : `${cariL.rows.length} kayıt`}
+            </span>
+          </div>)}
         {(() => {
           // 03.11.2026 yerleşim: tutarlar ve hesap aynı (cari_liste); yalnız görünüm. Ad sütunu satır kırar, tutarlar tek satır ve sağa hizalı.
-          const satirlar = tabloKes("cari", cariL.rows);
+          // 03.11.2026: ad filtresi yalnız listeyi daraltır (üstteki genel kartlar cariL.toplam'dan, değişmez)
+          const satirlar = tabloKes("cari", cariGorunen);
           const sayiS = { fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
           const iki = { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere", whiteSpace: "normal" }; // genel CSS td'ye nowrap verir
           const hucreOf = (r) => { const pbs = Object.entries(r.pb || {});
@@ -5323,8 +5418,10 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                 </div>)}
             </div>);
           const odemeBtn = (r, genis) => <button onClick={() => cariAc(r.anahtar)} title={`${r.ad} — cari detayı ve ödeme / avans girişi`} style={{ padding: "7px 12px", background: "#9d174d", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", ...(genis ? { flex: 1 } : {}) }}>💸 Ödeme Gir</button>;
-          const ekstreBtn = (r, yazili) => <button onClick={() => cariExcelIndir(marka, r.anahtar, r.ad).catch((e) => alert(e.message))} title="Cari ekstre (Excel)" aria-label={`${r.ad} cari ekstre (Excel)`} style={{ padding: "7px 10px", background: "#fff", color: "#065f46", border: "1.5px solid #a7f3d0", borderRadius: "8px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>📥{yazili ? " Cari ekstre" : ""}</button>;
-          const bos = cariL.rows.length === 0 && <div style={{ padding: "22px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura / ödeme yok</div>;
+          const faturaBtn = (r) => <button type="button" onClick={() => setFaturaPencere({ anahtar: r.anahtar, ad: r.ad, unvan: r.unvan, cari_modeli: r.cari_modeli })} title={`${r.ad} — kayıtlı faturalar`} aria-label={`${r.ad} faturaları`} style={{ padding: "7px 10px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #bfdbfe", borderRadius: "8px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>📄 Fatura</button>;
+          const bos = cariL.rows.length === 0 ? <div style={{ padding: "22px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>Henüz fatura / ödeme yok</div>
+            : cariGorunen.length === 0 ? <div style={{ padding: "22px", textAlign: "center", color: "#64748b", fontSize: "13px" }}>“{cariAra.trim()}” ile eşleşen tedarikçi / taşeron bulunamadı.{" "}
+                <button type="button" onClick={() => setCariAra("")} style={{ border: "none", background: "none", color: "#1d4ed8", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>Aramayı temizle</button></div> : null;
 
           // ── Mobil / dar tablet: her tedarikçi bir kart ──
           if (cariDar) return (
@@ -5345,7 +5442,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                       {alan("Açık avans / alacak", hucre("alacak", "#0e7490"))}
                       {alan("Son ödeme", sonOdeme(r))}
                     </div>
-                    <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>{odemeBtn(r, true)}{ekstreBtn(r, true)}</div>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>{odemeBtn(r, true)}{faturaBtn(r)}</div>
                   </div>);
               })}
             </div>);
@@ -5354,11 +5451,11 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
           const thW = { ...thF, whiteSpace: "normal", lineHeight: 1.25, verticalAlign: "bottom", padding: "9px 8px" };
           const thN = { ...thW, textAlign: "right" };
           const tdN = { ...tdS, textAlign: "right", verticalAlign: "top", padding: "11px 8px" };
-          // Sabit sütun düzeni: tutar / işlem sütunları sabit, ad sütunu kalan genişliği alır ve satır kırar (1200px'te ≈190px, 1366px'te ≈350px)
+          // Sabit sütun düzeni: tutar / işlem sütunları sabit, ad sütunu kalan genişliği alır ve satır kırar (03.11: işlem 212px = Ödeme Gir + Fatura)
           return (
-            <div style={tabloScrollS("cari", cariL.rows.length)}>
+            <div style={tabloScrollS("cari", cariGorunen.length)}>
               <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-                <colgroup><col /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "148px" }} /><col style={{ width: "104px" }} /><col style={{ width: "180px" }} /></colgroup>
+                <colgroup><col /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "128px" }} /><col style={{ width: "148px" }} /><col style={{ width: "104px" }} /><col style={{ width: "212px" }} /></colgroup>
                 <thead><tr>
                   <th style={{ ...thW, padding: "9px 12px" }}>Tedarikçi / Taşeron</th>
                   <th style={thN} title="Faturalı tedarikçide geçerli fatura toplamı (KDV dahil, iade düşülmüş); hakediş esaslı caride yapılan işin bedeli">Geçerli Fatura / Yapılan İş Bedeli</th>
@@ -5370,7 +5467,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                   <th style={{ ...thW, textAlign: "right" }}>İşlem</th>
                 </tr></thead>
                 <tbody>
-                  {cariL.rows.length === 0 && <tr><td colSpan={8}>{bos}</td></tr>}
+                  {satirlar.length === 0 && <tr><td colSpan={8} style={{ whiteSpace: "normal" }}>{bos}</td></tr>}
                   {satirlar.map((r) => { const hucre = hucreOf(r);
                     return (
                       <tr key={r.anahtar}>
@@ -5383,7 +5480,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                         <td style={{ ...tdN, background: "#fafbfc" }}>{netBlok(r)}</td>
                         <td style={{ ...tdS, verticalAlign: "top", padding: "11px 8px" }}>{sonOdeme(r)}</td>
                         <td style={{ ...tdS, verticalAlign: "top", padding: "9px 12px 9px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
-                          <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{odemeBtn(r)}{ekstreBtn(r)}</div>
+                          <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>{odemeBtn(r)}{faturaBtn(r)}</div>
                         </td>
                       </tr>);
                   })}
@@ -5391,7 +5488,8 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
               </table>
             </div>);
         })()}
-        <TabloAcKapa id="cari" count={cariL.rows.length} />
+        <TabloAcKapa id="cari" count={cariGorunen.length} />
+        {faturaPencere && <CariFaturaPenceresi marka={marka} cari={faturaPencere} onClose={() => setFaturaPencere(null)} />}
         <div style={{ padding: "9px 16px", fontSize: "11.5px", color: "#64748b", background: "#f8fafc", borderTop: "1px solid #f1f5f9" }}>
           Hakediş esaslı carilerde (mor etiket) borç = yapılan işin bedelidir (fiziki iş × iş tarihindeki taşeron fiyatı); açık avans iş tarihi sırasıyla mahsup edilir, mahsup yeni nakit çıkışı değildir. Faturalı tedarikçilerde kalan fatura borcu yalnız kesilmiş faturalardandır (fatura toplamı = KDV dahil ödenecek tutar; tevkifatlı faturada tevkifat düşülmüş). Faturası gelmemiş hakediş bu borca eklenmez — aşağıdaki hakediş tablosunda ayrı izlenir. Açık avans faturaya mahsup edilene kadar alacaktır; net cari = kalan fatura borcu − açık avans/alacak. Ödemeler nakit akışına bir kez düşer.
         </div>
