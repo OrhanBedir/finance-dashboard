@@ -4141,7 +4141,18 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
   const [hata, setHata] = useState("");
   const [imlec, setImlec] = useState(0);
   const [yeni, setYeni] = useState(null); // { ad, unvan, tur, hata, mevcut[] , busy }
+  const [basari, setBasari] = useState("");
   const sira = useRef(0);
+  // 02.11.2026: açılır liste ve yeni kart formu bu kapsayıcının içindedir. Dışarı tıklayınca kapanır; içerideki kutulara
+  // (kısa ad / resmi unvan) geçişte KAPANMAZ. Eskiden liste fare basışını tümden engellediği için içteki kutular odak
+  // alamıyor, yazılan metin üstteki arama kutusuna gidiyor ve yeni kart formu kapanıyordu (kart hiç oluşmuyordu).
+  const kapRef = useRef(null);
+  useEffect(() => {
+    if (!acik) return;
+    const f = (e) => { if (kapRef.current && !kapRef.current.contains(e.target)) setAcik(false); };
+    document.addEventListener("mousedown", f); document.addEventListener("touchstart", f);
+    return () => { document.removeEventListener("mousedown", f); document.removeEventListener("touchstart", f); };
+  }, [acik]);
   useEffect(() => { setQ(deger || ""); }, [deger]);
   useEffect(() => {
     if (!acik || !marka) return;
@@ -4155,14 +4166,24 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
     return () => clearTimeout(t);
   }, [q, acik, marka]);
   const sec = (r) => { setAcik(false); setYeni(null); setQ(r.ad); onSec && onSec(r); };
+  const yeniEksik = !yeni ? null : String(yeni.ad || "").trim().length < 2 ? "Kısa ad zorunlu (en az 2 karakter)" : null;
   const yeniKaydet = async () => {
-    if (!yeni || String(yeni.ad || "").trim().length < 2) return;
+    if (!yeni || yeni.busy) return;                       // çift tıklama: ikinci istek gönderilmez
+    if (yeniEksik) { setYeni((y) => ({ ...y, hata: yeniEksik })); return; }
     setYeni((y) => ({ ...y, busy: true, hata: "" }));
     try {
       const j = await cariIstek("tedarikci", { method: "POST", marka, govde: { ad: yeni.ad, unvan: yeni.unvan, tur: yeni.tur } });
+      setBasari(`✓ "${j.tedarikci.ad}" firma kartı oluşturuldu ve seçildi — faturayı kaydetmek için "Faturayı Kaydet"e basın`);
       sec({ ...j.tedarikci, etiketler: [j.tedarikci.ad], bakiye: {} });
-    } catch (e) { setYeni((y) => ({ ...y, busy: false, hata: e.message, mevcut: e.veri?.mevcut || [] })); }
+    } catch (e) {
+      // 409 = aynı adla kart zaten var (önceki deneme kaydetmiş ama yanıt gelmemiş olabilir) → mevcut kart seçilebilir
+      const msg = e.status === 403 ? `Firma kartı tanımlama yetkiniz yok — ${e.message}` : e.status === 409 ? e.message
+        : !e.status ? "Sunucuya ulaşılamadı — bağlantıyı kontrol edip tekrar deneyin (kart kaydedildiyse tekrar denemede mevcut kart önerilir)" : e.message;
+      setYeni((y) => ({ ...y, busy: false, hata: msg, mevcut: e.veri?.mevcut || [] }));
+    }
   };
+  // Yeni kart kutularında Enter fatura formunu GÖNDERMEZ (kartı kaydeder); Escape formu kapatır
+  const yeniTus = (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); yeniKaydet(); } else if (e.key === "Escape") { e.preventDefault(); setYeni(null); } };
   const tus = (e) => {
     if (!acik && (e.key === "ArrowDown" || e.key === "Enter")) { setAcik(true); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); setImlec((i) => Math.min(rows.length - 1, i + 1)); }
@@ -4172,14 +4193,15 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
   };
   const qBos = !q.trim();
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={kapRef} style={{ position: "relative" }}>
       <input value={q} autoFocus={autoFocus} placeholder={placeholder} onKeyDown={tus}
-        onFocus={() => setAcik(true)} onBlur={() => setTimeout(() => setAcik(false), 180)}
-        onChange={(e) => { setQ(e.target.value); setAcik(true); setYeni(null); onYaz && onYaz(e.target.value); }}
+        onFocus={() => setAcik(true)}
+        onChange={(e) => { setQ(e.target.value); setAcik(true); setBasari(""); onYaz && onYaz(e.target.value); }}
         style={{ ...odmInp, padding: "10px 12px", fontSize: "14px", ...(inputStyle || {}) }} />
+      {basari && !acik && <div role="status" style={{ fontSize: "11px", color: "#15803d", fontWeight: 700, marginTop: "3px" }}>{basari}</div>}
       {acik && (
-        <div onMouseDown={(e) => e.preventDefault()}
-          style={{ position: "absolute", left: 0, top: "calc(100% + 4px)", width: "max(100%, 340px)", maxWidth: "min(520px, 92vw)", zIndex: 14000, background: "#fff", border: "1.5px solid #cbd5e1", borderRadius: "12px", boxShadow: "0 14px 40px rgba(15,23,42,.18)", maxHeight: "360px", overflowY: "auto", textAlign: "left" }}>
+        <div onMouseDown={(e) => { if (!e.target.closest("input, textarea, select")) e.preventDefault(); }}
+          style={{ position: "absolute", left: 0, top: "calc(100% + 4px)", width: "max(100%, min(340px, calc(100vw - 140px)))", maxWidth: "min(520px, 92vw)" /* 02.11.2026: telefonda kutu genişliğinde kalır, pencereden taşmaz */, zIndex: 14000, background: "#fff", border: "1.5px solid #cbd5e1", borderRadius: "12px", boxShadow: "0 14px 40px rgba(15,23,42,.18)", maxHeight: "360px", overflowY: "auto", textAlign: "left" }}>
           {yuk && <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b" }}>Aranıyor…</div>}
           {hata && <div style={{ padding: "10px 12px", fontSize: "12px", color: "#b91c1c" }}>{hata}</div>}
           {!yuk && !hata && rows.length === 0 && <div style={{ padding: "10px 12px", fontSize: "12px", color: "#64748b" }}>{qBos ? "Yazmaya başlayın" : "Eşleşen firma kartı yok"}</div>}
@@ -4203,6 +4225,9 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
               </div>
             </div>
           ))}
+          {!kartAcabilir && !qBos && !yeni && rows.length === 0 && !yuk && (
+            <div style={{ padding: "10px 12px", fontSize: "12px", color: "#92400e", background: "#fffbeb" }}>Listede yok. Yeni firma kartı tanımlama yetkiniz yok — yetkili kullanıcıdan kartı açmasını isteyin.</div>
+          )}
           {kartAcabilir && !qBos && !yeni && (
             <div onClick={() => { const t = q.trim(); const resmi = /(^|\s)(LTD|ŞTİ|STİ|ŞTI|A\.?Ş\.?|LİMİTED|LIMITED|ANONİM|ŞİRKETİ)(\.|\s|$)/i.test(t); setYeni({ ad: resmi ? "" : t, unvan: resmi ? t : "", tur: "TEDARIKCI" }); }} style={{ padding: "10px 12px", cursor: "pointer", fontSize: "12.5px", fontWeight: 800, color: "#1d4ed8", background: "#f8fafc" }}>
               ＋ Yeni tedarikçi tanımla: “{q.trim()}”
@@ -4212,9 +4237,11 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
             <div style={{ padding: "10px 12px", background: "#f8fafc", borderTop: "1px solid #e2e8f0" }}>
               <div style={{ fontSize: "12px", fontWeight: 800, color: "#1e3a5f", marginBottom: "6px" }}>Yeni firma kartı</div>
               {/* 01.11.2026: kısa ad + resmi fatura unvanı aynı karta yazılır — fatura hangi adla gelirse gelsin aynı cariye işlenir */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                <input value={yeni.ad} autoFocus={!yeni.ad} onChange={(e) => setYeni((y) => ({ ...y, ad: e.target.value }))} placeholder="Kısa ad (ör. İztaş) *" style={odmInp} />
-                <input value={yeni.unvan} onChange={(e) => setYeni((y) => ({ ...y, unvan: e.target.value }))} placeholder="Resmi fatura unvanı (ör. İztaş İletişim Mühendislik Ltd. Şti.)" style={odmInp} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "6px" }}>
+                <label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Kısa ad <span style={{ color: "#dc2626" }}>*</span>
+                  <input value={yeni.ad} autoFocus={!yeni.ad} onKeyDown={yeniTus} onChange={(e) => setYeni((y) => ({ ...y, ad: e.target.value, hata: "" }))} placeholder="ör. İztaş" style={{ ...odmInp, marginTop: "2px", ...(yeniEksik ? { borderColor: "#fca5a5" } : {}) }} /></label>
+                <label style={{ fontSize: "11px", fontWeight: 700, color: "#334155" }}>Resmi fatura unvanı <span style={{ color: "#64748b", fontWeight: 500 }}>(önerilir)</span>
+                  <input value={yeni.unvan} onKeyDown={yeniTus} onChange={(e) => setYeni((y) => ({ ...y, unvan: e.target.value, hata: "" }))} placeholder="ör. İztaş İletişim Mühendislik Ltd. Şti." style={{ ...odmInp, marginTop: "2px" }} /></label>
               </div>
               <div style={{ fontSize: "11px", color: "#64748b", marginTop: "4px" }}>Kısa ad ve resmi unvan aynı cari hesaba bağlanır; avans ve fatura hangi adla girilirse girilsin bu karta işlenir.</div>
               <div style={{ display: "flex", gap: "6px", marginTop: "6px", alignItems: "center", flexWrap: "wrap" }}>
@@ -4223,12 +4250,19 @@ function TedarikciArama({ marka, deger, onSec, onYaz, kartAcabilir = true, place
                 ))}
                 <span style={{ flex: 1 }} />
                 <button type="button" onClick={() => setYeni(null)} style={{ padding: "6px 10px", background: "#e5e7eb", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>Vazgeç</button>
-                <button type="button" disabled={yeni.busy} onClick={yeniKaydet} style={{ padding: "6px 12px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>{yeni.busy ? "Kaydediliyor…" : "Kartı oluştur ve seç"}</button>
+                <button type="button" disabled={yeni.busy} onClick={yeniKaydet} title={yeniEksik || "Firma kartını kaydeder ve bu forma seçer (fatura ayrıca kaydedilir)"} style={{ padding: "6px 12px", background: yeniEksik ? "#94a3b8" : "#1e3a5f", color: "#fff", border: "none", borderRadius: "8px", fontSize: "12px", fontWeight: 800, cursor: yeni.busy ? "wait" : "pointer" }}>{yeni.busy ? "Kaydediliyor…" : "Tedarikçiyi kaydet ve seç"}</button>
               </div>
-              {yeni.hata && <div style={{ fontSize: "11.5px", color: "#b91c1c", marginTop: "6px" }}>{yeni.hata}</div>}
-              {(yeni.mevcut || []).map((m) => (
-                <button key={m.anahtar} type="button" onClick={() => sec({ ...m, kimlik: "KART", etiketler: [m.ad], bakiye: {} })} style={{ marginTop: "6px", marginRight: "6px", padding: "5px 10px", background: "#ecfdf5", border: "1px solid #86efac", borderRadius: "8px", fontSize: "12px", fontWeight: 700, color: "#166534", cursor: "pointer" }}>Mevcut kartı seç: {m.ad}</button>
-              ))}
+              {/* 02.11.2026: hata düğmenin hemen altında ve görünür alana kaydırılır — telefonda liste kaydırmalı, alttaki mesaj görünmüyordu */}
+              {yeni.hata && (
+                <div key={yeni.hata} ref={(el) => el && el.scrollIntoView({ block: "nearest" })}>
+                  <div role="alert" style={{ fontSize: "11.5px", color: "#b91c1c", marginTop: "6px", fontWeight: 700 }}>{yeni.hata}</div>
+                  {(yeni.mevcut || []).map((m) => (
+                    <button key={m.anahtar} type="button" onClick={() => sec({ ...m, kimlik: "KART", etiketler: [m.ad], bakiye: {} })} style={{ marginTop: "6px", marginRight: "6px", padding: "5px 10px", background: "#ecfdf5", border: "1px solid #86efac", borderRadius: "8px", fontSize: "12px", fontWeight: 700, color: "#166534", cursor: "pointer" }}>Mevcut kartı seç: {m.ad}</button>
+                  ))}
+                </div>
+              )}
+              {!yeni.hata && yeniEksik && <div style={{ fontSize: "11px", color: "#92400e", marginTop: "6px" }}>{yeniEksik}</div>}
+              <div style={{ fontSize: "10.5px", color: "#64748b", marginTop: "4px" }}>Bu düğme yalnız firma kartını kaydeder; fatura, formun altındaki "Faturayı Kaydet" ile ayrıca kaydedilir. Girdiğiniz fatura bilgileri korunur.</div>
             </div>
           )}
         </div>
@@ -15526,6 +15560,7 @@ function FinanceDashboard({
   const faturaOkumaDosya = useRef(null);        // { file, url } — "Tekrar oku" ve önizleme
   const faturaOtoAlanlar = useRef(new Set());   // okumanın forma yazdığı alanlar
   const faturaElleAlanlar = useRef(new Set());  // kullanıcının elle değiştirdiği alanlar — okuma üzerine yazmaz
+  const faturaSecilenKart = useRef(null); // 02.11.2026: son seçilen firma kartı adı — ad elle değişirse kullanıcıya bildirilir
   const invoiceFormRef = useRef(invoiceForm);
   invoiceFormRef.current = invoiceForm;
   const faturaOkumaSifirla = () => {
@@ -15844,6 +15879,7 @@ function FinanceDashboard({
     if (!actionTrigger) return;
     if (actionTrigger === 'fatura_girisi' || actionTrigger === 'fatura_yeni') {
       setShowInvoiceEntryModal(true);
+      faturaSecilenKart.current = null;
       setShowInvoiceFormPanel(actionTrigger === 'fatura_yeni'); // 29.10.2026: Teknocenter Taşeron Faturaları → "+ Fatura Girişi"
       setFaturaSiteSecim("");
       setShowInvoiceUpload(false);
@@ -16193,7 +16229,7 @@ function FinanceDashboard({
     setShowUpload(false);
     setShowInvoiceUpload(false);
     setShowInvoiceEntryModal(true);
-    setShowInvoiceFormPanel(true);
+    faturaSecilenKart.current = null; setShowInvoiceFormPanel(true);
   };
 
   const handleSaveManualInvoice = async (e) => {
@@ -16908,7 +16944,7 @@ function FinanceDashboard({
                     fatura_turu: "GELEN",
                     bagli_fatura_id: "",
                   });
-                  setShowInvoiceFormPanel(true);
+                  faturaSecilenKart.current = null; setShowInvoiceFormPanel(true);
                 }}
               >
                 Yeni Fatura Gir
@@ -17046,7 +17082,7 @@ function FinanceDashboard({
                                 className="tab"
                                 onClick={() => {
                                   handleEditManualInvoice(row);
-                                  setShowInvoiceFormPanel(true);
+                                  faturaSecilenKart.current = null; setShowInvoiceFormPanel(true);
                                 }}
                               >
                                 Düzenle
@@ -17157,7 +17193,8 @@ function FinanceDashboard({
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#3b82f6", display: "inline-block" }} />
                     Proje Bilgileri
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                  {/* 02.11.2026: fatura penceresi ızgaraları dar ekranda (telefon) alt alta dizilir; masaüstünde sütun sayısı aynı */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: "14px" }}>
                     {[
                       { label: "Bölge", name: "bolge", placeholder: "Antalya / İzmir / Ankara", list: "dl-fatura-bolge" },
                       { label: "Proje", name: "proje", placeholder: "TT / TC", list: "dl-fatura-proje" },
@@ -17193,7 +17230,7 @@ function FinanceDashboard({
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#8b5cf6", display: "inline-block" }} />
                     Fatura Bilgileri
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: "14px" }}>
                     {[
                       { label: "Fatura No *", name: "fatura_no", placeholder: "ABC2025/001" },
                       { label: "Tedarikçi *", name: "tedarikci", placeholder: "Firma adı" },
@@ -17208,11 +17245,13 @@ function FinanceDashboard({
                         <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#374151", marginBottom: "6px" }}>Tedarikçi / Taşeron *</label>
                         <TedarikciArama marka={faturaCariMarka} deger={invoiceForm.tedarikci || ""}
                           onYaz={(v) => { faturaElleAlanlar.current.add("tedarikci"); setInvoiceForm((p) => ({ ...p, tedarikci: v, tedarikci_id: "" })); }}
-                          onSec={(r) => { faturaElleAlanlar.current.add("tedarikci"); setInvoiceForm((p) => ({ ...p, tedarikci: r.unvan || r.ad, tedarikci_id: r.kimlik === "KART" && r.id ? String(r.id) : "" })); }}
+                          onSec={(r) => { faturaElleAlanlar.current.add("tedarikci"); faturaSecilenKart.current = r.kimlik === "KART" && r.id ? (r.unvan || r.ad) : null; setInvoiceForm((p) => ({ ...p, tedarikci: r.unvan || r.ad, tedarikci_id: r.kimlik === "KART" && r.id ? String(r.id) : "" })); }}
                           inputStyle={{ padding: "9px 12px", border: "1.5px solid #e5e7eb", borderRadius: "8px", fontSize: "14px" }} />
                         {String(invoiceForm.tedarikci || "").trim() && (
                           <div style={{ fontSize: "10.5px", marginTop: "3px", color: invoiceForm.tedarikci_id ? "#15803d" : "#b45309" }}>
-                            {invoiceForm.tedarikci_id ? "✓ firma kartı seçildi" : sadeceFatura ? "⚠ listeden seçin ya da 'Yeni tedarikçi tanımla'" : "⚠ listeden seçilmedi (serbest metin)"}
+                            {invoiceForm.tedarikci_id ? "✓ firma kartı seçildi"
+                              : faturaSecilenKart.current && faturaSecilenKart.current !== invoiceForm.tedarikci ? "⚠ Ad elle değiştirildi — seçili firma kartı kaldırıldı; listeden yeniden seçin"
+                              : sadeceFatura ? "⚠ listeden seçin ya da 'Yeni tedarikçi tanımla'" : "⚠ listeden seçilmedi (serbest metin)"}
                           </div>
                         )}
                       </div>
@@ -17320,7 +17359,7 @@ function FinanceDashboard({
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
                     Finansal Bilgiler
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: sadeceFatura ? "1fr 1fr 1fr" : "1fr 1fr 1fr 1fr 1fr", gap: "14px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: sadeceFatura ? "repeat(auto-fit, minmax(min(100%, 220px), 1fr))" : "repeat(auto-fit, minmax(min(100%, 140px), 1fr))", gap: "14px" }}>
                     {[
                       { label: "Tutar / Matrah (₺)", name: "tutar" },
                       { label: "KDV (₺)", name: "kdv" },
@@ -17340,7 +17379,7 @@ function FinanceDashboard({
                 </div>
 
                 {/* BÖLÜM 4: Not + Fatura Fotoğrafı */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: "16px", marginBottom: "16px" }}>
                   <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 24px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                     <div style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
                       <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#f59e0b", display: "inline-block" }} />
@@ -41098,8 +41137,8 @@ function App() {
                     ] : []),
                     ...(isAltMarka && isAdmin && !_fiyatGizli ? [
                       { ikon:'💰', label:'Nakit Akışı (Günlük)', aktif: page==='marka_nakit', onClick:()=>setPage('marka_nakit') },
-                      { ikon:'🧾', label:'Fatura Girişi', aktif: page==='marka_fatura_girisi', onClick:()=>setPage('marka_fatura_girisi') },
-                      { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron', onClick:()=>setPage('marka_taseron') },
+                      // 02.11.2026: ayrı "Fatura Girişi" kaldırıldı — Taşeron Faturaları firmanın tüm faturalarını listeler, "+ Fatura Girişi" aynı ekranı açar
+                      { ikon:'🔧', label:'Taşeron Faturaları', aktif: page==='marka_taseron' || page==='marka_fatura_girisi', onClick:()=>setPage('marka_taseron') },
                       { ikon:'🧾', label:'Şimşek Fatura Takip', aktif: page==='marka_fatura_takip', onClick:()=>setPage('marka_fatura_takip') },
                     ] : []),
                     ...(["orhan.bedir@simsektel.com","duzgun.simsek@simsektel.com"].includes(_userEmail) ? [{ ikon:'🏦', label:'Nakit Akışı', aktif: page==='cashflow', onClick:()=>setPage('cashflow') }] : []),
