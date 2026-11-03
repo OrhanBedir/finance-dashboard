@@ -7647,18 +7647,17 @@ app.get("/master/saha-kalemler", async (req, res) => {
         COALESCE(po.billed_qty, 0)           AS billed_qty,
         COALESCE(po.due_qty, 0)              AS due_qty,
         COALESCE(po.po_no,'')                AS po_no,
-        -- Birim fiyat: sahanın PO'su; PO açılmamışsa kalemin son PO fiyatı (tahmini)
-        COALESCE(NULLIF(po.unit_price,0), item_po.unit_price, 0) AS unit_price,
-        COALESCE(NULLIF(po.currency,''), item_po.currency, best_boq.currency, 'TRY') AS currency,
-        (po.item_code IS NULL AND item_po.unit_price IS NOT NULL) AS fiyat_tahmini,
+        -- Birim fiyat (03.11.2026, Orhan — KA0181 "PR ≈ 44k"): sahanın PO fiyatı; PO yoksa aşağıda (JS) PR satırının BoQ
+        -- fiyatı, o da yoksa seçili sürümün katalog fiyatı. Başka sahaların PO fiyatı artık kullanılmaz (en yüksek fiyatı
+        -- alıyordu, bölge / sürüm karışıyordu; PO'su hiç açılmamış kalem toplama sessizce girmiyordu).
+        NULLIF(po.unit_price,0)              AS po_unit_price,
+        COALESCE(NULLIF(po.currency,''), best_boq.currency, 'TRY') AS po_currency,
         (po.item_code IS NOT NULL)           AS po_var,
         (mw.item_code IS NOT NULL)           AS kayit_var
       FROM mw
       FULL OUTER JOIN po ON mw.item_code = po.item_code
       LEFT JOIN best_boq
         ON TRIM(COALESCE(best_boq.s_bom_code,'')) = COALESCE(mw.item_code, po.item_code)
-      LEFT JOIN best_item_po item_po
-        ON TRIM(COALESCE(item_po.item_code,'')) = COALESCE(mw.item_code, po.item_code)
       ORDER BY 1
     `;
 
@@ -7673,13 +7672,30 @@ app.get("/master/saha-kalemler", async (req, res) => {
       ),
     ]);
 
-    const rows = (gridRes.rows || []).map((r) => ({
-      ...r,
-      currency: normalizeCurrency(r.currency),
-      pr_qty: r.pr_qty === null || r.pr_qty === undefined ? null : Number(r.pr_qty),
-    }));
-
     const meta = metaRes.rows[0] || {};
+    // Birim fiyat kaynağı: PO (sahanın PO'su) → BOQ (PR satırına kaydedilmiş BoQ fiyatı) → KATALOG (satırın BoQ sürümü,
+    // sahanın bölgesi) → yok (fiyatsız; toplamda ayrıca sayılır, sessizce 0 kabul edilmez)
+    const fiyatBolge = boqKatalog.bolgeNormalize(meta.bolge) || boqKatalog.bolgeNormalize(getRegionFromSiteCode(site));
+    const katalogFiyati = async (surum, kod) => {
+      if (!surum || !kod) return null;
+      try { const k = await boqKatalog.kalemGetir(pool, surum, kod, fiyatBolge); return k && k.birim_fiyat !== null ? { fiyat: Number(k.birim_fiyat), pb: k.para_birimi || "TRY", surum } : null; }
+      catch { return null; }
+    };
+    const rows = [];
+    for (const r of gridRes.rows || []) {
+      let unit_price = 0, currency = r.po_currency || "TRY", fiyat_kaynak = null, fiyat_surum = null;
+      if (Number(r.po_unit_price) > 0) { unit_price = Number(r.po_unit_price); fiyat_kaynak = "PO"; }
+      else if (r.boq_birim_fiyat !== null && r.boq_birim_fiyat !== undefined && Number(r.boq_birim_fiyat) > 0) {
+        unit_price = Number(r.boq_birim_fiyat); currency = r.boq_para_birimi || "TRY"; fiyat_kaynak = "BOQ"; fiyat_surum = r.boq_surum || null;
+      } else {
+        const k = await katalogFiyati(r.boq_surum, r.item_code);
+        if (k) { unit_price = k.fiyat; currency = k.pb; fiyat_kaynak = "KATALOG"; fiyat_surum = k.surum; }
+      }
+      const { po_unit_price, po_currency, ...x } = r;
+      rows.push({ ...x, unit_price, currency: normalizeCurrency(currency), fiyat_kaynak, fiyat_surum,
+        fiyat_tahmini: fiyat_kaynak === "BOQ" || fiyat_kaynak === "KATALOG", // PO fiyatı değil → ekranda "≈"
+        pr_qty: r.pr_qty === null || r.pr_qty === undefined ? null : Number(r.pr_qty) });
+    }
     // 28.10.2026: başlıktaki taşeron ortak çözümden (taseronCozum): RF iş kolunun Günlük İş Girişi taşeronu (tam ad) esastır;
     // grup adı (TEKNO) onun yerine geçmez; birden fazla taşeron varsa seçilmez, "kontrol gerekli" gösterilir. "En çok geçen"
     // kuralı kaldırıldı (sessiz seçim). varsayilan_taseron: yeni kalem satırının ön değeri — grup adı asla ön değer olmaz.

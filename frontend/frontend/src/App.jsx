@@ -11150,10 +11150,13 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
       dueT += Number(r.due_qty || 0);
       billT += Number(r.billed_qty || 0);
     });
-    // Tutarlar (02.09.2026): para birimine göre PR / PO / faturalanan; PO'suz kalemde son PO fiyatı (tahmini)
-    const tutar = {}; let tahmini = false;
+    // Tutarlar (02.09.2026): para birimine göre PR / PO / faturalanan.
+    // 03.11.2026: PO'suz kalemde PR satırının BoQ fiyatı / seçili sürümün katalog fiyatı (tahmini, "≈"); başka sahaların PO
+    // fiyatı kullanılmaz. Fiyatı bulunamayan PR kalemi toplamda sessizce 0 sayılmaz → "fiyatsız" olarak ayrıca gösterilir.
+    const tutar = {}; let tahmini = false; const fiyatsiz = [];
     rows.forEach((r) => {
-      const f = Number(r.unit_price || 0); if (!f) return;
+      const f = Number(r.unit_price || 0);
+      if (!f) { if ((num(goster(r, "pr_qty")) || 0) > 0) fiyatsiz.push(r.item_code); return; }
       const c = String(r.currency || "TRY").toUpperCase();
       tutar[c] = tutar[c] || { pr: 0, po: 0, bill: 0 };
       tutar[c].pr   += (num(goster(r, "pr_qty")) || 0) * f;
@@ -11161,7 +11164,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
       tutar[c].bill += Number(r.billed_qty || 0) * f;
       if (r.fiyat_tahmini && (num(goster(r, "pr_qty")) || 0) > 0) tahmini = true;
     });
-    return { poAcik, farkli, qcOk, prT, reqT, doneT, dueT, billT, tutar, tahmini };
+    return { poAcik, farkli, qcOk, prT, reqT, doneT, dueT, billT, tutar, tahmini, fiyatsiz };
   }, [rows, duzenleme]);
   const paraFmt = (v, c) => (c === "USD" ? "$" : c === "EUR" ? "€" : "₺") + Math.round(v).toLocaleString("tr-TR");
 
@@ -11234,7 +11237,7 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
         num(goster(r, "done_qty")) ?? "", Number(r.due_qty || 0), Number(r.billed_qty || 0),
         r.qc_durum || "", r.subcon_name || "", r.po_no || "",
         fiyat ? fiyat : "", r.currency || "", fiyat && pr ? Math.round(pr * fiyat * 100) / 100 : "",
-        r.fiyat_tahmini && fiyat ? "tahmini (son PO)" : "",
+        !fiyat ? (pr ? "fiyat bulunamadı" : "") : r.fiyat_kaynak === "BOQ" ? `BoQ fiyatı (${r.fiyat_surum || r.boq_surum || "sürüm ?"}) — PO yok` : r.fiyat_kaynak === "KATALOG" ? `Katalog fiyatı (${r.fiyat_surum || "sürüm ?"}) — PO yok` : "",
       ];
     });
     // 29.10.2026: fiyat yetkisi yoksa Birim Fiyat / Para Birimi / PR Tutarı / Fiyat Notu sütunları dosyaya hiç yazılmaz
@@ -11291,9 +11294,15 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
             <span style={{ ...S.chip, background:"#d1fae5", color:"#047857", borderColor:"transparent" }}>QC OK <b>{ozet.qcOk}</b></span>
             {Object.keys(ozet.tutar).length > 0 && (
               <span
-                title={Object.entries(ozet.tutar).map(([c, t]) => `${c}: PR ${paraFmt(t.pr, c)} · PO ${paraFmt(t.po, c)} · Faturalanan ${paraFmt(t.bill, c)}`).join("\n") + (ozet.tahmini ? "\n~ PO açılmamış kalemlerde son PO birim fiyatı kullanıldı" : "")}
+                title={Object.entries(ozet.tutar).map(([c, t]) => `${c}: PR ${paraFmt(t.pr, c)} · PO ${paraFmt(t.po, c)} · Faturalanan ${paraFmt(t.bill, c)}`).join("\n") + (ozet.tahmini ? "\n≈ PO açılmamış kalemlerde PR'daki BoQ fiyatı / seçili sürümün katalog fiyatı kullanıldı" : "") + (ozet.fiyatsiz.length ? `\nFiyatı bulunamayan kalem (toplama girmedi): ${ozet.fiyatsiz.join(", ")}` : "")}
                 style={{ ...S.chip, background:"transparent", color:"#94a3b8", borderColor:"#e2e8f0", fontWeight:600, cursor:"help" }}>
                 PR {ozet.tahmini ? "≈ " : ""}{Object.entries(ozet.tutar).map(([c, t]) => paraFmt(t.pr, c)).join(" + ")}
+              </span>
+            )}
+            {!_fiyatGizliMi() && ozet.fiyatsiz.length > 0 && (
+              <span title={`Bu kalemlerin ne PO fiyatı ne BoQ / katalog fiyatı var; PR toplamına girmedi:\n${ozet.fiyatsiz.join("\n")}`}
+                style={{ ...S.chip, background:"#fef2f2", color:"#b91c1c", borderColor:"#fecaca", fontWeight:700, cursor:"help" }}>
+                ⚠ {ozet.fiyatsiz.length} kalem fiyatsız
               </span>
             )}
             {data.meta?.tssr_belge_url && (
