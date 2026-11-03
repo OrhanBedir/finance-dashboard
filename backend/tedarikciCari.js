@@ -818,19 +818,21 @@ function kur(app, c) {
   // Kartın gerçekleşen işleri: kalem bazında PR (done_qty), fiziki (tamamlanan_qty), hakedişe girmiş miktar, kalan ve fiyat
   async function hakedisIsleri(db, M, s, tarih) {
     const adlar = s.katlar;
-    // 02.11.2026: fiyat İŞ TARİHİNE göre seçilir (hakediş günü değil) — fiilî montaj bitişi → başlangıcı → tamamlanma → iş girişi
+    // 02.11.2026: fiyat İŞ TARİHİNE göre seçilir (hakediş günü değil). 03.11.2026 (Orhan): iş tarihi = fiilî MONTAJ BAŞLANGICI;
+    // yoksa iş kodunun ilk iş girişi; o da yoksa montaj bitişi / tamamlanma (bitiş tarihleri toplu kapatmada sonradan girilebiliyor)
     const isSql = (rp) => `SELECT m.id, UPPER(TRIM(m.site_code)) AS site_code, TRIM(COALESCE(m.item_code,'')) AS item_code, m.item_description,
         COALESCE(m.done_qty,0)::numeric AS pr_qty, COALESCE(m.tamamlanan_qty,0)::numeric AS fiziki_qty, m.subcon_name, m.qc_durum,
-        to_char(m.created_at,'YYYY-MM-DD') AS giris, ${rp ? "to_char(COALESCE(rp.installation_actual_end_date, rp.installation_actual_start_date, rp.tamamlanma_tarihi), 'YYYY-MM-DD')" : "NULL"} AS montaj
+        to_char(m.created_at,'YYYY-MM-DD') AS giris, ${rp ? "to_char(rp.installation_actual_start_date, 'YYYY-MM-DD')" : "NULL"} AS montaj,
+        ${rp ? "to_char(COALESCE(rp.installation_actual_end_date, rp.tamamlanma_tarihi), 'YYYY-MM-DD')" : "NULL"} AS bitis
       FROM master_works m ${rp ? "LEFT JOIN rollout_progress rp ON UPPER(TRIM(rp.site_code)) = UPPER(TRIM(m.site_code))" : ""}
       WHERE m.subcon_name IS NOT NULL ORDER BY m.site_code, m.id`;
     const r = await db.query(isSql(true)).catch(() => db.query(isSql(false)));
     const kalemler = r.rows.filter((x) => adlar.includes(katla(x.subcon_name)));
-    // İş kodunun tarihi: fiilî montaj tarihi, yoksa iş kodundaki en erken iş girişi; hiçbiri yoksa hakediş günü
+    // İş kodunun tarihi: montaj başlangıcı → en erken iş girişi → montaj bitişi; hiçbiri yoksa hakediş günü
     const isTarihi = new Map();
     for (const sc of new Set(kalemler.map((x) => x.site_code))) {
       const ks = kalemler.filter((x) => x.site_code === sc);
-      const t = ks.find((x) => x.montaj)?.montaj || ks.map((x) => x.giris).filter(Boolean).sort()[0];
+      const t = ks.find((x) => x.montaj)?.montaj || ks.map((x) => x.giris).filter(Boolean).sort()[0] || ks.find((x) => x.bitis)?.bitis;
       if (t) isTarihi.set(sc, t);
     }
     const ids = kalemler.map((x) => Number(x.id));
@@ -868,7 +870,7 @@ function kur(app, c) {
       }
       const satir = { master_works_id: Number(x.id), site_code: x.site_code, fiziksel_id: String(x.site_code).split("_")[0], item_code: x.item_code,
         aciklama: x.item_description, etiket: x.subcon_name, pr_qty: Number(x.pr_qty), fiziki_qty: Number(x.fiziki_qty), hakediste: giren, kalan,
-        qc: x.qc_durum || null, giris: x.giris, is_tarihi: isTarihi.get(x.site_code) || tarih, is_tarihi_kaynak: x.montaj ? "montaj" : "iş girişi",
+        qc: x.qc_durum || null, giris: x.giris, is_tarihi: isTarihi.get(x.site_code) || tarih, is_tarihi_kaynak: x.montaj ? "montaj başlangıcı" : x.giris ? "iş girişi" : "montaj bitişi",
         fiyat, fiyat_durum: durum, paket_dahil };
       satir.tutar = fiyat ? kalemDeger(satir, kalan) : null;
       out.push(satir);
