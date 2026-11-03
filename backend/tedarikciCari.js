@@ -294,9 +294,21 @@ function kur(app, c) {
         aciklama: "Ortak ödeme kaydı (araç kirası ekranı)", durum: "AKTIF", yeni_kayit: false }); }
       // Hakediş esaslı cari: onaylı hakediş borçtur; açık avans tarih sırasıyla (eskiden yeniye) hakedişe mahsup edilir.
       // Mahsup HESAPLANIR (ayrı kayıt/nakit çıkışı yok); her bakiye hareketlerden yeniden üretilebilir.
-      if (c0.id) for (const h of hk.filter((x) => Number(x.tedarikci_id) === c0.id)) {
-        c0.hakedisler.push({ ...h, toplam: r2(h.toplam) });
-        if (h.durum === "ONAYLI") { const P = pbOf(c0, h.pb); P.hakedis = r2((P.hakedis || 0) + Number(h.toplam)); }
+      if (c0.id) for (const h of hk.filter((x) => Number(x.tedarikci_id) === c0.id)) c0.hakedisler.push({ ...h, toplam: r2(h.toplam) });
+      // 03.11.2026 (Orhan): hakediş esaslı caride borç = YAPILAN İŞİN BEDELİ — fiziki tamamlanan miktar × iş tarihindeki taşeron
+      // fiyatı (paket / kalem); elle hakediş onayı beklenmez. Hakediş belgeleri dönem dökümü olarak kalır, borca ayrıca eklenmez
+      // (çift sayılmaz). Fiyatı tanımsız kalem borca girmez ve uyarı olarak gösterilir.
+      if (c0.id && c0.cari_modeli === "HAKEDIS" && M !== "SIMSEK") {
+        const s = R.byId.get(c0.id);
+        const isler = s ? await hakedisIsleri(db, M, s, bugunTR()) : [];
+        const fiz = isler.filter((x) => x.fiziki_qty > 0);
+        c0.is_bedeli = fiz.filter((x) => x.fiyat).map((x) => ({ master_works_id: x.master_works_id, site_code: x.site_code, item_code: x.item_code,
+          aciklama: x.aciklama, tarih: x.is_tarihi, tarih_kaynak: x.is_tarihi_kaynak, miktar: x.fiziki_qty, pb: x.fiyat.pb || "TRY",
+          paket: x.fiyat.paket ? x.fiyat.paket.ad : null, tutar: kalemDeger(x, x.fiziki_qty) }));
+        for (const b of c0.is_bedeli) { const P = pbOf(c0, b.pb); P.hakedis = r2((P.hakedis || 0) + b.tutar); }
+        const fiyatsiz = fiz.filter((x) => !["VAR", "PAKET"].includes(x.fiyat_durum));
+        if (fiyatsiz.length) c0.uyarilar.push({ tip: "FIYAT_TANIMSIZ", mesaj: `${fiyatsiz.length} gerçekleşen kalemde taşeron fiyatı tanımsız — borca eklenmedi (${[...new Set(fiyatsiz.map((x) => x.site_code))].slice(0, 5).join(", ")}${fiyatsiz.length > 5 ? "…" : ""})` });
+        pbOf(c0, "TRY"); // işi / avansı olmasa da özet satırı görünür
       }
       for (const [pb, P] of Object.entries(c0.pb)) {
         for (const k of Object.keys(P)) P[k] = r2(P[k]);
@@ -308,10 +320,10 @@ function kur(app, c) {
           P.hakedis_kalan = r2(P.hakedis - P.hakedis_mahsup);
           P.avans_acik = r2(P.avans_acik - P.hakedis_mahsup);
           P.kalan = r2(P.kalan + P.hakedis_kalan);
-          // Hakediş bazında karşılanma (FIFO, onay tarihine göre) — ekranda "ne kadarı ödendi" sütunu
+          // İş bazında karşılanma (FIFO, iş tarihine göre) — ekranda "ne kadarı ödendi" sütunu
           let kalanMahsup = P.hakedis_mahsup;
-          for (const h of c0.hakedisler.filter((x) => x.durum === "ONAYLI" && x.pb === pb)) {
-            h.karsilanan = r2(Math.min(kalanMahsup, h.toplam)); h.kalan = r2(h.toplam - h.karsilanan); kalanMahsup = r2(kalanMahsup - h.karsilanan);
+          for (const h of (c0.is_bedeli || []).filter((x) => x.pb === pb).sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)) || a.master_works_id - b.master_works_id)) {
+            h.karsilanan = r2(Math.min(kalanMahsup, h.tutar)); h.kalan = r2(h.tutar - h.karsilanan); kalanMahsup = r2(kalanMahsup - h.karsilanan);
           }
         } else { P.hakedis = P.hakedis || 0; P.hakedis_mahsup = 0; P.hakedis_kalan = 0; }
         P.alacak = r2(P.avans_acik + P.iade_alacak + P.fazla_odeme);
@@ -486,7 +498,7 @@ function kur(app, c) {
     try {
       const v = await cariHesapla(pool, req.cariFirma);
       const rows = [...v.cari.values()].map((c0) => ({ anahtar: c0.anahtar, id: c0.id, ad: c0.ad, unvan: c0.unvan, kimlik: c0.kimlik, tur: c0.tur, cari_modeli: c0.cari_modeli,
-        hakedis_sayisi: (c0.hakedisler || []).filter((h) => h.durum === "ONAYLI").length,
+        hakedis_sayisi: (c0.hakedisler || []).filter((h) => h.durum === "ONAYLI").length, is_sayisi: (c0.is_bedeli || []).length,
         etiketler: c0.etiketler, etiket_katla: c0.etiket_katla, adaylar: c0.adaylar, pb: c0.pb, fatura_sayisi: c0.faturalar.length,
         hareket_sayisi: c0.hareketler.length, uyari_sayisi: c0.uyarilar.length,
         son_odeme: c0.hareketler.find((h) => h.durum === "AKTIF" && h.islem_turu !== "MAHSUP")?.tarih || null }))
@@ -743,8 +755,8 @@ function kur(app, c) {
       for (const c0 of liste) for (const pb of Object.keys(c0.pb).length ? Object.keys(c0.pb) : ["TRY"]) {
         const ol = [];
         for (const f of c0.faturalar.filter((x) => x.pb === pb)) ol.push({ t: f.fatura_tarihi || f.giris_tarihi, s: 0, a: f.tur === "GELEN" ? "Fatura" : "İade faturası", n: f.fatura_no, b: f.tur === "GELEN" ? f.toplam : 0, al: f.tur === "GELEN" ? 0 : f.toplam, ack: f.note || "" });
-        // 02.11.2026: hakediş esaslı cari — onaylı hakediş borçtur (fatura değildir); taslak / iptal ekstreye girmez
-        for (const h of (c0.hakedisler || []).filter((x) => x.durum === "ONAYLI" && x.pb === pb)) ol.push({ t: h.tarih, s: 0, a: "Onaylı hakediş", n: `H-${h.id}`, b: h.toplam, al: 0, ack: `${h.kalem_sayisi} kalem · onay ${h.onaylayan || "—"} ${h.onay_tarihi || ""}${h.aciklama ? " · " + h.aciklama : ""}` });
+        // 03.11.2026: hakediş esaslı cari — borç gerçekleşen iştir (fatura değildir): iş kodu ve kalem bazında, iş tarihiyle
+        for (const h of (c0.is_bedeli || []).filter((x) => x.pb === pb)) ol.push({ t: h.tarih, s: 0, a: "Gerçekleşen iş", n: h.site_code, b: h.tutar, al: 0, ack: `${h.item_code} ${h.aciklama || ""}${h.paket ? ` · ${h.paket} paket` : ` · ${h.miktar} adet`} · iş tarihi: ${h.tarih_kaynak}` });
         for (const h of c0.hareketler.filter((x) => x.pb === pb && x.durum === "AKTIF")) {
           if (h.islem_turu === "MAHSUP") ol.push({ t: h.tarih, s: 1, a: TUR.MAHSUP, n: h.no, b: 0, al: 0, ack: h.dagilim.map((d) => `${d.fatura_no}: ${tl(d.odeme)}`).join(", ") });
           else ol.push({ t: h.tarih, s: 1, a: TUR[h.tur] || h.tur, n: h.no, b: 0, al: h.tutar, ack: [h.aciklama, h.referans && `ref ${h.referans}`].filter(Boolean).join(" · ") });
