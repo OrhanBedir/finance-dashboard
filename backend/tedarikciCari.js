@@ -501,7 +501,9 @@ function kur(app, c) {
         hakedis_sayisi: (c0.hakedisler || []).filter((h) => h.durum === "ONAYLI").length, is_sayisi: (c0.is_bedeli || []).length,
         etiketler: c0.etiketler, etiket_katla: c0.etiket_katla, adaylar: c0.adaylar, pb: c0.pb, fatura_sayisi: c0.faturalar.length,
         hareket_sayisi: c0.hareketler.length, uyari_sayisi: c0.uyarilar.length,
-        son_odeme: c0.hareketler.find((h) => h.durum === "AKTIF" && h.islem_turu !== "MAHSUP")?.tarih || null }))
+        // 03.11.2026: son ödemenin tutarı da (yalnız gösterim; cari hesabı değişmez)
+        ...(() => { const h = c0.hareketler.find((x) => x.durum === "AKTIF" && x.islem_turu !== "MAHSUP");
+          return { son_odeme: h?.tarih || null, son_odeme_tutar: h ? h.tutar : null, son_odeme_pb: h ? h.pb || "TRY" : null }; })() }))
         .sort((a, b) => (b.pb.TRY?.kalan || 0) - (a.pb.TRY?.kalan || 0) || a.ad.localeCompare(b.ad, "tr"));
       const toplam = {};
       for (const r of rows) for (const [pb, P] of Object.entries(r.pb)) {
