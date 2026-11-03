@@ -148,3 +148,8 @@ Veri işleme: "Data collected is processed ephemerally" → No. Güvenlik uygula
   • Saha Haritası: size atanan işlerin sahaları haritada; yol tarifi alın.
   • İş Atama (yöneticiler): ekibe iş atayın, atamaları görün ve güncelleyin.
   • Sahadan issue / engel bildirimi; bağlantı kopunca bildirimler telefonda bekler, bağlantı gelince gönderilir.
+
+## 1.1.1 güncellemesi (04.11.2026)
+- İş Atama: tipli kategorilerde (New Site Montaj: Standalone / LTE / NR700 / NR3500 / TRP / One Band; Gizleme; Malzeme) tip seçimi seçilen kategorinin hemen altında (önceden listenin sonunda, ekran dışındaydı).
+- Release notes (tr-TR):
+  • İş Atama: New Site Montaj tipi (LTE, NR700, NR3500…) artık kategorinin hemen altında seçiliyor.

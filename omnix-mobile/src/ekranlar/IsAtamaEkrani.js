@@ -131,25 +131,45 @@ function AdimCubugu({ adim, f, kat, onSec }) {
 }
 
 function KategoriAdimi({ f, guncelle, kategoriler, kat }) {
+  // 04.11.2026: tipli kategoride (New Site: Standalone / LTE / NR700 / NR3500 / TRP / One Band; Gizleme; Malzeme) tip seçimi
+  // seçilen kategorinin HEMEN ALTINDA açılır — listenin sonunda ekran dışında kalıp görünmüyordu
+  const tipler = kat?.alt_tipler || [];
+  const kart = (k) => {
+    const sec = k.kod === f.kategori;
+    const tipSayisi = (k.alt_tipler || []).length;
+    return (
+      <Pressable key={k.kod} onPress={() => guncelle({ kategori: k.kod, alt_tip: k.kod === f.kategori ? f.alt_tip : "", isler: k.tekil_site && f.isler.length > 1 ? f.isler.slice(0, 1) : f.isler })} accessibilityRole="radio" accessibilityState={{ selected: sec }}
+        style={({ pressed }) => [{ minHeight: DOKUNMA, paddingHorizontal: 14, borderRadius: kose.m, borderWidth: 1.5, borderColor: sec ? renk.lacivert : renk.cizgiKoyu, backgroundColor: sec ? renk.lacivert : renk.yuzey, justifyContent: "center" }, pressed && { opacity: 0.8 }]}>
+        <Metin tur="kucukKalin" renk={sec ? "#fff" : renk.metin}>{k.ikon ? `${k.ikon} ` : ""}{k.ad}{sec && f.alt_tip ? ` · ${f.alt_tip}` : ""}</Metin>
+        <Metin tur="minik" renk={sec ? "#C7D3E3" : renk.metinSoluk}>{[k.saha_zorunlu === false ? "sahasız olabilir" : k.tekil_site ? "tek saha" : "çoklu saha", k.qc_yazar ? "QC" : null, tipSayisi ? `${tipSayisi} tip` : null].filter(Boolean).join(" · ")}</Metin>
+      </Pressable>
+    );
+  };
+  const secIndex = kategoriler.findIndex((k) => k.kod === f.kategori);
+  const once = secIndex >= 0 ? kategoriler.slice(0, secIndex + 1) : kategoriler;
+  const sonra = secIndex >= 0 ? kategoriler.slice(secIndex + 1) : [];
   return (
     <View>
       <Metin tur="baslikM" style={{ fontWeight: "700", marginBottom: 4 }}>İş kategorisi</Metin>
       <Metin tur="kucuk" renk={renk.metinIkincil} style={{ marginBottom: aralik.s }}>Kategoriye göre tek / çoklu saha ve zorunlu alanlar web ile aynıdır.</Metin>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.xs }}>
-        {kategoriler.map((k) => {
-          const sec = k.kod === f.kategori;
-          return (
-            <Pressable key={k.kod} onPress={() => guncelle({ kategori: k.kod, alt_tip: "", isler: k.tekil_site && f.isler.length > 1 ? f.isler.slice(0, 1) : f.isler })} accessibilityRole="radio" accessibilityState={{ selected: sec }}
-              style={({ pressed }) => [{ minHeight: DOKUNMA, paddingHorizontal: 14, borderRadius: kose.m, borderWidth: 1.5, borderColor: sec ? renk.lacivert : renk.cizgiKoyu, backgroundColor: sec ? renk.lacivert : renk.yuzey, justifyContent: "center" }, pressed && { opacity: 0.8 }]}>
-              <Metin tur="kucukKalin" renk={sec ? "#fff" : renk.metin}>{k.ikon ? `${k.ikon} ` : ""}{k.ad}</Metin>
-              <Metin tur="minik" renk={sec ? "#C7D3E3" : renk.metinSoluk}>{k.saha_zorunlu === false ? "sahasız olabilir" : k.tekil_site ? "tek saha" : "çoklu saha"}{k.qc_yazar ? " · QC" : ""}</Metin>
-            </Pressable>
-          );
-        })}
-      </View>
-      {(kat?.alt_tipler || []).length ? (
-        <CipSecim etiket={`${kat.ad} tipi`} zorunlu secenekler={kat.alt_tipler.map((t) => ({ id: t, ad: t }))} deger={f.alt_tip} onSec={(t) => guncelle({ alt_tip: t })} style={{ marginTop: aralik.m }} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.xs }}>{once.map(kart)}</View>
+      {tipler.length ? (
+        <View style={{ marginTop: aralik.s, marginBottom: aralik.xs, padding: aralik.s, borderRadius: kose.m, backgroundColor: renk.altinZemin, borderWidth: 1, borderColor: renk.altin }}>
+          <Metin tur="kucukKalin" style={{ marginBottom: 6 }}>{kat.ad} tipi <Metin tur="kucukKalin" renk={renk.hata}>*</Metin></Metin>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.xs }}>
+            {tipler.map((t) => {
+              const sec = f.alt_tip === t;
+              return (
+                <Pressable key={t} onPress={() => guncelle({ alt_tip: t })} accessibilityRole="radio" accessibilityState={{ selected: sec }}
+                  style={({ pressed }) => [{ minHeight: 40, paddingHorizontal: 14, borderRadius: kose.tam, borderWidth: 1.5, borderColor: sec ? renk.lacivert : renk.cizgiKoyu, backgroundColor: sec ? renk.lacivert : renk.yuzey, justifyContent: "center" }, pressed && { opacity: 0.8 }]}>
+                  <Metin tur="kucukKalin" renk={sec ? "#fff" : renk.metin}>{t}</Metin>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       ) : null}
+      {sonra.length ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.xs, marginTop: aralik.xs }}>{sonra.map(kart)}</View> : null}
     </View>
   );
 }
