@@ -10618,6 +10618,18 @@ function SahaFaturaKontrolKarti({ site }) {
    İki seçenek: "2025 BoQ — Eski fiyat listesi" / "2026 BoQ — 12 Ekim 2026 ve sonrası". Öneri sunucudan gelir
    (GET /master/saha-kalemler meta.boq_oneri: sahanın GERÇEK malzeme geliş tarihi; 12.10.2026 00:00 Europe/Istanbul sınırı).
    Tarihe aykırı seçimde gerekçe zorunlu (sunucu da ister; seçim+gerekçe+kullanıcı+zaman boq_secim_log'a yazılır). */
+// 03.11.2026: kalem bazında BoQ öneri kontrolü — enerji kalemi ENH malzeme geliş tarihine, diğerleri RF tarihine göre (sunucu da
+// aynı kuralla doğrular). Dönüş: öneriye aykırı kalemler; sunucuya ulaşılamazsa null (eski saha geneli kontrol uygulanır).
+async function boqKalemAykirilari(site, surum, kodlar) {
+  const k = [...new Set((kodlar || []).map((x) => String(x || "").trim()).filter(Boolean))];
+  if (!site || !surum || !k.length) return [];
+  try {
+    const d = await fetchJson(`${API_BASE}/boq/surum-oneri?site=${encodeURIComponent(String(site).toUpperCase())}&kodlar=${encodeURIComponent(k.join(","))}`, { withAuth: true });
+    return (d.kalemler || []).filter((x) => x.onerilen && x.onerilen !== surum);
+  } catch { return null; }
+}
+const boqAykiriMetni = (liste) => liste.map((x) => `• ${x.kod}: ${x.kapsam === "ENH" ? "enerji kalemi — ENH malzeme geliş tarihine göre" : "RF malzeme geliş tarihine göre"} önerilen ${x.onerilen === "BOQ2026" ? "2026" : "2025"} BoQ`).join("\n");
+
 function BoqSurumKarti({ oneri, surumler = [], secim, onSecim, saltOkunur = false }) {
   const onerilen = oneri?.onerilen || null;
   const liste = surumler.length ? surumler : [
@@ -10655,7 +10667,8 @@ function BoqSurumKarti({ oneri, surumler = [], secim, onSecim, saltOkunur = fals
       </div>
       {aykiri && (
         <div style={{ marginTop:8, background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"8px 12px" }}>
-          <div style={{ fontSize:12, color:"#b45309", fontWeight:700 }}>⚠ Seçim malzeme geliş tarihine aykırı — gerekçe zorunlu (yalnız yetkili kullanıcı kaydedebilir; seçim, gerekçe, kullanıcı ve zaman kaydedilir).</div>
+          <div style={{ fontSize:12, color:"#b45309", fontWeight:700 }}>⚠ Seçim RF malzeme geliş tarihine aykırı — RF kalemi kaydedilecekse gerekçe zorunlu (yalnız yetkili kullanıcı kaydedebilir; seçim, gerekçe, kullanıcı ve zaman kaydedilir).</div>
+          <div style={{ fontSize:11, color:"#92400e", marginTop:3 }}>Enerji kalemleri (Power Access) RF tarihine değil ENH malzeme geliş tarihine göre kontrol edilir{oneri?.enh?.surum ? ` — ENH tarihine göre öneri: ${oneri.enh.surum === "BOQ2026" ? "2026" : "2025"} BoQ` : " — bu sahada ENH malzeme geliş tarihi girilmemiş, enerji kalemi için gerekçe istenmez"}.</div>
           <input value={secim?.gerekce || ""} onChange={(e) => onSecim({ ...secim, gerekce: e.target.value })} placeholder="Gerekçe (ör. Huawei PM onayıyla yeni BoQ uygulanacak)"
             style={{ marginTop:6, width:"100%", boxSizing:"border-box", padding:"7px 10px", border:"1.5px solid #fcd34d", borderRadius:8, fontSize:12.5 }} />
         </div>
@@ -11162,7 +11175,12 @@ function SahaKalemGridi({ siteCode, onVeriGir, oneriler = [], boqSecim, setBoqSe
     if (!bekleyen.length) { alert("Değişiklik yok"); return; }
     // 27.10.2026: BoQ sürümü zorunlu; aykırı seçimde gerekçe zorunlu (sunucu da doğrular)
     if (!boqSecim?.surum) { alert("BoQ sürümü seçilmeden PR kaydedilemez — 2025 / 2026 BoQ seçeneğinden birini seçin."); return; }
-    if (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen && !String(boqSecim.gerekce || "").trim()) { alert("Seçilen BoQ sürümü malzeme geliş tarihine aykırı — gerekçe yazın."); return; }
+    if (!String(boqSecim.gerekce || "").trim()) {
+      const ayk = await boqKalemAykirilari(siteCode, boqSecim.surum, bekleyen.map((x) => x.item_code));
+      if (ayk === null ? (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen) : ayk.length) {
+        alert(`Seçilen BoQ sürümü malzeme geliş tarihine aykırı — gerekçe yazın.${ayk?.length ? "\n\n" + boqAykiriMetni(ayk) : ""}`); return;
+      }
+    }
     setKaydediyor(true);
     try {
       const govde = { site: String(siteCode || "").toUpperCase(), kalemler: bekleyen, boq_surum: boqSecim.surum, boq_secim_gerekce: boqSecim.gerekce || "" };
@@ -12188,7 +12206,13 @@ function DailyEntry({ actionTrigger, onActionHandled, saltOkunur = false, poTale
 
     // 27.10.2026: BoQ sürümü zorunlu; aykırı seçimde gerekçe zorunlu
     if (!boqSecim.surum) { alert("BoQ sürümü seçilmeden PR kaydedilemez — saha kartından 2025 / 2026 BoQ seçin."); setSaving(false); return; }
-    if (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen && !String(boqSecim.gerekce || "").trim()) { alert("Seçilen BoQ sürümü malzeme geliş tarihine aykırı — saha kartında gerekçe yazın."); setSaving(false); return; }
+    if (!String(boqSecim.gerekce || "").trim()) {
+      // 03.11.2026: enerji kalemi ENH malzeme tarihine göre değerlendirilir (RF montajı eski BoQ, enerji işi yeni BoQ olabilir)
+      const ayk = await boqKalemAykirilari(form.site_code, boqSecim.surum, [form.item_code]);
+      if (ayk === null ? (boqSecim.onerilen && boqSecim.surum !== boqSecim.onerilen) : ayk.length) {
+        alert(`Seçilen BoQ sürümü malzeme geliş tarihine aykırı — saha kartında gerekçe yazın.${ayk?.length ? "\n\n" + boqAykiriMetni(ayk) : ""}`); setSaving(false); return;
+      }
+    }
 
     try {
       // Normalize subcon name to UPPERCASE

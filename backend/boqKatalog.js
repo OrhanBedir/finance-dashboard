@@ -104,6 +104,25 @@ async function surumOner(pool, site) {
     enh_farkli: !!(oRf.surum && oEnh.surum && oRf.surum !== oEnh.surum) };
 }
 
+// 03.11.2026 (Orhan): ENERJİ kalemi — RF montajı eski BoQ ile yapılmış sahada enerji işleri sonradan (yeni BoQ ile) yapılır.
+// Kalem katalogda yalnız enerji kategorisindeyse (2026 "POWER ACCESS" / kaynak PA, 2025 "Power Construction") kapsamı ENH'dir
+// ve BoQ önerisi ENH malzeme geliş tarihine göre yapılır; RF tarihi enerji kalemi için esas alınmaz. Karışık kalem (ör. vinç) RF sayılır.
+const ENERJI_KAPSAM_SQL = `(COALESCE(kaynak_kapsam,'') = 'PA' OR UPPER(TRIM(COALESCE(kapsam,''))) IN ('POWER ACCESS','POWER CONSTRUCTION'))`;
+async function kalemKapsamlari(pool, kodlar) {
+  const k = [...new Set((kodlar || []).map((x) => String(x || "").trim()).filter(Boolean))];
+  const out = new Map(k.map((x) => [x, "RF"]));
+  if (!k.length) return out;
+  const r = await pool.query(`SELECT kod, BOOL_AND(${ENERJI_KAPSAM_SQL}) AS enerji FROM boq_katalog WHERE kod = ANY($1::text[]) GROUP BY kod`, [k]).catch(() => ({ rows: [] }));
+  for (const x of r.rows) if (x.enerji) out.set(String(x.kod), "ENH");
+  return out;
+}
+// Kalemin kapsamına göre önerilen sürüm: ENH kalemi → ENH malzeme tarihi önerisi, diğerleri → RF önerisi
+function kalemOnerisi(oneri, kapsam) {
+  const o = kapsam === "ENH" ? (oneri?.enh || {}) : (oneri?.rf || {});
+  return { kapsam, onerilen: o.surum || null, durum: o.durum || "YOK", tarih: o.tarih || null,
+    gerekce: kapsam === "ENH" ? (o.surum ? `Enerji kalemi — ENH ${o.gerekce}` : `Enerji kalemi — ENH malzeme geliş tarihi girilmemiş; tarihe göre kontrol yapılamadı (Rollout'tan ENH malzeme geliş tarihini girin).`) : (o.gerekce || "") };
+}
+
 // ── Şema ────────────────────────────────────────────────────────────────────────
 async function tabloHazirla(pool) {
   await pool.query(`CREATE TABLE IF NOT EXISTS boq_katalog (
@@ -348,6 +367,6 @@ async function prSnapshot(pool, { surum, kod, bolge, kapsam = null }) {
     boq_birim_fiyat: k.birim_fiyat === null ? null : Number(k.birim_fiyat), boq_aciklama: k.aciklama_en || null }, fiyat_yok: k.birim_fiyat === null };
 }
 
-module.exports = { SURUMLER, SINIR_TARIHI, BOLGELER, surumBul, bolgeNormalize, istanbulGunu, tariheGoreSurum, trGun,
+module.exports = { kalemKapsamlari, kalemOnerisi, SURUMLER, SINIR_TARIHI, BOLGELER, surumBul, bolgeNormalize, istanbulGunu, tariheGoreSurum, trGun,
   malzemeGelisTarihi, surumOner, tabloHazirla, fiyatAyristir, birimNormalize, paraNormalize, onizle, onizleDb, iceAl,
   surumDurumu, katalogVarMi, kalemGetir, katalogAra, prSnapshot };
