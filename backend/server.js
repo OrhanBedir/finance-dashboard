@@ -4011,7 +4011,7 @@ async function tssrBoqDegerlendir(req, site, { surum: surumIstek = null, yenile 
     const S = boqKatalog.surumBul(surumIstek) || (oneri.onerilen ? boqKatalog.surumBul(oneri.onerilen) : null);
     const bolge = getRegionFromSiteCode(site);
     const [rp, mw, po, kr] = await Promise.all([
-      pool.query(`SELECT tssr_belge_url FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]),
+      pool.query(`SELECT tssr_belge_url, site_type FROM rollout_progress WHERE UPPER(TRIM(site_code)) = $1 LIMIT 1`, [site]),
       pool.query(`SELECT TRIM(COALESCE(item_code,'')) AS item_code, MAX(COALESCE(item_description,'')) AS item_description, SUM(COALESCE(done_qty,0)) AS pr_qty,
                   SUM(COALESCE(tamamlanan_qty, done_qty, 0)) AS done_qty, MAX(boq_surum) AS boq_surum, MAX(boq_secim_gerekce) AS boq_secim_gerekce, MAX(boq_secim_zaman) AS boq_secim_zaman, MIN(created_at) AS created_at
                   FROM master_works WHERE UPPER(TRIM(site_code)) = $1 AND TRIM(COALESCE(item_code,'')) <> '' GROUP BY 1`, [site]),
@@ -4025,7 +4025,8 @@ async function tssrBoqDegerlendir(req, site, { surum: surumIstek = null, yenile 
     if (tssr.guncel?.sonuc) await sahaKonum.tssrdenKonumYaz(pool, site, tssr.guncel.sonuc, tssr.guncel.belge_url).catch((e) => console.warn("saha konum:", e.message));
     const katalogHazir = !!(S && (await boqKatalog.katalogVarMi(pool, S.kod)));
     const katalog = katalogHazir ? await boqKatalog.katalogAra(pool, { surum: S.kod, bolge, limit: 2000 }) : [];
-    const sonuc = prKontrol.kontrol({ site, tssr, katalog, katalogHazir, surum: S ? S.kod : null, surumOneri: oneri, prRows: mw.rows, poRows: po.rows, kararlar: kr.rows });
+    const sonuc = prKontrol.kontrol({ site, tssr, katalog, katalogHazir, surum: S ? S.kod : null, surumOneri: oneri, prRows: mw.rows, poRows: po.rows, kararlar: kr.rows,
+      siteTipi: rp.rows[0]?.site_type || null }); // 03.11.2026: STANDALONE = New Site (Co-Located / bant ekleme önerilmez)
     sonuc.katalog_hazir = katalogHazir; sonuc.surum_ad = S ? S.ad : null; sonuc.surum_oneri = oneri; sonuc.bolge = boqKatalog.bolgeNormalize(bolge);
     sonuc.tssr_belgeler = (tssr.belgeler || []).map((b) => ({ dosya: b.dosya_adi, url: b.belge_url, durum: b.durum, hata: b.hata || "", kaynak: b.kaynak, guncel: !!b.guncel,
       tarih: b.sonuc?.kapak?.hazirlama_tarihi || b.sonuc?.belge_tarihi || null, revizyon: b.sonuc?.kapak?.belge_surumu || b.sonuc?.revizyon || "", teknik_kapsam: b.sonuc?.kapak?.teknik_kapsam || "",
@@ -4483,6 +4484,8 @@ app.get("/po/akilli-asistan", authMiddleware, async (req, res) => {
           for (const u of d.uyarilar || []) {
             if (u.tip === "DAHIL_MUKERRER" && u.item_code && !u.karar) bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: u.item_code, adet: 0, kisa: "Pakete dahil olabilir", mesaj: u.mesaj });
           }
+          // New Site: bir bant eklemeden fazlası — kalem önerilmez, yalnız teyit notu (03.11.2026)
+          for (const p of d.paket?.paketler || []) if (p.durum === "NEWSITE_TEYIT") bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "", adet: 0, kisa: "Huawei ile teyit", mesaj: `TSSR incelendi: ${p.bant} — ${p.neden}` });
           // Kafes kulede vinç: eski kesin kural korunur (TSSR kule tipi yapay zekâdan)
           if (/kafes|lattice/i.test(aiT.guncel.sonuc.kule_tipi || "") && prSet.has("8818249053"))
             bulgular.push({ tip: "UYARI", kaynak: "TSSR", item_code: "8818249053", adet: 0, kisa: "Kafes kule — vinç talep etme", mesaj: "TSSR'a göre saha KAFES KULE — kafes kulede vinç talep edilmez, PR'daki vinç kalemini kontrol et." });

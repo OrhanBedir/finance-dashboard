@@ -146,8 +146,8 @@ function karsitKalipVarMi(is, prAciklama) {
    3) Fiyat yalnız katalogdan; katalog boşsa "Katalog kullanıma hazır değil; paket eşleştirmesi tamamlanamadı."
    Paketin SITE birimi ekipman adediyle çarpılmaz (3 RRU ≠ 3 paket). */
 const KATALOG_YOK_MESAJ = "Katalog kullanıma hazır değil; paket eşleştirmesi tamamlanamadı.";
-function paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel }) {
-  const sec = PK.paketSec(surum, S);
+function paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel, newSite = null }) {
+  const sec = PK.paketSec(surum, S, { newSite });
   const kapsamGetir = (kod) => PK.paketKapsami(surum, kod);
   const paketler = sec.paketler.map((p) => {
     const secenekler = (p.kodlar || []).map((kod) => {
@@ -192,6 +192,11 @@ function paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel
     }
     if (et.includes("BANT_ILAVESI")) {
       const p = paketler.find((x) => SK.kapsamIfadeleri(is.bant || is.aciklama).some((b) => SK.bantSinifi(b) === SK.bantSinifi(x.bant)));
+      // New Site (03.11.2026): ilk bant ekleme New Site paketine dahil; fazlası teyit — ayrı kalem önerilmez
+      if (p?.durum === "NEWSITE_DAHIL") { const d = p.dahil_dayanak;
+        return { ...base, durum: "PAKETE_DAHIL", paket_kod: d.paket_kod, neden: p.neden,
+          sow_dayanaklari: [{ etiket: "Bant ilavesi (aynı ziyaret)", no: d.no, metin: d.metin, hucre: d.hucre, sayfa: d.sayfa, dosya: d.dosya, paket_kod: d.paket_kod }] }; }
+      if (p?.durum === "NEWSITE_TEYIT") return { ...base, durum: "KONTROL", newsite_teyit: true, paket_bant: p.bant, neden: p.neden };
       return { ...base, durum: "PAKET", paket_bant: p?.bant || "", paket_kodlari: p ? p.secenekler.map((x) => x.kod) : [], neden: p ? "Bu iş paketin kendisidir (bant ilavesi)" : "Bant ilavesi için paket ailesi bulunamadı — Kontrol gerekli" };
     }
     if (!et.length) return { ...base, durum: "KONTROL", neden: "İş türü/ekipman paket kapsamıyla karşılaştırılamadı — Kontrol gerekli" };
@@ -219,7 +224,7 @@ function paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel
    tssr: tssrOkuma.sahaTssrAnaliz çıktısı; katalog: boq_katalog satırları (seçilen sürüm, bölge)
    prRows: [{item_code, item_description, pr_qty, done_qty, boq_surum, created_at}] ; poRows: [{item_code, requested_qty, po_no}]
    kararlar: [{anahtar, karar, gerekce, kullanici, zaman}] (dikkate alınmayanlar) */
-function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows = [], kararlar = [], katalogHazir = null }) {
+function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows = [], kararlar = [], katalogHazir = null, siteTipi = null }) {
   if (katalogHazir === null) katalogHazir = Array.isArray(katalog) && katalog.length > 0;
   const oneriler = [], uyarilar = [];
   const prMap = {}; prRows.forEach((r) => { prMap[String(r.item_code).trim()] = r; });
@@ -276,7 +281,13 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
   }
 
   // 3) Paket öncelikli değerlendirme, ardından paket dışındaki işler için kalem karşılığı
-  const paket = paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel });
+  // New Site (03.11.2026): PR'da New Site paketi varsa ya da saha tipi STANDALONE ise (canlıda STANDALONE sahaların
+  // hiçbirinde Co-Located paketi yok) ana kurulum New Site paketidir.
+  const nsPr = Object.values(PK.NEW_SITE_KODLARI).flat().find((k) => prMap[k] || poMap[k]) || null;
+  const newSite = nsPr ? { var: true, pr_kod: nsPr, neden: `PR'da ${nsPr} New Site paketi var` }
+    : /^standalone$/i.test(String(siteTipi || "").trim()) ? { var: true, pr_kod: null, neden: "saha tipi STANDALONE" } : null;
+  sonuc.new_site = newSite;
+  const paket = paketDegerlendir({ surum, S, katMap, katalogHazir, prMap, poMap, guncel, newSite });
   sonuc.paket = paket;
   const prEslesen = new Set();
   const eslesmeler = S.isler.map((is) => kalemBul(katalog || [], is));
@@ -286,8 +297,9 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
     const pd = paket.isler[i] || {};
     // Pakete dahil iş ya da bant ilavesinin kendisi → ayrı kalem önerilmez (paketin içindeki iş tekrar talep ettirilmez)
     const paketKapsami = ["PAKETE_DAHIL", "PAKET"].includes(pd.durum);
+    const newsiteTeyit = !!pd.newsite_teyit; // New Site'ta fazladan bant: yalnız teyit notu, aday kalem / eksik uyarısı yok
     const kanitsizEk = pd.durum === "EK_ADAY"; // SOW'da geçmiyor ama kapsam dayanağı da yok → yalnız kontrol
-    const es = paketKapsami ? { durum: pd.durum, adaylar: [] } : eslesmeler[i];
+    const es = paketKapsami ? { durum: pd.durum, adaylar: [] } : newsiteTeyit ? { durum: "KONTROL", adaylar: [] } : eslesmeler[i];
     const karar = kararMap[anahtar] || null;
     const o = { anahtar, is: { sira: i + 1, tur: is.tur, tur_tr: TUR_TR[is.tur] || is.tur, aciklama: is.aciklama, teknoloji: is.teknoloji, bant: is.bant, ekipman: is.ekipman,
         miktar: is.miktar, miktar_ham: is.miktar_ham, birim: is.birim, anten_cozumu: antenCozumu(is) }, dayanak, miktar_belgede: is.miktar !== null, durum: es.durum, adaylar: [], karar };
@@ -296,6 +308,7 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
     if (pd.durum === "PAKET") o.paket_notu = `Bu iş paketin kendisidir (${(pd.paket_kodlari || []).join(" / ") || "paket bulunamadı"}).`;
     if (kanitsizEk) o.paket_notu = "Seçili paket SOW'unda bu iş geçmiyor; ayrı kalem için kapsam dayanağı doğrulanmadı — aday kalemler yalnız bilgi amaçlıdır (Kontrol gerekli).";
     if (pd.durum === "EK_TALEP") o.paket_notu = pd.neden;
+    if (newsiteTeyit) o.paket_notu = pd.neden;
     if (pd.miktar_hesabi) o.miktar_hesabi = pd.miktar_hesabi;
     if (es.durum === "ACIK" || es.durum === "ALTERNATIF") {
       o.adaylar = es.adaylar.map((a, j) => {
@@ -326,7 +339,7 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
             : `TSSR sayfa ${is.sayfa || "?"}'de ${is.ekipman || ""} ${TUR_TR[is.tur] || ""} belirtiliyor; PR'da karşılık yok ve birden fazla aday kalem var — doğru kalemi seçin.`,
           dayanak: `${guncel.dosya_adi} sayfa ${is.sayfa || "?"}: “${is.dayanak}”` });
       }
-    } else if (paketKapsami) {
+    } else if (paketKapsami || newsiteTeyit) {
       o.mesaj = o.paket_notu;
     } else if (!katalogHazir) {
       o.mesaj = KATALOG_YOK_MESAJ;
@@ -370,6 +383,20 @@ function kontrol({ site, tssr, katalog, surum, surumOneri, prRows = [], poRows =
     if (!varOlan) uyarilar.push({ tip: "PAKET", seviye: p.durum === "ACIK" ? "ONERI" : "KONTROL", anahtar: `paket|${p.bant}`, item_code: p.durum === "ACIK" ? p.secenekler[0].kod : "", item_description: p.secenekler[0]?.baslik || "",
       mesaj: p.durum === "ACIK" ? `${p.bant}: ${p.secenekler[0].kod} paketi adayı, PR'da yok. ${p.neden}` : `${p.bant}: birden fazla paket seçeneği var (${p.secenekler.map((x) => x.kod).join(" / ")}) — ${p.neden}`,
       dayanak: `${guncel.dosya_adi} sayfa ${p.tssr_dayanak?.kapak_sayfa || 1} (teknik kapsam ${p.tssr_dayanak?.teknik_kapsam || "-"})${p.tssr_dayanak?.anten_sayfa ? ` · anten dayanağı sayfa ${p.tssr_dayanak.anten_sayfa}` : ""}` });
+  }
+  // 4c) New Site: fazladan bant için teyit notu; Co-Located / bant ekleme paketi PR'a ayrıca girilmişse mükerrer olabilir
+  if (newSite) {
+    for (const p of paket.paketler) if (p.durum === "NEWSITE_TEYIT")
+      uyarilar.push({ tip: "KAPSAM", seviye: "KONTROL", anahtar: `newsite|${p.bant}`, item_code: "", mesaj: `${p.bant}: ${p.neden}`, dayanak: `${guncel.dosya_adi} sayfa ${S.kapak?.sayfa || 1} (teknik kapsam ${S.kapak?.teknik_kapsam || "-"})` });
+    const nsKod = paket.paketler.find((p) => p.aile === "NEW_SITE" && p.rol === "ANA")?.secenekler?.[0]?.kod || newSite.pr_kod;
+    const bd = nsKod ? PK.newSiteBantDayanagi(surum, nsKod) : null;
+    for (const r of prRows) {
+      const kod = String(r.item_code || "").trim();
+      if (!PK.NEW_SITE_MUKERRER_KODLAR.has(kod)) continue;
+      uyarilar.push({ tip: "DAHIL_MUKERRER", seviye: "KONTROL", anahtar: `newsite_dahil|${kod}`, item_code: kod, item_description: r.item_description || katMap[kod]?.aciklama_en || "",
+        mesaj: `${kod} (${r.item_description || katMap[kod]?.aciklama_en || ""}) New Site sahasında ayrıca talep edilmiş. Ana kurulum ve aynı ziyarette bir bant ekleme New Site paketine${nsKod ? ` (${nsKod})` : ""} dahildir — mükerrer olabilir, kontrol edin.`,
+        dayanak: bd ? `${bd.dosya} · ${bd.sayfa} ${bd.hucre}: "${bd.metin}"` : newSite.neden });
+    }
   }
   const anaKapsamlar = paket.paketler.filter((p) => ["ACIK", "ALTERNATIF"].includes(p.durum)).map((p) => PK.paketKapsami(surum, p.secenekler[0].kod)).filter(Boolean);
   if (anaKapsamlar.length) for (const r of prRows) {

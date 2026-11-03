@@ -163,6 +163,51 @@ const AILE_2025 = {
   LTE: { ana: { VAR: "8818274543", YOK: "8818274542" }, ayni: { _: "8818274283" } },
 };
 
+// ── New Site (03.11.2026, Orhan — KA0181) ─────────────────────────────────────────────────────────────────────────
+// New Site paketleri (New Site Tender L4-Specification) ana kurulumu ve "One Band addition at same site visit included"
+// satırıyla AYNI ZİYARETTE BİR bant eklemeyi kapsar. New Site sahasında Co-Located ana paketi ve bant ekleme paketleri
+// önerilmez (iş iki kez fiyatlanır). Bir bant eklemeden fazlası kesin hüküm değildir → "Huawei ile teyit".
+const NEW_SITE_KODLARI = { BOQ2026: ["8812489293", "8812489294"], BOQ2025: [] };
+const BIR_BANT_DAHIL_RX = /one band addition at same site visit included/i;
+function newSiteBantDayanagi(surum, kod) {
+  const k = kayitGetir(surum, kod);
+  const s = k ? k.sow_satirlari.find((x) => BIR_BANT_DAHIL_RX.test(x.metin)) : null;
+  return s ? { paket_kod: kod, no: s.no, metin: s.metin, hucre: k.kaynak?.sow_hucre, sayfa: k.kaynak?.sayfa, dosya: k.kaynak?.dosya } : null;
+}
+// TSSR'dan kabin tipi: dış ortam kabini → 8812489293, mevcut sistem odası → 8812489294; belirsizse iki seçenek
+function newSiteKabinTipi(sonuc) {
+  const t = [(sonuc?.isler || []).map((is) => `${is.ekipman || ""} ${is.aciklama || ""}`).join(" "), sonuc?.kapak?.teknik_kapsam || ""].join(" ");
+  const dis = /outdoor\s*(system\s*)?cabinet|dış\s*ortam\s*kabin|outdoor kabin/i.test(t), oda = /system room|sistem odas|shelter|indoor/i.test(t);
+  return dis && !oda ? "8812489293" : oda && !dis ? "8812489294" : null;
+}
+function newSitePaketleri(surum, sonuc, bantlar, ns) {
+  const adaylar = NEW_SITE_KODLARI[surum] || [];
+  const paketler = [], notlar = [];
+  const ilkBant = bantlar[0] || "Saha";
+  if (!adaylar.length) {
+    paketler.push({ bant: ilkBant, aile: "NEW_SITE", rol: "ANA", durum: "YOK", kodlar: [],
+      neden: `Saha New Site (${ns.neden}); seçili ${surum} BoQ bilgi tabanında New Site paketi yok. Co-Located / bant ekleme paketleri New Site sahasına önerilmez — Kontrol gerekli.` });
+    return { paketler, notlar };
+  }
+  const kabin = newSiteKabinTipi(sonuc);
+  const kodlar = ns.pr_kod ? [ns.pr_kod] : kabin ? [kabin] : adaylar;
+  paketler.push({ bant: ilkBant, aile: "NEW_SITE", rol: "ANA", durum: kodlar.length === 1 ? "ACIK" : "ALTERNATIF", kodlar,
+    neden: ns.pr_kod
+      ? `Saha New Site (${ns.neden}); ana kurulum ${ns.pr_kod} New Site paketiyle PR'da. ${bantlar.length ? `${ilkBant} ana kurulumla kapsanır.` : ""}`.trim()
+      : `Saha New Site (${ns.neden}); ana kurulum New Site paketiyle yapılır${kodlar.length > 1 ? " — kabin tipi (dış ortam kabini / mevcut sistem odası) TSSR'da doğrulanamadı, seçim gerekli" : ""}. Co-Located paketi önerilmez.` });
+  const dayanak = newSiteBantDayanagi(surum, kodlar[0]);
+  bantlar.slice(1).forEach((bant, i) => {
+    if (i === 0 && dayanak) {
+      paketler.push({ bant, aile: "NEW_SITE", rol: "AYNI_ZIYARET", durum: "NEWSITE_DAHIL", kodlar: [], dahil_dayanak: dayanak,
+        neden: `New Site paketine dahil — ${dayanak.paket_kod} SOW ${dayanak.hucre} satır ${dayanak.no}: "${dayanak.metin}". Ayrıca bant ekleme paketi talep edilmez.` });
+    } else {
+      paketler.push({ bant, aile: "NEW_SITE", rol: "AYNI_ZIYARET", durum: "NEWSITE_TEYIT", kodlar: [],
+        neden: `New Site paketi ana kurulumu ve aynı ziyarette bir bant eklemeyi kapsıyor${dayanak ? ` (${dayanak.paket_kod} SOW satır ${dayanak.no})` : ""}; ${bant} bunun dışında kalıyor olabilir — Huawei ile teyit edin. Kalem kendiliğinden önerilmedi.` });
+    }
+  });
+  return { paketler, notlar };
+}
+
 function bantAilesi(bant, sonuc) {
   const b = bantSinifi(bant);
   if (b === "NR700") return "NR700";
@@ -176,11 +221,16 @@ function bantAilesi(bant, sonuc) {
 }
 
 // Paket önerileri: { paketler:[{kod, aile, bant, rol, durum, neden, kosullar, alternatifler, ...}], notlar }
-function paketSec(surum, sonuc) {
+// baglam.newSite: { var, neden, pr_kod } — prKontrol saha tipi (STANDALONE) ya da PR'daki New Site paketinden belirler
+function paketSec(surum, sonuc, baglam = {}) {
   const aileler = surum === "BOQ2026" ? AILE_2026 : surum === "BOQ2025" ? AILE_2025 : null;
   if (!aileler) return { paketler: [], notlar: ["BoQ sürümü seçilmemiş — paket değerlendirmesi yapılmadı."] };
   const bantlar = tssrBantlari(sonuc);
   const anten = antenRevizyonu(sonuc);
+  if (baglam.newSite?.var) {
+    const ns = newSitePaketleri(surum, sonuc, bantlar, baglam.newSite);
+    return { paketler: ns.paketler, bantlar, anten, notlar: ns.notlar, new_site: baglam.newSite };
+  }
   const notlar = [];
   const kapsamMetni = sonuc?.kapak?.teknik_kapsam || "";
   const paketler = [];
@@ -211,4 +261,8 @@ function paketSec(surum, sonuc) {
   return { paketler, bantlar, anten, notlar };
 }
 
-module.exports = { KB, ETIKET, ETIKET_AD, kayitGetir, paketKapsami, sowSatiriEtiketle, isEtiketleri, katalogEtiketleri, tssrBantlari, antenRevizyonu, paketSec };
+// New Site sahasında ayrıca talep edilmemesi gereken paket kodları (Co-Located ana + aynı ziyaret bant ekleme aileleri)
+const NEW_SITE_MUKERRER_KODLAR = new Set([AILE_2026, AILE_2025].flatMap((A) => Object.values(A).flatMap((t) => [...Object.values(t.ana), ...Object.values(t.ayni)])));
+
+module.exports = { KB, ETIKET, ETIKET_AD, kayitGetir, paketKapsami, sowSatiriEtiketle, isEtiketleri, katalogEtiketleri, tssrBantlari, antenRevizyonu, paketSec,
+  NEW_SITE_KODLARI, NEW_SITE_MUKERRER_KODLAR, newSiteBantDayanagi };

@@ -10884,8 +10884,9 @@ function TssrBoqKontrolPaneli({ siteCode, surum, onTalebeEkle, saltOkunur = fals
                       <div key={p.bant} className="tbk-satir">
                         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                           <b>{p.bant}</b><span className="tbk-kucuk">{p.rol === "ANA" ? "ana paket" : "aynı ziyaret"}</span>
-                          <Rozet t={p.durum === "ACIK" ? "Önerilen" : p.durum === "ALTERNATIF" ? "Seçenekli — seçim gerekli" : p.durum === "KATALOG_YOK" ? "Katalog eksik" : p.durum === "KATALOGDA_YOK" ? "Fiyat doğrulanamadı" : "Karşılık yok"}
-                            r={p.durum === "ACIK" ? "#166534" : "#b45309"} z={p.durum === "ACIK" ? "#dcfce7" : "#fef3c7"} />
+                          <Rozet t={p.durum === "NEWSITE_DAHIL" ? "New Site paketine dahil" : p.durum === "NEWSITE_TEYIT" ? "Huawei ile teyit — önerilmedi" : p.durum === "ACIK" && (p.secenekler || []).some((x) => x.pr_var) ? "PR'da var" : p.durum === "ACIK" ? "Önerilen" : p.durum === "ALTERNATIF" ? "Seçenekli — seçim gerekli" : p.durum === "KATALOG_YOK" ? "Katalog eksik" : p.durum === "KATALOGDA_YOK" ? "Fiyat doğrulanamadı" : "Karşılık yok"}
+                            r={["ACIK", "NEWSITE_DAHIL"].includes(p.durum) ? "#166534" : "#b45309"} z={["ACIK", "NEWSITE_DAHIL"].includes(p.durum) ? "#dcfce7" : "#fef3c7"} />
+                          {p.aile === "NEW_SITE" && p.rol === "ANA" && <Rozet t="New Site" r="#1e3a8a" z="#dbeafe" />}
                         </div>
                         <div style={{ marginTop: 2 }}>{p.neden}</div>
                         {p.mesaj && <div style={{ color: "#b45309", fontWeight: 700 }}>{p.mesaj}</div>}
