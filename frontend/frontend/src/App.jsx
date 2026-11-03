@@ -5237,7 +5237,9 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
       {/* Özet kartlar — fatura borcu, uygulanan ödeme, açık avans ve fatura bekleyen hakediş AYRI metriklerdir (29.10.2026) */}
       {(() => {
         const T = cariL.toplam?.TRY || { gecerli: 0, uygulanan: 0, kalan: 0, alacak: 0, nakit: 0 };
-        const bekHak = (hakedis?.ekipler || []).reduce((sm, e) => { const cr = cariBul(e.subcon); const mat = Number(cr?.pb?.TRY?.matrah || 0); return sm + Math.max(0, Number(e.bedel || 0) - mat); }, 0);
+        const r2t = (x) => Math.round(Number(x || 0) * 100) / 100;
+        // hakediş esaslı cariler fatura beklemez (borçları yapılan iş bedelidir) — bu karta girmez
+        const bekHak = (hakedis?.ekipler || []).reduce((sm, e) => { const cr = cariBul(e.subcon); if (cr?.cari_modeli === "HAKEDIS") return sm; const mat = Number(cr?.pb?.TRY?.matrah || 0); return sm + Math.max(0, Number(e.bedel || 0) - mat); }, 0);
         const diger = Object.entries(cariL.toplam || {}).filter(([pb]) => pb !== "TRY");
         const kart = (ad, v, renk, alt) => (
           <div style={{ background: "#fff", border: "1.5px solid #e5e7eb", borderLeft: `4px solid ${renk}`, borderRadius: "12px", padding: "12px 14px" }}>
@@ -5247,10 +5249,11 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
           </div>);
         return (<>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginBottom: diger.length ? "6px" : "18px" }}>
-            {kart("GEÇERLİ TOPLAM FATURA", T.gecerli, "#1e3a5f", "KDV dahil ödenecek, iade düşülmüş")}
-            {kart("FATURALARA UYGULANAN", T.uygulanan, "#15803d", "ödeme + avans mahsubu")}
-            {kart("KALAN FATURA BORCU", T.kalan, T.kalan > 0 ? "#b45309" : "#15803d", "kesilmiş faturalardan")}
-            {kart("AÇIK AVANS / ALACAK", T.alacak, "#0e7490", "faturaya mahsup edilmemiş")}
+            {/* 03.11.2026: hakediş esaslı carilerin yapılan iş bedeli ve işe mahsup edilen ödemesi de toplamlara girer */}
+            {kart(T.hakedis ? "GEÇERLİ FATURA + YAPILAN İŞ" : "GEÇERLİ TOPLAM FATURA", r2t(Number(T.gecerli || 0) + Number(T.hakedis || 0)), "#1e3a5f", T.hakedis ? `fatura ₺${fmt(T.gecerli || 0)} + hakediş esaslı iş ₺${fmt(T.hakedis)}` : "KDV dahil ödenecek, iade düşülmüş")}
+            {kart("UYGULANAN ÖDEME", r2t(Number(T.uygulanan || 0) + Number(T.hakedis_mahsup || 0)), "#15803d", T.hakedis_mahsup ? `faturaya ₺${fmt(T.uygulanan || 0)} + işe ₺${fmt(T.hakedis_mahsup)}` : "ödeme + avans mahsubu")}
+            {kart("KALAN BORÇ", T.kalan, T.kalan > 0 ? "#b45309" : "#15803d", T.hakedis ? "kesilmiş fatura + yapılan iş" : "kesilmiş faturalardan")}
+            {kart("AÇIK AVANS / ALACAK", T.alacak, "#0e7490", "henüz mahsup edilmemiş")}
             {kart("FATURA BEKLEYEN HAKEDİŞ", bekHak, "#6d28d9", "anlaşma bedeli, KDV hariç — borca eklenmez")}
           </div>
           {diger.length > 0 && <div style={{ fontSize: "12px", color: "#475569", marginBottom: "18px" }}>Diğer para birimleri (TL'ye çevrilmez): {diger.map(([pb, P]) => `${pb}: kalan ${cariPara(P.kalan, pb)} · açık avans ${cariPara(P.alacak, pb)}`).join(" | ")}</div>}
@@ -5323,7 +5326,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginTop: "10px", paddingTop: "10px", borderTop: "1px solid #f1f5f9" }}>
                       {alan(hak ? "Yapılan iş bedeli" : "Geçerli fatura", hak ? hucre("hakedis", "#5b21b6") : hucre("gecerli", "#1e3a5f"))}
-                      {alan("Uygulanan ödeme", hucre("uygulanan", "#15803d"))}
+                      {alan(hak ? "İşe mahsup edilen ödeme" : "Uygulanan ödeme", hucre(hak ? "hakedis_mahsup" : "uygulanan", "#15803d"))}
                       {alan("Kalan fatura borcu", <b>{hucre("kalan", (v) => v > 0 ? "#b45309" : "#15803d")}</b>)}
                       {alan("Açık avans / alacak", hucre("alacak", "#0e7490"))}
                       {alan("Son ödeme", sonOdeme(r))}
@@ -5345,7 +5348,7 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                 <thead><tr>
                   <th style={{ ...thW, padding: "9px 12px" }}>Tedarikçi / Taşeron</th>
                   <th style={thN} title="Faturalı tedarikçide geçerli fatura toplamı (KDV dahil, iade düşülmüş); hakediş esaslı caride yapılan işin bedeli">Geçerli Fatura / Yapılan İş Bedeli</th>
-                  <th style={thN} title="Faturalara uygulanan ödeme ve avans mahsubu">Uygulanan Ödeme</th>
+                  <th style={thN} title="Faturalara uygulanan ödeme ve avans mahsubu; hakediş esaslı caride yapılan iş bedeline mahsup edilen ödeme">Uygulanan Ödeme</th>
                   <th style={thN} title="Kesilmiş faturalardan kalan borç (hakediş esaslı caride yapılan iş bedelinden kalan dahil)">Kalan Fatura Borcu</th>
                   <th style={thN} title="Faturaya mahsup edilmemiş avans ve alacak">Açık Avans / Alacak</th>
                   <th style={{ ...thN, color: "#0f172a" }} title="Net cari = kalan fatura borcu − açık avans / alacak">Net Cari</th>
@@ -5359,7 +5362,8 @@ function MarkaTaseronPanel({ currentUser, onFaturaAc }) {
                       <tr key={r.anahtar}>
                         <td style={{ ...tdS, verticalAlign: "top", padding: "11px 12px", whiteSpace: "normal" }}>{adBlok(r)}</td>
                         <td style={tdN}>{r.cari_modeli === "HAKEDIS" ? hucre("hakedis", "#5b21b6") : hucre("gecerli", "#1e3a5f")}</td>
-                        <td style={tdN}>{hucre("uygulanan", "#15803d")}</td>
+                        {/* 03.11.2026: hakediş esaslı caride avans/ödeme yapılan iş bedeline mahsup edilir (faturaya değil) */}
+                        <td style={tdN} title={r.cari_modeli === "HAKEDIS" ? "Ödenen avansın yapılan iş bedeline mahsup edilen kısmı" : undefined}>{hucre(r.cari_modeli === "HAKEDIS" ? "hakedis_mahsup" : "uygulanan", "#15803d")}</td>
                         <td style={{ ...tdN, fontWeight: 800 }}>{hucre("kalan", (v) => v > 0 ? "#b45309" : "#15803d")}</td>
                         <td style={tdN}>{hucre("alacak", "#0e7490")}</td>
                         <td style={{ ...tdN, background: "#fafbfc" }}>{netBlok(r)}</td>

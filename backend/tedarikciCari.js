@@ -507,7 +507,7 @@ function kur(app, c) {
         .sort((a, b) => (b.pb.TRY?.kalan || 0) - (a.pb.TRY?.kalan || 0) || a.ad.localeCompare(b.ad, "tr"));
       const toplam = {};
       for (const r of rows) for (const [pb, P] of Object.entries(r.pb)) {
-        const T = toplam[pb] || (toplam[pb] = { fatura: 0, iade: 0, gecerli: 0, uygulanan: 0, kalan: 0, avans_acik: 0, alacak: 0, net: 0, nakit: 0, matrah: 0 });
+        const T = toplam[pb] || (toplam[pb] = { fatura: 0, iade: 0, gecerli: 0, uygulanan: 0, kalan: 0, avans_acik: 0, alacak: 0, net: 0, nakit: 0, matrah: 0, hakedis: 0, hakedis_mahsup: 0 });
         for (const k of Object.keys(T)) T[k] = r2(T[k] + (P[k] || 0));
       }
       const sorunlar = [...v.cari.values()].flatMap((c0) => c0.uyarilar.map((u) => ({ ...u, anahtar: c0.anahtar, ad: c0.ad })));
