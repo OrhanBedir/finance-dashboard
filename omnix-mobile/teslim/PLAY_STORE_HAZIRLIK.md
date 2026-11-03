@@ -140,3 +140,11 @@ Veri işleme: "Data collected is processed ephemerally" → No. Güvenlik uygula
 - `eas build -p android --profile production` (AAB, versionCode otomatik artar) → Play Console Production → "Create new release".
 - `eas build -p android --profile personel-apk` → `/mobil` güncelle.
 - iOS ile aynı sürüm numarası (app.config `version`) kullanılır; Play'de versionCode, App Store'da buildNumber ayrı sayaçlardır.
+
+## 1.1.0 güncellemesi (03.11.2026)
+- Sürüm 1.1.0 (versionCode EAS "remote" kaynaktan otomatik: 3). Değişiklik: Saha Haritası (Saha sekmesi), yönetici İş Atama (Ana sayfa → Operasyon), personel Issue bildirimi + çevrimdışı kuyruk.
+- Release notes (tr-TR):
+  Yenilikler
+  • Saha Haritası: size atanan işlerin sahaları haritada; yol tarifi alın.
+  • İş Atama (yöneticiler): ekibe iş atayın, atamaları görün ve güncelleyin.
+  • Sahadan issue / engel bildirimi; bağlantı kopunca bildirimler telefonda bekler, bağlantı gelince gönderilir.
