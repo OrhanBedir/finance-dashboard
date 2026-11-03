@@ -9,6 +9,7 @@ import { BolumBasligi, IkonKutu, Kart, Metin, Rozet, Satir } from "../bilesenler
 import { Bant, HataDurum, IskeletKart, EskiVeriBandi } from "../bilesenler/durum";
 import { FirmaBasligi } from "../bilesenler/marka";
 import { BaglantiBandi } from "../bilesenler/BaglantiBandi";
+import { OperasyonBolumu } from "../bilesenler/OperasyonBolumu";
 import { useOturum } from "../oturum/OturumSaglayici";
 import { useVeri } from "../api/veri";
 import { isApi, panoApi } from "../api/uclar";
@@ -89,6 +90,7 @@ export function AnaSayfa({ navigation }) {
             </Kart>
           ) : null}
 
+          <OperasyonBolumu navigation={navigation} />
           <BolumBasligi baslik="Hızlı işlemler" />
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
             <HizliIslem ikon="receipt-outline" baslik="Masraf ekle" alt="Fiş yükle" onPress={() => navigation.navigate("Harcamalar", { sekme: "masraf" })} />

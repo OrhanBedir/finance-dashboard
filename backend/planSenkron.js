@@ -135,10 +135,9 @@ function kur(app, deps) {
   };
 
   // ── Tarih / saat değişikliği: AYNI atama güncellenir, mükerrer açılmaz ──
-  app.post("/plan/atama/:id/zaman", authMiddleware, async (req, res) => {
-    try {
-      const row = await atamaAl(req, req.params.id);
-      const b = req.body || {};
+  // 03.11.2026: üç plan işlemi fonksiyon olarak dışa açıldı (islemler) — mobil İş Atama aynı kuralları çağırır, kopya yazılmaz
+  async function zamanDegistir(req, id, b = {}) {
+      const row = await atamaAl(req, id);
       if (!tsMi(b.bas) || !tsMi(b.bit) || new Date(b.bit) <= new Date(b.bas)) throw H(400, "Başlangıç ve bitiş zamanı girin (bitiş başlangıçtan sonra)");
       if (bitmisMi(row)) throw H(400, "Tamamlanmış iş yeniden planlanmaz; yeniden çalışma gerekiyorsa gerekçeli yeni iş / ziyaret oluşturun");
       if (row.durum === "IPTAL") throw H(400, "İptal edilmiş / aktarılmış atama değiştirilemez");
@@ -156,22 +155,32 @@ function kur(app, deps) {
         await client.query("COMMIT");
       } catch (e) { await client.query("ROLLBACK").catch(() => {}); throw e; } finally { client.release(); }
       await islemGecmisiYaz(req, "is_atama", row.id, "PLAN_ZAMAN", eskiZaman(row), { plan_baslangic: b.bas, plan_bitis: b.bit, gerekce });
-      res.json({ ok: true, row: await isAtamaDetay(row.id), bildirim: { tur: "PLAN_DEGISTI", alicilar: (row.personeller || []).map((p) => p.email) } });
-    } catch (e) { hata(res, e); }
+      return { ok: true, row: await isAtamaDetay(row.id), bildirim: { tur: "PLAN_DEGISTI", alicilar: (row.personeller || []).map((p) => p.email) } };
+  }
+  app.post("/plan/atama/:id/zaman", authMiddleware, async (req, res) => {
+    try { res.json(await zamanDegistir(req, req.params.id, req.body || {})); } catch (e) { hata(res, e); }
   });
   const eskiZaman = (row) => ({ plan_tarihi: row.plan_tarihi, plan_baslangic: row.plan_baslangic, plan_bitis: row.plan_bitis });
 
   // ── Ekip değiştir: başlanmamış → taşı; başlanmış → "kalan işi devret" (kalan_devir: true + gerekçe) ──
-  app.post("/plan/atama/:id/ekip-degistir", authMiddleware, async (req, res) => {
-    try {
-      const row = await atamaAl(req, req.params.id);
-      const b = req.body || {};
+  // Ekip (yeni_ekip_no) ya da — 03.11.2026 — tek tek kişiler (yeni_personeller: [{email,ad}]) seçilebilir; kurallar aynı
+  async function ekipDegistir(req, id, b = {}) {
+      const row = await atamaAl(req, id);
       const gerekce = temiz(b.gerekce, 500);
       if (bitmisMi(row)) throw H(400, "Tamamlanmış iş başka ekibe taşınmaz; yeniden çalışma gerekiyorsa gerekçeli yeni iş / ziyaret oluşturun");
       if (row.durum === "IPTAL") throw H(400, "İptal edilmiş / aktarılmış atama taşınamaz");
-      const ekip = (await planEkipleri(req, b.yeni_ekip_no))[0];
-      if (!ekip) throw H(403, "Yeni ekip bulunamadı ya da kapsamınızda değil");
-      if (Number(ekip.ekip_no) === Number(row.ekip_no)) throw H(400, "İş zaten bu ekipte");
+      let ekip = null;
+      if (b.yeni_ekip_no != null && b.yeni_ekip_no !== "") {
+        ekip = (await planEkipleri(req, b.yeni_ekip_no))[0];
+        if (!ekip) throw H(403, "Yeni ekip bulunamadı ya da kapsamınızda değil");
+        if (Number(ekip.ekip_no) === Number(row.ekip_no)) throw H(400, "İş zaten bu ekipte");
+      } else {
+        const secilen = (Array.isArray(b.yeni_personeller) ? b.yeni_personeller : []).map((p) => ({ email: String(p?.email || "").toLowerCase().trim(), ad: String(p?.ad || p?.email || "").trim() })).filter((p) => p.email);
+        if (!secilen.length) throw H(400, "Yeni ekip ya da en az bir personel seçin");
+        const eskiMail = (row.personeller || []).map((p) => String(p.email || "").toLowerCase()).sort().join(",");
+        if (secilen.map((p) => p.email).sort().join(",") === eskiMail) throw H(400, "Seçilen kişiler mevcut atamayla aynı");
+        ekip = { ekip_no: null, ad: secilen.map((p) => p.ad).join(", "), bolge: row.bolge || null, plaka: null, sef: null, uyeler: secilen.map((p) => ({ ad: p.ad, email: p.email })), kisisel: true };
+      }
       const kisiHata = await isAtamaPersonelKapsamHatasi(req, ekip.uyeler.filter((u) => u.email).map((u) => ({ email: u.email, ad: u.ad })));
       if (kisiHata) throw H(403, kisiHata);
       const ulasim = await ekipUlasim(pool, ekip);
@@ -201,6 +210,8 @@ function kur(app, deps) {
             JSON.stringify({ ...(row.plan_detay || {}), devir: { kaynak_atama_id: row.id, tur: neden, gerekce, onceki_durum: row.durum, onceki_gun_sayisi: (row.gunler || []).length, kalan_sure_gun: b.kalan_sure_gun != null ? Number(b.kalan_sure_gun) : null } }),
             row.konum_aciklama || null, row.id, null]);
         yeniId = ins.rows[0].id;
+        // Kişisel (ekipsiz) yeni atama: ekip_no yazılmaz; eski ekip numarası da taşınmaz
+        if (ekip.kisisel) await client.query(`UPDATE is_atama SET ekip_no = NULL, arac_plaka = NULL WHERE id = $1`, [yeniId]);
         await client.query(`UPDATE is_atama SET durum = 'IPTAL', iptal_nedeni = $2, devir_hedef_atama_id = $3, plan_surum = COALESCE(plan_surum,1) + 1,
             kapanis_not = CONCAT_WS(E'\\n', NULLIF(kapanis_not,''), $4::text), updated_at = NOW() WHERE id = $1`,
           [row.id, neden, yeniId, `${new Date().toLocaleDateString("tr-TR")} ${basladi ? "Kalan iş" : "İş"} ${ekip.ad} ekibine aktarıldı (#${yeniId}) — ${gerekce} (${req.user?.name || ben(req)})`]);
@@ -216,26 +227,32 @@ function kur(app, deps) {
       } catch (e) { await client.query("ROLLBACK").catch(() => {}); throw e; } finally { client.release(); }
       await islemGecmisiYaz(req, "is_atama", row.id, basladi ? "KALAN_DEVIR" : "EKIP_DEGISTIR", { ekip_no: row.ekip_no, durum: row.durum }, { yeni_atama_id: yeniId, ekip_no: ekip.ekip_no, gerekce });
       await islemGecmisiYaz(req, "is_atama", yeniId, "OLUSTURMA", null, { kaynak_atama_id: row.id, ekip_no: ekip.ekip_no, personeller: kisiler.map((k) => k.email), tur: basladi ? "KALAN_DEVIR" : "DEVIR" });
-      res.json({ ok: true, eski_atama_id: row.id, yeni_atama_id: yeniId, row: await isAtamaDetay(yeniId), ulasim, uyarilar: [malzemeUyari].filter(Boolean),
-        bildirim: { tur: "EKIP_DEGISTI", eski_alicilar: (row.personeller || []).map((p) => p.email), yeni_alicilar: kisiler.map((k) => k.email) } });
-    } catch (e) { hata(res, e); }
+      return { ok: true, eski_atama_id: row.id, yeni_atama_id: yeniId, row: await isAtamaDetay(yeniId), ulasim, uyarilar: [malzemeUyari].filter(Boolean),
+        bildirim: { tur: "EKIP_DEGISTI", eski_alicilar: (row.personeller || []).map((p) => p.email), yeni_alicilar: kisiler.map((k) => k.email) } };
+  }
+  app.post("/plan/atama/:id/ekip-degistir", authMiddleware, async (req, res) => {
+    try { res.json(await ekipDegistir(req, req.params.id, req.body || {})); } catch (e) { hata(res, e); }
   });
 
   // ── İptal: plandan çıkar (başlanmışsa onay ister) ──
-  app.post("/plan/atama/:id/iptal", authMiddleware, async (req, res) => {
-    try {
-      const row = await atamaAl(req, req.params.id);
-      const gerekce = temiz(req.body?.gerekce, 500);
+  async function iptalEt(req, id, b = {}) {
+      const row = await atamaAl(req, id);
+      const gerekce = temiz(b.gerekce, 500);
       if (gerekce.length < 3) throw H(400, "İptal gerekçesi yazın");
       if (bitmisMi(row)) throw H(400, "Tamamlanmış iş iptal edilmez");
-      if (row.durum === "IPTAL") return res.json({ ok: true, tekrar: true, row });
-      if (baslamisMi(row) && req.body?.baslamis_onay !== true) throw H(409, "Bu işte çalışma başlamış — iptal için açık onay gerekir; ekibin gün kayıtları korunur", { baslamis_onay_gerekli: true });
+      if (row.durum === "IPTAL") return { ok: true, tekrar: true, row };
+      if (b.plan_surum != null && Number(b.plan_surum) !== Number(row.plan_surum || 1)) throw H(409, "Bu atama bu arada değiştirildi — yenileyip tekrar deneyin", { plan_surum: row.plan_surum });
+      if (baslamisMi(row) && b.baslamis_onay !== true) throw H(409, "Bu işte çalışma başlamış — iptal için açık onay gerekir; ekibin gün kayıtları korunur", { baslamis_onay_gerekli: true });
       await pool.query(`UPDATE is_atama SET durum = 'IPTAL', iptal_nedeni = 'IPTAL', plan_surum = COALESCE(plan_surum,1) + 1, kapanis_not = CONCAT_WS(E'\\n', NULLIF(kapanis_not,''), $2::text), updated_at = NOW() WHERE id = $1`,
         [row.id, `${new Date().toLocaleDateString("tr-TR")} Plandan çıkarıldı — ${gerekce} (${req.user?.name || ben(req)})`]);
       await islemGecmisiYaz(req, "is_atama", row.id, "IPTAL", { durum: row.durum }, { durum: "IPTAL", gerekce });
-      res.json({ ok: true, row: await isAtamaDetay(row.id), bildirim: { tur: "IPTAL", alicilar: (row.personeller || []).map((p) => p.email) } });
-    } catch (e) { hata(res, e); }
+      return { ok: true, row: await isAtamaDetay(row.id), bildirim: { tur: "IPTAL", alicilar: (row.personeller || []).map((p) => p.email) } };
+  }
+  app.post("/plan/atama/:id/iptal", authMiddleware, async (req, res) => {
+    try { res.json(await iptalEt(req, req.params.id, req.body || {})); } catch (e) { hata(res, e); }
   });
+  // Mobil İş Atama modülü bu işlemleri aynı kurallarla çağırır
+  module.exports.islemler = { zamanDegistir, ekipDegistir, iptalEt, atamaAl, baslamisMi, bitmisMi, segmentleriYenile, H };
 
   // ── İnceleme kuyruğu (ofis): bekleyen geç bildirimler ──
   app.get("/plan/inceleme", authMiddleware, async (req, res) => {

@@ -19,8 +19,9 @@ async function govdeOku(res) {
  * @param {string} yol  — "/hr/is-avans" gibi
  * @param {{ method?: string, govde?: any, form?: FormData, zamanAsimiMs?: number, kimliksiz?: boolean }} secenek
  */
-export async function istek(yol, { method = "GET", govde, form, zamanAsimiMs = 30000, kimliksiz = false } = {}) {
-  const basliklar = { Accept: "application/json" };
+export async function istek(yol, { method = "GET", govde, form, zamanAsimiMs = 30000, kimliksiz = false, basliklar: ekBasliklar } = {}) {
+  // x-istemci: sunucu bildirim / inceleme kayıtlarında kanalı "mobil" olarak işaretler
+  const basliklar = { Accept: "application/json", "x-istemci": "mobil", ...(ekBasliklar || {}) };
   const kullanilanToken = kimliksiz ? null : _token;
   if (kullanilanToken) basliklar.Authorization = `Bearer ${kullanilanToken}`;
   let body;
@@ -47,7 +48,7 @@ export async function istek(yol, { method = "GET", govde, form, zamanAsimiMs = 3
     if (_oturumDustu && kullanilanToken && kullanilanToken === _token) _oturumDustu(h.message);
     throw h;
   }
-  if (!res.ok) throw hataSinifla(res.status, sunucuMesaji);
+  if (!res.ok) { const h = hataSinifla(res.status, sunucuMesaji); if (veri && typeof veri === "object") h.govde = veri; throw h; } // govde: 409 çakışma / inceleme ayrıntısı
   // Bazı eski uçlar hata durumunda 200 + { ok:false, error } döndürür
   if (veri && typeof veri === "object" && !Array.isArray(veri) && (veri.ok === false || (veri.error && !veri.id))) {
     throw hataSinifla(400, sunucuMesaji);

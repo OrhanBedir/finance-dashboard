@@ -71,8 +71,26 @@ export const haritaApi = {
 export const isApi = {
   benim: () => api.get("/is-atama/benim"),
   detay: (id) => api.get(`/is-atama/${id}`),
-  basla: (id) => api.post(`/is-atama/${id}/basla`, {}),
-  bitir: (id, govde) => api.post(`/is-atama/${id}/bitir`, govde),
+  // 03.11.2026: istek_anahtari — aynı dokunuş / çevrimdışı tekrar gönderimi sunucuda ikinci kez işlenmez (is_atama_istek)
+  basla: (id, istekAnahtari) => api.post(`/is-atama/${id}/basla`, { istek_anahtari: istekAnahtari }),
+  bitir: (id, govde, istekAnahtari) => api.post(`/is-atama/${id}/bitir`, { ...govde, istek_anahtari: istekAnahtari }),
+  // Fiilî bildirim (iş kodu bazında, QC'ye yazmaz): BASLADI / TAMAMLANDI / ISSUE / ISSUE_KAPANDI
+  bildir: (govde, istekAnahtari) => api.post("/is-fiili/bildir", { ...govde, istek_anahtari: istekAnahtari }),
+};
+
+// İş Atama (yönetici, 03.11.2026): web "Rollout İş Atama" ile AYNI kayıtlar / yetki / kurallar; kim neyi görür sunucu karar verir
+export const atamaApi = {
+  yetkim: () => api.get("/is-atama/yetkim"),
+  baslangic: () => api.get("/mobil/is-atama/baslangic", { zamanAsimiMs: 60000 }),
+  ara: (q) => api.get(`/mobil/is-atama/ara?q=${kodla(q)}`, { zamanAsimiMs: 90000 }),
+  kontrol: (govde) => api.post("/mobil/is-atama/kontrol", govde, { zamanAsimiMs: 60000 }),
+  olustur: (govde, istekAnahtari) => api.post("/mobil/is-atama", { ...govde, istek_anahtari: istekAnahtari }, { zamanAsimiMs: 60000 }),
+  liste: ({ filtre = "bugun", q = "", bolge = "", ekip_no = "", durum = "", kategori = "" } = {}) =>
+    api.get(`/mobil/is-atama/liste?filtre=${kodla(filtre)}&q=${kodla(q)}&bolge=${kodla(bolge)}&ekip_no=${kodla(ekip_no)}&durum=${kodla(durum)}&kategori=${kodla(kategori)}`, { zamanAsimiMs: 90000 }),
+  detay: (id) => api.get(`/mobil/is-atama/${id}`),
+  guncelle: (id, govde) => api.put(`/mobil/is-atama/${id}`, govde),
+  iptal: (id, govde) => api.post(`/mobil/is-atama/${id}/iptal`, govde),
+  devret: (id, govde) => api.post(`/mobil/is-atama/${id}/devret`, govde),
 };
 
 // Onaylar (25.10.2026): kullanıcının ŞU AN işlem yapabileceği kayıtlar; firma + tarihli onay devri backend'de hesaplanır.

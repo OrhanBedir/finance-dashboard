@@ -13,6 +13,7 @@ import { Alan, CipSecim } from "../bilesenler/form";
 import { Ekran } from "../bilesenler/Ekran";
 import { FirmaBasligi } from "../bilesenler/marka";
 import { BaglantiBandi } from "../bilesenler/BaglantiBandi";
+import { OperasyonBolumu } from "../bilesenler/OperasyonBolumu";
 import { useOturum } from "../oturum/OturumSaglayici";
 import { useVeri } from "../api/veri";
 import { cleanupApi, onayApi, panoApi, yonetimApi } from "../api/uclar";
@@ -98,6 +99,7 @@ export function YonetimAnaSayfa({ navigation }) {
           </Kart>
 
           {/* 3) Saha ve iş durumu */}
+          <OperasyonBolumu navigation={navigation} />
           <BolumBasligi baslik="Saha ve iş durumu" />
           <Kart onPress={() => navigation.navigate("Saha")} erisimEtiketi="Saha işleri">
             <View style={{ flexDirection: "row", alignItems: "center" }}>

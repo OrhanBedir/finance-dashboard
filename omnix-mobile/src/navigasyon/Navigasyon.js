@@ -20,6 +20,8 @@ import { HesapHareketleriEkrani } from "../ekranlar/HesapHareketleriEkrani";
 import { SahaEkrani } from "../ekranlar/SahaEkrani";
 import { IsDetayEkrani } from "../ekranlar/IsDetayEkrani";
 import { SahaHaritaEkrani } from "../ekranlar/SahaHaritaEkrani";
+import { IsAtamaEkrani } from "../ekranlar/IsAtamaEkrani";
+import { IsAtamaDetayEkrani } from "../ekranlar/IsAtamaDetayEkrani";
 import { CleanupEkrani } from "../ekranlar/CleanupEkrani";
 import { MalzemeDetayEkrani, MalzemeTalepEkrani } from "../ekranlar/MalzemeEkranlari";
 import { StokIslemEkrani } from "../ekranlar/StokEkranlari";
@@ -118,6 +120,9 @@ export function Navigasyon() {
         <Yigin.Screen name="HesapHareketleri" component={HesapHareketleriEkrani} />
         <Yigin.Screen name="IsDetay" component={IsDetayEkrani} />
         <Yigin.Screen name="SahaHarita" component={SahaHaritaEkrani} />
+        {/* 03.11.2026: yönetici İş Atama (yetki sunucuda; personelin İşlerim ekranından ayrı) */}
+        <Yigin.Screen name="IsAtama" component={IsAtamaEkrani} />
+        <Yigin.Screen name="IsAtamaDetay" component={IsAtamaDetayEkrani} />
         <Yigin.Screen name="Cleanup" component={CleanupEkrani} />
         <Yigin.Screen name="MalzemeTalep" component={MalzemeTalepEkrani} />
         <Yigin.Screen name="MalzemeDetay" component={MalzemeDetayEkrani} />
