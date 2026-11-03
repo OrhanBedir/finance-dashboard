@@ -4080,6 +4080,20 @@ const CARI_PB = { TRY: "₺", USD: "$", EUR: "€" };
 const cariPara = (n, pb = "TRY") => `${Number(n || 0) < 0 ? "−" : ""}${CARI_PB[pb] || ""}${odmTL(Math.abs(Number(n || 0)))}${CARI_PB[pb] ? "" : " " + pb}`;
 const CARI_TUR = { AVANS: "Avans", FATURA_ODEME: "Fatura ödemesi", MAHSUP: "Avans mahsubu", FATURA_GIRISI: "Fatura girişinde ödenen" };
 const cariTarih = (t) => (t ? String(t).slice(0, 10).split("-").reverse().join(".") : "—");
+// 03.11.2026 (KA0181 TSSR): tarayıcıdan depoya doğrudan yüklemede 0 baytlık dosya sessizce "yüklendi" sayılıyordu
+// (dosya henüz tam inmemişken / okunamazken seçilince). Seçimde, yüklemeden önce ve yüklemeden sonra boyut doğrulanır.
+const dosyaBoyutYaz = (n) => { const b = Number(n || 0); return b >= 1048576 ? `${(b / 1048576).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} MB` : b >= 1024 ? `${Math.round(b / 1024)} KB` : `${b} bayt`; };
+const bosDosyaHatasi = (ad) => { const e = new Error(`"${ad || "dosya"}" boş (0 bayt) — dosya tam inmemiş ya da okunamamış olabilir. Dosyayı bilgisayarınızda açıp kontrol edin, sonra yeniden seçin.`); e.bosDosya = true; return e; };
+function bosDosyaKontrol(file) { if (!file || !(Number(file.size) > 0)) throw bosDosyaHatasi(file && file.name); }
+// Yükleme sonrası: depodaki dosyanın boyutu okunabiliyorsa 0 / eksik olmadığı doğrulanır. Boyut okunamazsa (ağ / CORS) yükleme engellenmez.
+async function yuklenenDosyaDogrula(publicUrl, file) {
+  let len = null, kodlama = null;
+  try { const h = await fetch(publicUrl, { method: "HEAD", cache: "no-store" }); if (h.ok) { len = h.headers.get("content-length"); kodlama = h.headers.get("content-encoding"); } } catch { return; }
+  if (len === null || len === "") return;
+  const n = Number(len);
+  if (n === 0) throw bosDosyaHatasi(file && file.name);
+  if (!kodlama && file && Number(file.size) > 0 && n < Number(file.size)) { const e = new Error(`"${file.name}" eksik yüklendi (${dosyaBoyutYaz(n)} / ${dosyaBoyutYaz(file.size)}). Bağlantıyı kontrol edip yeniden yükleyin.`); e.bosDosya = true; throw e; }
+}
 async function cariIstek(yol, { method = "GET", govde, marka } = {}) {
   const ayr = yol.includes("?") ? "&" : "?";
   const r = await fetch(`${API_BASE}/finance/marka-cari/${yol}${marka ? `${ayr}marka=${encodeURIComponent(marka)}` : ""}`, {
@@ -22852,6 +22866,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
     } else { setIsgBelgeDosya(null); }
   };
   const uploadIsgBelge = async (isgId, file) => {
+    bosDosyaKontrol(file); // 03.11.2026: 0 baytlık dosya yüklenmez
     const ext = file.name.split(".").pop();
     // Adım 1: Backend'den signed URL al
     let signedUrl, publicUrl;
@@ -22866,6 +22881,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
       const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type, "x-upsert":"true" } });
       if (!upRes.ok) throw new Error(upRes.status);
     } catch(e) { throw new Error("Adım2 (Supabase PUT): " + e.message); }
+    await yuklenenDosyaDogrula(publicUrl, file); // boş / eksik yüklendiyse adres kaydedilmez
     // Adım 3: Public URL'yi DB'ye kaydet
     try {
       const patchRes = await fetch(`${API_BASE}/hr/personel/${selectedPersonel.id}/isg/${isgId}/belge-url`, {
@@ -44214,6 +44230,7 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
 
       // Belge upload helper — tek dosya yükler, publicUrl döner
       const uploadRolloutBelge = async (file, type) => {
+        bosDosyaKontrol(file); // 0 bayt → depoya hiç gönderilmez
         const ext = (/\.([A-Za-z0-9]{1,8})$/.exec(file.name || "")?.[1] || "bin").toLowerCase();
         const signRes = await fetch(`${API_BASE}/rollout/signed-upload-url?rolloutId=${result.row.id}&type=${type}&ext=${ext}`);
         if (!signRes.ok) throw new Error("Signed URL alınamadı");
@@ -44221,6 +44238,7 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
         // Bazı tarayıcılar .xls/.dwg/.msg için boş MIME verir — boş Content-Type yüklemeyi bozmasın
         const upRes = await fetch(signedUrl, { method:"PUT", body: file, headers:{ "Content-Type": file.type || "application/octet-stream", "x-upsert":"true" } });
         if (!upRes.ok) throw new Error("Supabase yükleme başarısız");
+        await yuklenenDosyaDogrula(publicUrl, file); // depoya boş / eksik gittiyse adres kayda yazılmaz
         return publicUrl;
       };
 
@@ -44248,9 +44266,13 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
           const degisti = mevcut.join("\n") !== String(existingRow[field] || "");
           if (!files.length && !degisti) continue;
           try {
+            const atlanan = [];
             for (const file of files) {
-              mevcut.push(await uploadRolloutBelge(file, type));
+              try { mevcut.push(await uploadRolloutBelge(file, type)); }
+              catch (e) { if (e.bosDosya) { atlanan.push(e.message); continue; } throw e; }
             }
+            if (atlanan.length) alert(`${type.toUpperCase()} belgesi kaydedilmedi:\n\n${atlanan.join("\n")}`);
+            if (atlanan.length && atlanan.length === files.length && !degisti) continue;
             const birlesik = mevcut.join("\n");
             await fetchJson(`${API_BASE}/rollout/${result.row.id}/belge-url`, {
               method:"POST", withAuth:true, headers:{"Content-Type":"application/json"},
@@ -44461,7 +44483,7 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
         ))}
         {files.map((f, i) => (
           <div key={`${f.name}-${i}`} style={{ display:"flex", gap:"6px", alignItems:"center", fontSize:"11px", color:"#059669", fontWeight:600 }}>
-            <span>📎 {f.name}</span>
+            <span>📎 {f.name} <span style={{ color:"#64748b", fontWeight:500 }}>({dosyaBoyutYaz(f.size)})</span></span>
             <button type="button" title="Seçimi kaldır"
               onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
               style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:"12px", lineHeight:1 }}>✕</button>
@@ -44471,7 +44493,10 @@ function RolloutEntryModal({ siteCode, rows, alanKollari, onClose, onSaved }) {
           📎 {urls.length || files.length ? "Belge Ekle" : "Belge Ekle (PDF, görsel, DWG, Excel xls/xlsx, Word, ZIP/RAR)"}
           <input type="file" multiple accept={accept} style={{ display:"none" }}
             onChange={async e => {
-              const yeni = await zipAc(Array.from(e.target.files || []));
+              const hepsi = await zipAc(Array.from(e.target.files || []));
+              const bos = hepsi.filter(f => !(Number(f.size) > 0));
+              const yeni = hepsi.filter(f => Number(f.size) > 0);
+              if (bos.length) alert(`Boş (0 bayt) dosya eklenmedi:\n${bos.map(f => "• " + f.name).join("\n")}\n\nDosya tam inmemiş ya da okunamamış olabilir. Bilgisayarınızda açıp kontrol edin, sonra yeniden seçin.`);
               if (yeni.length) setFiles(prev => [...prev, ...yeni]);
               e.target.value = "";
             }} />
