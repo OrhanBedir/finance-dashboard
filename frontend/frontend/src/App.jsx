@@ -29426,6 +29426,30 @@ function AvansOzetKartlari({ surum, onDegisti, firmaSabit }) {
   );
 }
 
+// 03.11.2026: Personel Avans Özeti — sunucu her satıra odeme_sinifi (HAZIR / ONAY / ODENDI / HARIC), kalan_tutar, para_birimi,
+// kisi_anahtari (personel_id; personelsiz talepte talep eden e-postası) ekler (backend/avansOdemeOzet.js). Burada yalnız toplanır.
+function avansOdemeOzetle(rows) {
+  const tekil = new Map(); for (const t of rows || []) if (!tekil.has(t.id)) tekil.set(t.id, t);
+  const ekle = (h, pb, tutar, id) => { const x = h[pb] || (h[pb] = { tutar: 0, adet: 0, ids: [] }); x.tutar = Math.round((x.tutar + Number(tutar || 0)) * 100) / 100; x.adet += 1; x.ids.push(id); };
+  const yeni = () => ({ hazir: {}, onay: {}, toplam: {}, odenen: {} });
+  const genel = yeni(), kisiler = new Map();
+  for (const t of tekil.values()) {
+    const pb = t.para_birimi || "TRY", ka = t.kisi_anahtari || `T:${t.id}`;
+    const k = kisiler.get(ka) || { anahtar: ka, ad: t.kisi_ad || t.personel_ad || t.talep_eden_ad || "—", kayit: 0, ...yeni() };
+    k.kayit += 1; kisiler.set(ka, k);
+    for (const h of [genel, k]) {
+      if (t.odeme_sinifi === "HAZIR") { ekle(h.hazir, pb, t.kalan_tutar, t.id); ekle(h.toplam, pb, t.kalan_tutar, t.id); }
+      else if (t.odeme_sinifi === "ONAY") { ekle(h.onay, pb, t.kalan_tutar, t.id); ekle(h.toplam, pb, t.kalan_tutar, t.id); }
+      else if (t.odeme_sinifi === "ODENDI") ekle(h.odenen, pb, t.tutar, t.id);
+    }
+  }
+  const ihtiyac = (k) => Object.values(k.toplam).reduce((s, x) => s + x.tutar, 0);
+  return { ...genel, kayit: tekil.size, kisiler: [...kisiler.values()].sort((a, b) => ihtiyac(b) - ihtiyac(a) || String(a.ad).localeCompare(String(b.ad), "tr")) };
+}
+const avansParaYaz = (o) => { const e = Object.entries(o || {}); if (!e.length) return "₺0"; return e.map(([pb, x]) => (pb === "TRY" ? `₺${x.tutar.toLocaleString("tr-TR", { maximumFractionDigits: 2 })}` : `${x.tutar.toLocaleString("tr-TR", { maximumFractionDigits: 2 })} ${pb}`)).join(" + "); };
+const avansAdet = (o) => Object.values(o || {}).reduce((s, x) => s + x.adet, 0);
+const avansIds = (o) => Object.values(o || {}).flatMap((x) => x.ids);
+
 function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = "", initialKapsam = "", yeniTetik = 0, duzeltTetik = null, onDegisti = null }) {
   const [list, setList] = useState([]);
   // 02.11.2026: düzelt ve yeniden gönder (reddedilen, sahibi) — aynı talep kimliği, yeni onay turu; açıklama zorunlu
@@ -29534,6 +29558,11 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
   const bendeBekliyor = (t) => t.tekno ? !!t.tekno.benim : (isRolloutMudur && t.durum === "TALEP") || (isPM && (t.durum === "TALEP" || t.durum === "ROLLOUT_MUDUR_ONAY")) || (isDirektor && t.durum === "PM_ONAY") || (isMuhasebe && t.durum === "DIREKTOR_ONAY");
   const [filterDonem, setFilterDonem] = useState(""); // talep tarihi ayı (YYYY-MM)
   const [filterFirma, setFilterFirma] = useState("");
+  // 03.11.2026 Personel Avans Özeti: kalıcı kimlikle kişi seçimi (aynı adlı kişiler birleşmez), dökümden tek talebe odak
+  const [filterKisi, setFilterKisi] = useState(""); // kisi_anahtari (P:<personel_id> | E:<e-posta>)
+  const [filterTalepId, setFilterTalepId] = useState(null);
+  const [ozetDokum, setOzetDokum] = useState(null); // { baslik, ids }
+  const [kisiDokumAcik, setKisiDokumAcik] = useState(false);
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   const loadBakiye = async () => {
@@ -29647,7 +29676,11 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
     if (filterDonem && String(t.tarih || "").slice(0, 7) !== filterDonem) return false;
     if (filterFirma && String(t.firma || "").toUpperCase() !== filterFirma) return false;
     if (!aramaEslesir(t)) return false;
-    if (filterDurum && t.durum !== filterDurum) return false;
+    if (filterKisi && t.kisi_anahtari !== filterKisi) return false;
+    if (filterTalepId && t.id !== filterTalepId) return false;
+    if (filterDurum === "__ODEME_BEKLEYEN") { if (t.odeme_sinifi !== "HAZIR") return false; }
+    else if (filterDurum === "__ONAY_SURECI") { if (t.odeme_sinifi !== "ONAY") return false; }
+    else if (filterDurum && t.durum !== filterDurum) return false;
     if (filterGider && t.gider_turu !== filterGider) return false;
     if (filterBolge && t.bolge !== filterBolge) return false;
     if (filterProje && t.proje !== filterProje) return false;
@@ -30103,8 +30136,12 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
               .filter(Boolean).join("_").replace(/[^\p{L}\p{N}_-]+/gu, "_") + ".xlsx";
             const indirExcel = async () => {
               try {
+                // 03.11.2026: ekrandaki listenin AYNI kayıtları (sekme, dönem, firma, kişi seçimi dahil) → liste, özet ve Excel tutarlı.
+                // Sunucu yetki / firma kapsamını ayrıca uygular; özet sayfası aynı hesapla (avansOdemeOzet) üretilir.
+                const _kisiAd = filterKisi ? (list.find((t) => t.kisi_anahtari === filterKisi)?.kisi_ad || "") : searchText.trim();
                 const r = await fetch(`${API_BASE}/hr/is-avans/excel${qs ? "?" + qs : ""}`,
-                  { headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}` } });
+                  { method: "POST", headers: { Authorization: `Bearer ${localStorage.getItem("token")||""}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids: [...new Set(visibleList.map((t) => t.id))], ozet_baslik: [KAPSAM_AD[kapsam], _kisiAd].filter(Boolean).join(" · ") }) });
                 if (!r.ok) { alert("Excel indirilemedi"); return; }
                 const blob = await r.blob();
                 const url = URL.createObjectURL(blob);
@@ -30143,7 +30180,7 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
             autoComplete="off"
             name="avans_ara"
             list={searchKapsam === "HEPSI" ? undefined : "avans-kisi-listesi"}
-            onChange={e => setSearchText(e.target.value)}
+            onChange={e => { setSearchText(e.target.value); setFilterKisi(""); setFilterTalepId(null); }}
             style={{ padding: "8px 14px", border: "none", fontSize: "14px", minWidth: "220px", outline: "none" }}
           />
           {/* Kişi seçimi: avans sahibi (Kime) ya da talep eden adları listeden seçilebilir */}
@@ -30194,9 +30231,11 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
           <option value="DIREKTOR_ONAY">Onaylandı · Ödeme Bekler</option>
           <option value="TAMAMLANDI">Tamamlandı</option>
           <option value="REDDEDILDI">Reddedildi</option>
+          <option value="__ODEME_BEKLEYEN">Ödeme bekleyen (tüm onaylar tamam)</option>
+          <option value="__ONAY_SURECI">Onay sürecinde (henüz ödenemez)</option>
         </select>
-        {(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis || filterDonem || filterFirma) && (
-          <button onClick={() => { setSearchText(""); setFilterDurum(""); setFilterGider(""); setFilterBolge(""); setFilterProje(""); setFilterBaslangic(""); setFilterBitis(""); setFilterDonem(""); setFilterFirma(""); }}
+        {(searchText || filterDurum || filterGider || filterBolge || filterProje || filterBaslangic || filterBitis || filterDonem || filterFirma || filterKisi || filterTalepId) && (
+          <button onClick={() => { setSearchText(""); setFilterDurum(""); setFilterGider(""); setFilterBolge(""); setFilterProje(""); setFilterBaslangic(""); setFilterBitis(""); setFilterDonem(""); setFilterFirma(""); setFilterKisi(""); setFilterTalepId(null); }}
             style={{ padding: "8px 14px", background: "#f3f4f6", color: "#374151", border: "none", borderRadius: "10px", cursor: "pointer", fontSize: "13px" }}>
             Filtreleri Temizle
           </button>
@@ -30204,6 +30243,127 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
       </div>
       <div style={{ fontSize:"12.5px", fontWeight:700, color:"#6b7a90", margin:"-6px 0 10px" }}>{KAPSAM_AD[kapsam]} — {visibleList.length} sonuç</div>
 
+      {/* ═══ 03.11.2026 PERSONEL AVANS ÖZETİ — filtreye göre (liste ile AYNI kayıtlar: sekme + durum + tüm filtreler). Tutarlar sunucunun
+          satıra eklediği ödeme sınıfından (onay zinciri kuralı); sayfa / ekrandaki kısım değil, filtrelenmiş kayıtların tamamı. ═══ */}
+      {(() => {
+        const oz = avansOdemeOzetle(visibleList);
+        const kisiSecili = filterKisi ? oz.kisiler.find((k) => k.anahtar === filterKisi) || { ad: (list.find((t) => t.kisi_anahtari === filterKisi)?.kisi_ad) || "Seçili personel", anahtar: filterKisi } : null;
+        const tekKisi = kisiSecili || (searchText.trim() && oz.kisiler.length === 1 ? oz.kisiler[0] : null);
+        // Sekme / durum filtresinde eşleşme yoksa da kısayol: arama TÜM kayıtlarda tek kişiye uyuyorsa o kişi
+        const tumAday = !tekKisi && searchText.trim() ? [...new Map(list.filter(aramaEslesir).map((t) => [t.kisi_anahtari, { anahtar: t.kisi_anahtari, ad: t.kisi_ad }])).values()] : [];
+        const kisayolKisi = tekKisi || (tumAday.length === 1 ? tumAday[0] : null);
+        const cokKisi = !tekKisi && oz.kisiler.length > 1;
+        const baslik = tekKisi ? `👤 ${tekKisi.ad}` : searchText.trim() ? `Filtrelenen personellerin toplamı (${oz.kisiler.length} personel)` : `Filtrelenen kayıtların toplamı (${oz.kisiler.length} personel)`;
+        const kisitlar = [filterBaslangic || filterBitis ? `talep tarihi ${filterBaslangic || "…"} – ${filterBitis || "…"}` : "", filterDonem ? `dönem ${filterDonem}` : "", filterFirma ? `firma ${filterFirma}` : "",
+          filterGider ? `gider ${filterGider}` : "", filterBolge ? `bölge ${filterBolge}` : "", filterProje ? `proje ${filterProje}` : ""].filter(Boolean);
+        const kisayol = () => { const k = kisayolKisi; setKapsam("TUM"); setFilterDurum("__ODEME_BEKLEYEN"); setFilterTalepId(null); if (k?.anahtar) setFilterKisi(k.anahtar); };
+        const kisayolAktif = kapsam === "TUM" && filterDurum === "__ODEME_BEKLEYEN";
+        const kutu = (tur, ad, deger, adetO, renk, bg, alt, ids, ana) => (
+          <button type="button" onClick={() => setOzetDokum({ baslik: `${tekKisi ? tekKisi.ad + " — " : ""}${ad}`, ids, tur })} title="Hesabı oluşturan talepleri göster"
+            style={{ textAlign: "left", background: bg, border: `1.5px solid ${renk}33`, borderLeft: `4px solid ${renk}`, borderRadius: "12px", padding: ana ? "14px 16px" : "12px 14px", cursor: "pointer", minWidth: 0 }}>
+            <div style={{ fontSize: "11px", fontWeight: 800, color: renk, letterSpacing: "0.03em" }}>{ad}</div>
+            <div style={{ fontSize: ana ? "26px" : "20px", fontWeight: 800, color: renk, marginTop: "2px", fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>{deger}</div>
+            <div style={{ fontSize: "11.5px", color: "#475569", marginTop: "2px" }}>{avansAdet(adetO)} talep{alt ? ` · ${alt}` : ""}</div>
+          </button>);
+        return (
+          <section aria-label="Filtreye göre personel avans özeti" style={{ ...cardSt, padding: "14px 16px", marginBottom: "16px", border: "1.5px solid #c7d2fe", textAlign: "left" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#4338ca", letterSpacing: "0.05em" }}>FİLTREYE GÖRE PERSONEL ÖZETİ · {KAPSAM_AD[kapsam]}</div>
+                <div style={{ fontSize: "16px", fontWeight: 800, color: "#0f172a", marginTop: "2px" }}>{baslik}</div>
+              </div>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {kisiSecili && <button type="button" onClick={() => setFilterKisi("")} style={{ padding: "6px 10px", border: "1px solid #c7d2fe", background: "#fff", color: "#4338ca", borderRadius: "8px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>Kişi seçimini kaldır ✕</button>}
+                {!isRequester && kisayolKisi && !kisayolAktif && <button type="button" onClick={kisayol} style={{ padding: "6px 12px", border: "none", background: "#166534", color: "#fff", borderRadius: "8px", fontSize: "12.5px", fontWeight: 800, cursor: "pointer" }}>💸 {tekKisi ? "Personelin" : `${kisayolKisi.ad} —`} tüm ödeme bekleyenlerini göster</button>}
+              </div>
+            </div>
+            {kapsam === "ONAYIM" && (
+              <div role="note" style={{ marginTop: "8px", padding: "7px 10px", borderRadius: "8px", background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: "12px" }}>
+                Bu sekme yalnız <b>onayınızı bekleyen</b> talepleri sayar — personelin bütün talepleri değildir. Ödenecek tutarın tamamı için "Tüm kayıtlar" sekmesine geçin{kisayolKisi ? " ya da kısayolu kullanın" : ""}.
+              </div>)}
+            {kisayolAktif && (
+              <div role="note" style={{ marginTop: "8px", padding: "7px 10px", borderRadius: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: "12px" }}>
+                Tüm kayıtlar · yalnız ödeme bekleyen (bütün onayları tamam) talepler.{kisitlar.length ? <> Korunan diğer kısıtlar: <b>{kisitlar.join(" · ")}</b>.</> : " Başka kısıt yok."}
+              </div>)}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px", marginTop: "10px" }}>
+              {kutu("hazir", "ŞİMDİ YATIRILACAK", avansParaYaz(oz.hazir), oz.hazir, "#166534", "#f0fdf4", "bütün onayları tamam, ödenmemiş", avansIds(oz.hazir), true)}
+              {kutu("onay", "ONAY BEKLEYEN", avansParaYaz(oz.onay), oz.onay, "#b45309", "#fffbeb", "henüz ödenemez — toplama eklenmedi", avansIds(oz.onay))}
+              {kutu("toplam", "TOPLAM BEKLEYEN İHTİYAÇ", avansParaYaz(oz.toplam), oz.toplam, "#1e3a5f", "#f8fafc", "şimdi yatırılacak + onay bekleyen; onay bekleyen bölüm henüz ödenemez", avansIds(oz.toplam))}
+              {kutu("odenen", "FİLTREDE ÖDENEN", avansParaYaz(oz.odenen), oz.odenen, "#1d4ed8", "#eff6ff", "gerçek ödemeler (talep tarihine göre)", avansIds(oz.odenen))}
+            </div>
+            {cokKisi && (
+              <div style={{ marginTop: "10px" }}>
+                {searchText.trim() && (
+                  <div style={{ fontSize: "12px", color: "#475569", marginBottom: "6px" }}>Arama birden fazla personele uyuyor — toplam tek kişinin değildir. Personel seçin:
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" }}>
+                      {oz.kisiler.slice(0, 12).map((k) => (
+                        <button key={k.anahtar} type="button" onClick={() => setFilterKisi(k.anahtar)} title={k.anahtar.startsWith("P:") ? `Personel no ${k.anahtar.slice(2)}` : "Personel kaydı yok — talep eden"}
+                          style={{ padding: "5px 10px", border: "1px solid #c7d2fe", background: "#eef2ff", color: "#3730a3", borderRadius: "999px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>
+                          {k.ad}{oz.kisiler.filter((x) => x.ad === k.ad).length > 1 ? ` (#${k.anahtar.slice(2)})` : ""} · {avansParaYaz(k.hazir)}
+                        </button>))}
+                    </div>
+                  </div>)}
+                <button type="button" onClick={() => setKisiDokumAcik((v) => !v)} aria-expanded={kisiDokumAcik}
+                  style={{ padding: "4px 0", border: "none", background: "none", color: "#4338ca", fontSize: "12.5px", fontWeight: 700, cursor: "pointer" }}>{kisiDokumAcik ? "▲" : "▼"} Kişi bazlı döküm ({oz.kisiler.length})</button>
+                {kisiDokumAcik && (
+                  <div style={{ overflowX: "auto", marginTop: "4px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                      <thead><tr style={{ background: "#f8fafc", color: "#64748b" }}>{["Personel", "Şimdi yatırılacak", "Onay bekleyen", "Toplam ihtiyaç", "Filtrede ödenen", ""].map((h, i) => <th key={i} style={{ padding: "6px 8px", textAlign: i === 0 ? "left" : "right", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                      <tbody>{oz.kisiler.map((k) => (
+                        <tr key={k.anahtar} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 700 }}>{k.ad}{oz.kisiler.filter((x) => x.ad === k.ad).length > 1 ? <span style={{ color: "#94a3b8", fontWeight: 500 }}> (#{k.anahtar.slice(2)})</span> : null}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", color: "#166534", fontWeight: 700, whiteSpace: "nowrap" }}>{avansParaYaz(k.hazir)} <span style={{ color: "#94a3b8" }}>({avansAdet(k.hazir)})</span></td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", color: "#b45309", whiteSpace: "nowrap" }}>{avansParaYaz(k.onay)} <span style={{ color: "#94a3b8" }}>({avansAdet(k.onay)})</span></td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>{avansParaYaz(k.toplam)}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", color: "#1d4ed8", whiteSpace: "nowrap" }}>{avansParaYaz(k.odenen)}</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right" }}><button type="button" onClick={() => setFilterKisi(k.anahtar)} style={{ padding: "3px 8px", border: "1px solid #c7d2fe", background: "#fff", color: "#4338ca", borderRadius: "7px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer" }}>Seç</button></td>
+                        </tr>))}</tbody>
+                    </table>
+                  </div>)}
+              </div>)}
+            {filterTalepId && (
+              <div role="status" style={{ marginTop: "10px", padding: "7px 10px", borderRadius: "8px", background: "#eef2ff", color: "#3730a3", fontSize: "12.5px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ flex: "1 1 220px" }}>Yalnız <b>AV-{filterTalepId}</b> gösteriliyor — onay / ödeme işlemini aşağıdaki satırdan yapın (mevcut yetkili akış).</span>
+                <button type="button" onClick={() => setFilterTalepId(null)} style={{ marginLeft: "auto", padding: "3px 9px", border: "1px solid #c7d2fe", background: "#fff", color: "#3730a3", borderRadius: "7px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}>Tümüne dön ✕</button>
+              </div>)}
+            {ozetDokum && (() => {
+              const satirlar = visibleList.filter((t) => ozetDokum.ids.includes(t.id));
+              const asama = (t) => t.tekno?.asama_tr || ({ TALEP: "Rollout müdürü onayı", ROLLOUT_MUDUR_ONAY: "PM onayı", PM_ONAY: "Direktör onayı", DIREKTOR_ONAY: "Ödeme bekliyor (onaylar tamam)", TAMAMLANDI: "Ödendi", REDDEDILDI: "Reddedildi" }[t.durum] || t.durum);
+              const gunY = (v) => { if (!v) return "—"; if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v).split("-").reverse().join(".");
+                const d = new Date(v); return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("tr-TR", { timeZone: "Europe/Istanbul" }); };
+              return (
+                <div role="dialog" aria-modal="true" aria-label={ozetDokum.baslik} onClick={() => setOzetDokum(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "12px" }}>
+                  <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "14px", width: "min(920px, 100%)", maxHeight: "85vh", overflow: "auto", padding: "16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "baseline" }}>
+                      <h3 style={{ margin: 0, fontSize: "16px" }}>{ozetDokum.baslik} — {satirlar.length} talep</h3>
+                      <button type="button" onClick={() => setOzetDokum(null)} style={{ border: "none", background: "#f1f5f9", borderRadius: "8px", padding: "4px 10px", cursor: "pointer" }}>Kapat ✕</button>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", margin: "4px 0 8px" }}>Toplam {avansParaYaz(avansOdemeOzetle(satirlar)[ozetDokum.tur || "toplam"])} {ozetDokum.tur === "odenen" ? "ödendi" : "ödenmemiş kalan"} · ödeme bu pencereden yapılmaz; "Listede göster" ile satıra gidip mevcut yetkili akışla işlem yapın.</div>
+                    {!satirlar.length ? <div style={{ padding: "18px", textAlign: "center", color: "#94a3b8" }}>Kayıt yok (₺0 · 0 talep)</div> : (
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                          <thead><tr style={{ background: "#f8fafc", color: "#64748b" }}>{["Talep", "Tarih", "Personel", "Talep eden", "Tutar", "Kalan", "Aşama", "Son ödeme günü", ""].map((h, i) => <th key={i} style={{ padding: "6px 8px", textAlign: [4, 5].includes(i) ? "right" : "left", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+                          <tbody>{satirlar.map((t) => (
+                            <tr key={t.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                              <td style={{ padding: "6px 8px", fontWeight: 700, whiteSpace: "nowrap" }}>AV-{t.id}</td>
+                              <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{gunY(t.tarih)}</td>
+                              <td style={{ padding: "6px 8px" }}>{t.personel_ad || t.talep_eden_ad}</td>
+                              <td style={{ padding: "6px 8px" }}>{t.talep_eden_ad}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>₺{Number(t.tutar || 0).toLocaleString("tr-TR")}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap", fontWeight: 700 }}>{t.odeme_sinifi === "ODENDI" ? "—" : `₺${Number(t.kalan_tutar || 0).toLocaleString("tr-TR")}`}</td>
+                              <td style={{ padding: "6px 8px" }}>{asama(t)}</td>
+                              <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{gunY(t.son_odeme_tarihi)}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }}><button type="button" onClick={() => { setFilterTalepId(t.id); setOzetDokum(null); }} style={{ padding: "3px 8px", border: "1px solid #c7d2fe", background: "#fff", color: "#4338ca", borderRadius: "7px", fontSize: "11.5px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Listede göster</button></td>
+                            </tr>))}</tbody>
+                        </table>
+                      </div>)}
+                  </div>
+                </div>);
+            })()}
+          </section>);
+      })()}
+
+      {!isRequester && <div style={{ fontSize: "10.5px", fontWeight: 800, color: "#64748b", letterSpacing: "0.05em", margin: "4px 0 6px" }}>GENEL ÖZET · liste filtrelerinden bağımsız</div>}
       {/* 28.10.2026: özet kartları (son ödeme günü / onay bekleyenler / bugün gereken avans) — sunucudan, büyük modal + hızlı onay.
           Kart ve modal aynı yanıttan; kapsam liste ile aynı (alt marka yalnız kendi firması). */}
       {!isRequester && <AvansOzetKartlari surum={list} onDegisti={load} firmaSabit={_altMarka ? _marka : null} />}
@@ -30271,8 +30431,9 @@ function IsAvansPanel({ currentUser, onPendingCount, embedded = false, mode = ""
               return (
                 <div key={b.id} style={{ background: "#fff", border: `2px solid ${bk < 0 ? "#fecaca" : "#bfdbfe"}`, borderRadius: "14px", padding: "10px 18px", display: "flex", gap: "18px", alignItems: "center" }}>
                   <div>
+                    <div style={{ fontSize: "10px", fontWeight: 800, color: "#64748b", letterSpacing: "0.04em" }}>PERSONELİN MEVCUT AÇIK AVANSI</div>
                     <div style={{ fontWeight: 800, fontSize: "14px", color: "#111827" }}>👤 {b.ad_soyad}</div>
-                    <div style={{ fontSize: "11px", color: "#9ca3af" }}>üzerine çıkan para (tamamlanan avanslar)</div>
+                    <div style={{ fontSize: "11px", color: "#9ca3af" }}>geçmişte ödenmiş avanslar − arşivlenen masraf · yeni ödeme ihtiyacı değildir</div>
                   </div>
                   <div style={{ textAlign: "center" }}>
                     <div style={{ fontSize: "10.5px", fontWeight: 700, color: "#b45309" }}>TOPLAM AVANS</div>

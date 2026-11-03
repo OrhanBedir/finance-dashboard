@@ -569,7 +569,8 @@ const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron pr
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
 const tedarikciCari = require("./tedarikciCari"); // tedarikçi cari: fatura borcu / ödeme / avans / mahsup (29.10.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
-const teknoOnay = require("./teknoOnay"); // Teknocenter avans / masraf onay zinciri + firma kapsam kapıları (31.10.2026)
+const teknoOnay = require("./teknoOnay");
+const avansOdemeOzet = require("./avansOdemeOzet"); // iş avansı ödeme sınıfı + personel ödeme özeti (03.11.2026) // Teknocenter avans / masraf onay zinciri + firma kapsam kapıları (31.10.2026)
 const onayDevri = require("./onayDevri"); // tarihli onay devri: firma + adım + onaycı kullanıcı kimliği + yürürlük (25.10.2026)
 const avansTur = require("./avansTur"); // iş avansı red → düzelt → yeniden gönder, sürümlü onay turları (02.11.2026)
 const markaMutabakat = require("./markaMutabakat"); // Teknocenter finansman / Şimşek borcu mutabakatı (26.10.2026)
@@ -1136,6 +1137,7 @@ const ISG_EXCEL = [/^\/export\/excel$/]; // Rollout Excel'i: ayrı izin (rollout
 const ISG_YAZMA = [
   ["POST", /^\/auth\/(login|reset-password-request|reset-password)$/],
   ["POST", /^\/hr\/is-avans$/], ["PUT", /^\/hr\/is-avans\/\d+$/], ["DELETE", /^\/hr\/is-avans\/\d+$/], ["PUT", /^\/hr\/is-avans\/\d+\/yeniden-gonder$/],
+  ["POST", /^\/hr\/is-avans\/excel$/], // 03.11.2026: ekrandaki filtrenin kayıtlarıyla Excel (okuma; kendi kayıt kilidi uçta)
   ["POST", /^\/hr\/masraf-form$/], ["DELETE", /^\/hr\/masraf-form\/\d+$/], ["PUT", /^\/hr\/masraf-form\/\d+\/submit$/],
   ["POST", /^\/hr\/masraf-kalem$/], ["PUT", /^\/hr\/masraf-kalem\/\d+$/], ["DELETE", /^\/hr\/masraf-kalem\/\d+$/],
   ["POST", /^\/hr\/masraf-kalem\/\d+\/not$/], ["POST", /^\/hr\/masraf-belge\/\d+$/], ["DELETE", /^\/hr\/masraf-belge\/\d+$/],
@@ -24501,7 +24503,8 @@ async function isAvansGorunurSatirlar(req, sorgu = {}) {
     }
     // 31.10.2026 Teknocenter onay zinciri: açık satırlara zincir bilgisi (aşama, onaycı, oturumdaki kişinin onaylayıp onaylayamayacağı)
     // 02.11.2026: tur / red bilgisi (tur_no, gonderim, onceki_red, red, sahibi, duzeltilebilir) — web ve mobil aynı veriyi okur
-    return avansTurPanel.turBilgisiEkle(req, await teknoPanel.bilgiEkle(req, "avans", rows));
+    // 03.11.2026: ödeme sınıfı / kalan / kişi anahtarı — web "Personel Avans Özeti" ve Excel aynı alanları kullanır
+    return (await avansTurPanel.turBilgisiEkle(req, await teknoPanel.bilgiEkle(req, "avans", rows))).map(avansOdemeOzet.satiraEkle);
 }
 app.get("/hr/is-avans", authMiddleware, async (req, res) => {
   try { res.json(await isAvansGorunurSatirlar(req, req.query)); }
@@ -25087,7 +25090,9 @@ function adlariTeklestir(rows, alanlar) {
     return o;
   });
 }
-app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
+// 03.11.2026: POST gövdesinde ekrandaki filtrenin kayıt kimlikleri (ids) gelir → Excel listesi ve özet sayfası ekranla birebir
+// aynı kapsamı kullanır (sekme, dönem, firma, personel seçimi dahil). Yetki / firma kapsamı koşulları her durumda uygulanır.
+async function isAvansExcel(req, res) {
   try {
     const ExcelJS = require("exceljs");
     const wb = new ExcelJS.Workbook();
@@ -25095,7 +25100,10 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
 
     const ws = wb.addWorksheet("İş Avansı Talepleri");
 
-    let { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma, ara, ara_kapsam } = req.query;
+    const _Q = { ...(req.query || {}), ...(req.method === "POST" && req.body && typeof req.body === "object" ? req.body : {}) };
+    let { email, durum, gider_turu, bolge, proje, baslangic, bitis, firma, ara, ara_kapsam } = _Q;
+    const _ids = Array.isArray(_Q.ids) ? [...new Set(_Q.ids.map(Number).filter((x) => Number.isInteger(x) && x > 0))].slice(0, 20000) : null;
+    const _ozetBaslik = String(_Q.ozet_baslik || "").slice(0, 200);
     let personelKilidi = null; // personel: yalnız kendi kayıtları (talep eden VEYA adına açılan)
     if (!avansTamGorus(req)) { email = null; personelKilidi = String(req.user.email || "").toLowerCase(); }
     const conditions = [];
@@ -25118,6 +25126,7 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
     if (proje) { conditions.push(`t.proje = $${params.length+1}`); params.push(proje); }
     if (baslangic) { conditions.push(`t.tarih >= $${params.length+1}`); params.push(baslangic); }
     if (bitis) { conditions.push(`t.tarih <= $${params.length+1}`); params.push(bitis); }
+    if (_ids) { conditions.push(`t.id = ANY($${params.length+1}::int[])`); params.push(_ids); }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const list = await pool.query(`
       SELECT t.*, p.ad_soyad as personel_ad
@@ -25275,12 +25284,42 @@ app.get("/hr/is-avans/excel", authMiddleware, async (req, res) => {
     // Excel içinde de sütun filtresi (Personel/Gider Türü seçerek süzmek için)
     ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: Math.max(2, list.rows.length + 2), column: colDefs.length } };
 
+    // 03.11.2026: Personel Avans Özeti — ekrandaki özetle aynı hesap (avansOdemeOzet), aynı kayıtlar üzerinden
+    {
+      const oz = avansOdemeOzet.ozetle(list.rows.map(avansOdemeOzet.satiraEkle));
+      const wo = wb.addWorksheet("Personel Avans Özeti");
+      wo.views = [{ showGridLines: false }];
+      const pbler = [...new Set(["TRY", ...["hazir", "onay", "toplam", "odenen"].flatMap((k) => Object.keys(oz[k]))])];
+      wo.mergeCells(1, 1, 1, 2 + pbler.length * 4);
+      wo.getCell(1, 1).value = "PERSONEL AVANS ÖZETİ" + (_ozetBaslik ? " — " + _ozetBaslik : "") + ` (${oz.kayit} kayıt, ${oz.kisi_sayisi} personel)`;
+      wo.getCell(1, 1).font = { bold: true, size: 13, color: { argb: "FFFFFFFF" }, name: "Arial" };
+      wo.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A5F" } };
+      const bas = ["Personel (paranın üzerine yazıldığı)", "Kayıt"];
+      for (const pb of pbler) bas.push(`Şimdi yatırılacak (${pb})`, `Onay bekleyen (${pb})`, `Toplam bekleyen ihtiyaç (${pb})`, `Filtrede ödenen (${pb})`);
+      bas.forEach((h, i) => { const c = wo.getCell(2, i + 1); c.value = h; c.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Arial", size: 10 };
+        c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2563EB" } }; c.alignment = { wrapText: true, vertical: "middle", horizontal: "center" }; wo.getColumn(i + 1).width = i === 0 ? 34 : i === 1 ? 8 : 20; });
+      wo.getRow(2).height = 32;
+      const deger = (o, pb) => (o[pb] ? `${o[pb].adet} talep` : "0 talep");
+      const satirYaz = (r, ad, kayit, x, kalin) => {
+        const v = [ad, kayit]; for (const pb of pbler) v.push(x.hazir[pb]?.tutar || 0, x.onay[pb]?.tutar || 0, x.toplam[pb]?.tutar || 0, x.odenen[pb]?.tutar || 0);
+        v.forEach((val, i) => { const c = wo.getCell(r, i + 1); c.value = val; c.font = { name: "Arial", size: 10, bold: !!kalin }; if (i >= 2) { c.numFmt = "#,##0.00"; c.alignment = { horizontal: "right" }; } });
+        if (!kalin) for (let i = 0; i < pbler.length; i++) { const c = wo.getCell(r, 3 + i * 4); c.note = `${deger(x.hazir, pbler[i])}`; }
+      };
+      oz.kisiler.forEach((k, i) => satirYaz(3 + i, k.ad || k.anahtar, k.kayit, k, false));
+      satirYaz(3 + oz.kisiler.length, "TOPLAM", oz.kayit, oz, true);
+      const notR = 5 + oz.kisiler.length;
+      wo.getCell(notR, 1).value = "Şimdi yatırılacak = gerekli bütün onayları tamamlanmış, ödeme bekleyen taleplerin ödenmemiş tutarı. Onay bekleyen bölüm henüz ödenemez. Reddedilen ve ödenmiş talepler ihtiyaca girmez; masraf bakiyesi düşülmez. Para birimleri kurla birleştirilmez.";
+      wo.getCell(notR, 1).font = { name: "Arial", size: 9, italic: true, color: { argb: "FF64748B" } };
+    }
+
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=is_avans_talepleri.xlsx`);
     await wb.xlsx.write(res);
     res.end();
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
+}
+app.get("/hr/is-avans/excel", authMiddleware, isAvansExcel);
+app.post("/hr/is-avans/excel", authMiddleware, isAvansExcel);
 
 // ─── MASRAF FORMU ────────────────────────────────────────────────────────────
 
