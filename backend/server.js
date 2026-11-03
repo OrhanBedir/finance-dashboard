@@ -22189,6 +22189,8 @@ app.post("/hr/personel/:id/yeniden-ise-baslat", authMiddleware, async (req, res)
     const p = pr.rows[0];
     if (!p) { await client.query("ROLLBACK"); client.release(); return res.status(404).json({ error: "Personel bulunamadı" }); }
     if (!ikYonetimYetkisi(req, p)) { await client.query("ROLLBACK"); client.release(); return res.status(403).json({ error: "Yeniden işe başlatma yetkiniz yok" }); }
+    { const _kapP = altMarkaKapsam(req); // 03.11.2026: alt marka hesabı personeli başka firmaya taşıyamaz
+      if (_kapP && b.marka != null && String(b.marka).trim() && !_kapP.bordro.includes(String(b.marka).trim().toUpperCase())) { await client.query("ROLLBACK"); client.release(); return res.status(403).json({ error: "Personel başka bir firmaya taşınamaz" }); } }
     if (p.birlestirildi_personel_id) { await client.query("ROLLBACK"); client.release(); return res.status(400).json({ error: `Bu kayıt #${p.birlestirildi_personel_id} ile birleştirilmiş — ana kaydı kullanın` }); }
     const eskiGir = ymdYerel(p.ise_giris_tarihi) || null, eskiAyr = ymdYerel(p.isten_ayrilma_tarihi) || null;
     // Tekrar istek: aynı giriş tarihiyle dönem zaten açık → ikinci dönem açılmaz
@@ -22357,6 +22359,13 @@ app.post("/hr/personel", personelEkleKapisi, async (req, res) => {
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
       elektrik_isi, yuksekte_calisma, arac_kullanim, marka } = req.body;
+    // 03.11.2026: firma kapsamı OTURUMDAN — alt marka (Teknocenter) hesabı yalnız kendi firmasına personel ekler; istekte başka
+    // firma (ör. ERC / Şimşek) gönderilirse reddedilir. ERC paneli mevcut davranışla (Bordro Şirketi seçimi) devam eder.
+    const _kapP = altMarkaKapsam(req);
+    const _istenenMarka = marka != null && String(marka).trim() ? String(marka).trim().toUpperCase() : null;
+    if (_kapP && _istenenMarka && _istenenMarka !== _kapP.kod)
+      return res.status(403).json({ ok: false, error: `Yalnız kendi firmanıza (${markaProfil(_kapP.kod).ad || _kapP.kod}) personel ekleyebilirsiniz` });
+    const markaFinal = _kapP ? _kapP.kod : (_istenenMarka || "ERC");
     // 15.10.2026: aynı e-postayla ikinci personel açılmaz — mevcut kaydı düzenleyin (409 + mevcut_id)
     const _mail = String(email || "").trim().toLowerCase();
     const adStd = adSoyadStandart(ad_soyad);
@@ -22381,7 +22390,7 @@ app.post("/hr/personel", personelEkleKapisi, async (req, res) => {
        net_maas||0,bankadan_gosterilen||0,elden_verilen||0,iban,banka_adi,banka_hesap_no,
        ekip_bilgisi||null,alt_yuklenici||null,firma_tipi||"simsek",isdp_account||null,iresource_giris||null,
        kkd_zimmet_tarihi||null,mesleki_yeterlilik_durum||null,mesleki_yeterlilik_tarihi||null,
-       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,String(marka||"ERC").toUpperCase()]
+       elektrik_isi||false,yuksekte_calisma||false,arac_kullanim||false,markaFinal]
     );
     if (ekip_bilgisi) await orgPanel.uyelikSenkron(req, r.rows[0].id, null, r.rows[0].ekip_bilgisi, { gerekce: "Yeni personel kaydında ekip seçildi" });
     // Aynı e-postalı sistem hesabı varsa kimlik bağlanır (mükerrer profil oluşmaz)
@@ -22412,6 +22421,17 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       ekip_bilgisi, alt_yuklenici, firma_tipi, isdp_account, iresource_giris,
       kkd_zimmet_tarihi, mesleki_yeterlilik_durum, mesleki_yeterlilik_tarihi,
       elektrik_isi, yuksekte_calisma, arac_kullanim, marka, maas_donem } = req.body;
+    // 03.11.2026: alt marka hesabı yalnız kendi bordro kapsamındaki personeli düzenler ve başka firmaya taşıyamaz (oturumdan)
+    {
+      const _kapP = altMarkaKapsam(req);
+      if (_kapP) {
+        const cur = (await pool.query(`SELECT UPPER(COALESCE(marka,'ERC')) AS m FROM personel WHERE id=$1`, [id])).rows[0];
+        if (!cur) return res.status(404).json({ error: "Personel bulunamadı" });
+        if (!_kapP.bordro.includes(cur.m)) return res.status(403).json({ ok: false, error: "Bu personel başka bir firmaya ait — düzenleme yetkiniz yok" });
+        if (marka != null && String(marka).trim() && !_kapP.bordro.includes(String(marka).trim().toUpperCase()))
+          return res.status(403).json({ ok: false, error: "Personel başka bir firmaya taşınamaz" });
+      }
+    }
     // MAAŞ VERSİYONLAMA: maaş alanları değiştiyse eski değeri taban kaydında
     // koru, yeni değeri seçilen dönemden (maas_donem, yoksa içinde bulunulan ay)
     // itibaren geçerli yap → geçmiş aylar eski maaşla hesaplanmaya devam eder.

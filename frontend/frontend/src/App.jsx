@@ -14550,10 +14550,24 @@ function FinanceHwInvoiceItemsUploadInline({ onClose, onUploaded, sadeceDiger = 
 // ── Tarih alanı GG.AA.YYYY (18.09.2026, Orhan): tarayıcı dili İngilizce olunca <input type="date">
 // AA/GG/YYYY gösteriyordu ve kafa karıştırıyordu. Kullanıcı gün.ay.yıl yazar, değer ISO (YYYY-MM-DD)
 // olarak tutulur; 📅 düğmesi tarayıcının takvimini açar.
+// 03.11.2026 (Orhan — Personel Ekle): takvim artık bileşenin kendi penceresi. Eskiden görünmeyen (1px, odak almayan) yerel
+// tarih alanının showPicker() penceresi açılıyordu; alan odak almadığı için dışarı tıklama algılanmıyor (özellikle Safari) ve
+// pencere açık kalıyordu; Escape de personel formunu kapatıyordu. Şimdi: dışarı tıklayınca yalnız takvim kapanır, Escape önce
+// takvimi kapatır (form açık kalır), ay / yıl gezinmesi kapatmaz, aynı anda tek takvim açık olur. Değer ISO gün metni
+// (yyyy-aa-gg) olarak yazılır — Date / saat dilimi dönüşümü yok, gün kayması olmaz. Görünüm gg.aa.yyyy.
+let _acikTakvimKapat = null;
+// 03.11.2026: personel.firma_tipi "simsek" = şirketin KENDİ kadrolu personeli (maaş / puantaj / İSG şirket listesi bu değere
+// bağlı, değer değişmez); hangi şirket olduğu personel.marka'dadır. Etiket firmaya göre: TEKNO → Teknocenter, AHY → AHY.
+const KADRO_FIRMA_AD = { TEKNO: "Teknocenter", AHY: "AHY" };
+const kadroFirmaAd = (marka) => KADRO_FIRMA_AD[String(marka || "").toUpperCase()] || "Şimşek";
+const TAKVIM_AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 function TarihGirisi({ value, onChange, style, required, placeholder = "gg.aa.yyyy" }) {
   const isoToTr = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v))) ? String(v).slice(0, 10).split("-").reverse().join(".") : "";
   const [metin, setMetin] = useState(isoToTr(value));
-  const gizliRef = useRef(null);
+  const [acik, setAcik] = useState(false);
+  const [goster, setGoster] = useState({ y: 2000, m: 0 });
+  const [konum, setKonum] = useState(null);
+  const kokRef = useRef(null), girisRef = useRef(null), panelRef = useRef(null);
   useEffect(() => { setMetin(isoToTr(value)); }, [value]);
   const trToIso = (t) => {
     const m = String(t || "").trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
@@ -14580,17 +14594,93 @@ function TarihGirisi({ value, onChange, style, required, placeholder = "gg.aa.yy
     if (iso) { onChange(iso); setMetin(isoToTr(iso)); }
     else setMetin(isoToTr(value)); // geçersiz → eski değere dön
   };
+  const kapat = useCallback(() => { setAcik(false); if (_acikTakvimKapat === kapatRef.current) _acikTakvimKapat = null; }, []);
+  const kapatRef = useRef(null); kapatRef.current = kapat;
+  const konumla = useCallback(() => {
+    const r = girisRef.current?.getBoundingClientRect(); if (!r) return;
+    const yuk = 330, gen = 280, altBos = window.innerHeight - r.bottom;
+    setKonum({ left: Math.max(8, Math.min(r.left, window.innerWidth - gen - 8)), top: altBos >= yuk || r.top < yuk ? r.bottom + 4 : r.top - yuk - 4, gen });
+  }, []);
+  const ac = () => {
+    if (acik) return;
+    if (_acikTakvimKapat && _acikTakvimKapat !== kapat) _acikTakvimKapat(); // bir takvimden diğerine geçince önceki kapanır
+    _acikTakvimKapat = kapat;
+    const iso = trToIso(metin) || (value && /^\d{4}-\d{2}-\d{2}/.test(String(value)) ? String(value).slice(0, 10) : null);
+    const bugun = new Date();
+    setGoster(iso ? { y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)) - 1 } : { y: bugun.getFullYear(), m: bugun.getMonth() });
+    konumla(); setAcik(true);
+  };
+  useEffect(() => {
+    if (!acik) return;
+    // Dışarı tıklama: giriş kutusu ve takvim paneli dışındaki her yer yalnız takvimi kapatır (form açık kalır)
+    const disari = (e) => { if (kokRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return; kapat(); };
+    // Escape: pencere düzeyinde YAKALAMA aşamasında — personel formunun (pencere, kabarcık) Escape dinleyicisine ulaşmaz
+    const tus = (e) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); kapat(); girisRef.current?.focus(); } };
+    const yeniden = () => konumla();
+    document.addEventListener("mousedown", disari, true);
+    document.addEventListener("touchstart", disari, true);
+    window.addEventListener("keydown", tus, true);
+    window.addEventListener("resize", yeniden);
+    window.addEventListener("scroll", yeniden, true);
+    return () => {
+      document.removeEventListener("mousedown", disari, true);
+      document.removeEventListener("touchstart", disari, true);
+      window.removeEventListener("keydown", tus, true);
+      window.removeEventListener("resize", yeniden);
+      window.removeEventListener("scroll", yeniden, true);
+    };
+  }, [acik, kapat, konumla]);
+  useEffect(() => () => { if (_acikTakvimKapat === kapatRef.current) _acikTakvimKapat = null; }, []);
+  const sec = (y, m, g) => { const iso = `${y}-${String(m + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`; onChange(iso); setMetin(isoToTr(iso)); kapat(); };
+  const seciliIso = trToIso(metin);
+  const bugunIso = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  const gunSayisi = new Date(goster.y, goster.m + 1, 0).getDate();
+  const bosluk = (new Date(goster.y, goster.m, 1).getDay() + 6) % 7; // haftanın ilk günü Pazartesi
+  const ayDegis = (d) => setGoster((g) => { const t = g.m + d; return { y: g.y + Math.floor(t / 12), m: ((t % 12) + 12) % 12 }; });
+  const yilBas = new Date().getFullYear() + 5;
+  const yillar = Array.from({ length: yilBas - 1930 + 1 }, (_, i) => yilBas - i);
+  const btn = { border: "none", background: "transparent", cursor: "pointer", borderRadius: "6px", fontSize: "14px", padding: "4px 8px", color: "#334155" };
   return (
-    <div style={{ position:"relative" }}>
-      <input type="text" inputMode="numeric" value={metin} placeholder={placeholder} required={required}
-        onChange={e => yaz(e.target.value)} onBlur={bitir}
+    <div ref={kokRef} style={{ position:"relative" }}>
+      <input ref={girisRef} type="text" inputMode="numeric" value={metin} placeholder={placeholder} required={required}
+        onChange={e => yaz(e.target.value)} onBlur={bitir} onClick={ac}
+        aria-haspopup="dialog" aria-expanded={acik}
         style={{ ...(style || {}), paddingRight:"36px" }} />
-      <input ref={gizliRef} type="date" tabIndex={-1} aria-hidden="true" value={value && /^\d{4}-\d{2}-\d{2}/.test(String(value)) ? String(value).slice(0, 10) : ""}
-        onChange={e => onChange(e.target.value)}
-        style={{ position:"absolute", right:"8px", top:"50%", transform:"translateY(-50%)", width:"1px", height:"1px", opacity:0, pointerEvents:"none" }} />
-      <button type="button" title="Takvimden seç" tabIndex={-1}
-        onClick={() => { const el = gizliRef.current; if (!el) return; try { el.showPicker ? el.showPicker() : el.click(); } catch { el.click(); } }}
+      <button type="button" title="Takvimden seç" aria-label="Takvimi aç" tabIndex={-1}
+        onClick={() => (acik ? kapat() : ac())}
         style={{ position:"absolute", right:"6px", top:"50%", transform:"translateY(-50%)", border:"none", background:"transparent", cursor:"pointer", fontSize:"15px", padding:"2px 4px", color:"#64748b" }}>📅</button>
+      {acik && konum && createPortal(
+        <div ref={panelRef} role="dialog" aria-label="Takvim" data-tarih-takvim="1"
+          style={{ position:"fixed", left: konum.left, top: konum.top, width: konum.gen, zIndex: 3000, background:"#fff", border:"1.5px solid #cbd5e1", borderRadius:"12px",
+            boxShadow:"0 12px 30px rgba(15,23,42,0.18)", padding:"10px", boxSizing:"border-box", textAlign:"center", fontFamily:"inherit" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"4px", marginBottom:"6px" }}>
+            <button type="button" style={btn} aria-label="Önceki ay" onClick={() => ayDegis(-1)}>‹</button>
+            <select aria-label="Ay" value={goster.m} onChange={e => setGoster(g => ({ ...g, m: Number(e.target.value) }))}
+              style={{ flex: 1, padding:"4px", border:"1px solid #e2e8f0", borderRadius:"6px", fontSize:"13px", background:"#fff" }}>
+              {TAKVIM_AYLAR.map((a, i) => <option key={a} value={i}>{a}</option>)}
+            </select>
+            <select aria-label="Yıl" value={goster.y} onChange={e => setGoster(g => ({ ...g, y: Number(e.target.value) }))}
+              style={{ width:"78px", padding:"4px", border:"1px solid #e2e8f0", borderRadius:"6px", fontSize:"13px", background:"#fff" }}>
+              {(yillar.includes(goster.y) ? yillar : [goster.y, ...yillar]).map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <button type="button" style={btn} aria-label="Sonraki ay" onClick={() => ayDegis(1)}>›</button>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:"2px", fontSize:"12px" }}>
+            {["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"].map(g => <div key={g} style={{ color:"#94a3b8", fontWeight:700, padding:"3px 0" }}>{g}</div>)}
+            {Array.from({ length: bosluk }, (_, i) => <div key={`b${i}`} />)}
+            {Array.from({ length: gunSayisi }, (_, i) => {
+              const g = i + 1, iso = `${goster.y}-${String(goster.m + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
+              const secili = iso === seciliIso, bugun = iso === bugunIso;
+              return <button key={g} type="button" onClick={() => sec(goster.y, goster.m, g)} aria-label={`${g} ${TAKVIM_AYLAR[goster.m]} ${goster.y}`} aria-pressed={secili}
+                style={{ border: bugun && !secili ? "1px solid #93c5fd" : "1px solid transparent", borderRadius:"7px", padding:"5px 0", cursor:"pointer", fontSize:"12.5px",
+                  background: secili ? "#1e3a5f" : "transparent", color: secili ? "#fff" : "#0f172a", fontWeight: secili || bugun ? 800 : 500 }}>{g}</button>;
+            })}
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:"8px" }}>
+            <button type="button" style={{ ...btn, fontSize:"12px", color:"#1d4ed8", fontWeight:700 }} onClick={() => { const d = new Date(); sec(d.getFullYear(), d.getMonth(), d.getDate()); }}>Bugün</button>
+            <button type="button" style={{ ...btn, fontSize:"12px", color:"#64748b", fontWeight:700 }} onClick={() => { onChange(""); setMetin(""); kapat(); }}>Temizle</button>
+          </div>
+        </div>, document.body)}
     </div>
   );
 }
@@ -22621,7 +22711,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
     const url = editingPersonel ? `${API_BASE}/hr/personel/${editingPersonel.id}` : `${API_BASE}/hr/personel`;
     // Yeni personel, ekleyen kullanıcının markasına yazılır (İK marka izolasyonu)
     // Ad-soyad standardı (19.10.2026): kaydedilen değer de büyük harf; aynı isim uyarısı sunucudan (409 + ayni_isim)
-    const _pBody = { ...pForm, ad_soyad: adSoyadStandart(pForm.ad_soyad), marka: pForm.marka || _hrMarka, ayni_isim_onay: !!ayniIsimOnay };
+    // 03.11.2026: alt marka panelinde (Teknocenter) yeni personel her zaman oturumun firmasına yazılır (form varsayılanı "ERC"
+    // olsa bile); düzenlemede kaydın mevcut firması korunur. Sunucu da oturumdan doğrular.
+    const _pMarka = _hrMarka !== "ERC" ? (editingPersonel ? (pForm.marka || _hrMarka) : _hrMarka) : (pForm.marka || _hrMarka);
+    const _pBody = { ...pForm, ad_soyad: adSoyadStandart(pForm.ad_soyad), marka: _pMarka, ayni_isim_onay: !!ayniIsimOnay };
     // Maaş gizli modda (muhasebe) maaş alanları forma hiç gelmez — mevcut
     // değerler aynen korunur, versiyonlama tetiklenmez
     if (_maasGizli && editingPersonel) {
@@ -22770,7 +22863,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
             {f.ise_giris && f.ise_giris > _bugunYmd && <div style={{ fontSize: "11px", color: "#1d4ed8", marginTop: "3px" }}>İleri tarihli — kadroda "İşe başlayacak" görünür, tarih gelmeden çalışmış sayılmaz</div>}</div>
           <div><label style={lbl}>Unvan</label><input value={f.unvan} onChange={e => setF("unvan", e.target.value)} style={inp} /></div>
           <div><label style={lbl}>Bölge / Proje</label><input value={f.bolge} onChange={e => setF("bolge", e.target.value)} style={inp} /></div>
-          <div><label style={lbl}>Firma</label><select value={f.firma_tipi} onChange={e => setF("firma_tipi", e.target.value)} style={inp}><option value="simsek">Şimşek</option><option value="taseron">Taşeron (sadece ISG)</option></select></div>
+          <div><label style={lbl}>Firma</label><select value={f.firma_tipi} onChange={e => setF("firma_tipi", e.target.value)} style={inp}><option value="simsek">{kadroFirmaAd(f.marka)}</option><option value="taseron">Taşeron (sadece İSG)</option></select></div>
           {_hrMarka === "ERC" && <div><label style={lbl}>Bordro Şirketi</label><select value={f.marka} onChange={e => setF("marka", e.target.value)} style={inp}><option value="ERC">Şimşek</option><option value="TEKNO">Teknocenter</option><option value="AHY">AHY</option></select></div>}
           {!_maasGizli && <>
             <div><label style={lbl}>Net Maaş (₺)</label><input value={f.net_maas} onChange={e => setF("net_maas", e.target.value)} inputMode="decimal" style={{ ...inp, borderColor: maasEksik ? "#fcd34d" : inp.border }} placeholder="boş = bilgi eksik" /></div>
@@ -24969,9 +25062,11 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                       <div>
                         <label style={labelSt}>Firma Tipi</label>
                         {/* Personel Maaş yalnız Şimşek içindir; taşeron personeli ISG/Belgeler'den eklenir */}
-                        <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt}>
-                          <option value="simsek">Şimşek</option>
-                          <option value="taseron">Taşeron (sadece ISG)</option>
+                        {/* 03.11.2026: alt marka (Teknocenter) panelinde kadrolu seçenek kendi firmasıdır; Şimşek görünmez. Firma (marka)
+                            sunucuda oturumdan doğrulanır. Taşeron: yalnız İSG takibi, maaş / puantaj kadrosuna girmez (mevcut kural). */}
+                        <select value={pForm.firma_tipi||"simsek"} onChange={e=>setPForm(f=>({...f,firma_tipi:e.target.value}))} style={inputSt} aria-label="Firma Tipi">
+                          <option value="simsek">{_hrMarka !== "ERC" ? kadroFirmaAd(_hrMarka) : "Şimşek"}</option>
+                          <option value="taseron">Taşeron (sadece İSG)</option>
                         </select>
                       </div>
                       {/* Bordro şirketi (03.09.2026): Şimşek (ERC) / AHY — listedeki rozet ve AHY maaş payı buradan */}
