@@ -10,6 +10,8 @@
 const VARSAYILAN_API = "https://telematik.triomobil.com/fleet/v1";
 const ONBELLEK_MS = 60 * 1000;      // Triomobil'e en çok dakikada bir istek (tüm kullanıcılar aynı yanıtı paylaşır)
 const ZAMAN_ASIMI_MS = 15 * 1000;
+const SAYFA_BOYUTU = 50;   // Swagger: trait:pagination:_perPage maximum 50
+const SAYFA_SINIRI = 20;   // en çok 1000 araç
 
 const ayar = (env = process.env) => ({
   api: String(env.TRIOMOBIL_API || VARSAYILAN_API).replace(/\/+$/, ""),
@@ -77,11 +79,22 @@ async function sonKonumlar({ env = process.env, fetchFn = fetch, simdi = Date.no
     const a = ayar(env);
     try {
       let tok = _token && _token.api === a.api && _token.kullanici === a.kullanici ? _token.deger : await _tokenAl(a, fetchFn);
-      const cagir = (t) => _istek(`${a.api}/reports/vehicle/locations/latest?_perPage=500`, { headers: { Authorization: t, Accept: "application/json" } }, fetchFn);
-      let r = await cagir(tok);
-      if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await cagir(tok); } // süresi dolmuş anahtar: bir kez yenile
-      if (r.durum >= 300 || !Array.isArray(r.govde)) throw new Error(`Triomobil konum raporu alınamadı (HTTP ${r.durum})`);
-      const veri = { ok: true, yapilandirildi: true, zaman: new Date(simdi).toISOString(), araclar: r.govde.map(kayitDuzenle).filter((k) => k.plaka_norm) };
+      // 04.11.2026 canlı düzeltme: bu raporda _perPage en çok 50 (500 → HTTP 400); adres yalnız _pull=location.address ile gelir.
+      // Sayfa sayfa okunur (50'den az dönen sayfa son sayfadır; güvenlik için en çok SAYFA_SINIRI sayfa).
+      const cagir = (t, sayfa) => _istek(`${a.api}/reports/vehicle/locations/latest?_perPage=${SAYFA_BOYUTU}&_page=${sayfa}&_pull=location.address`,
+        { headers: { Authorization: t, Accept: "application/json" } }, fetchFn);
+      const tum = [];
+      for (let sayfa = 1; sayfa <= SAYFA_SINIRI; sayfa++) {
+        let r = await cagir(tok, sayfa);
+        if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await cagir(tok, sayfa); } // süresi dolmuş anahtar: bir kez yenile
+        if (r.durum >= 300 || !Array.isArray(r.govde)) {
+          const ayrinti = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : "";
+          throw new Error(`Triomobil konum raporu alınamadı (HTTP ${r.durum}${ayrinti ? `: ${ayrinti}` : ""})`);
+        }
+        tum.push(...r.govde);
+        if (r.govde.length < SAYFA_BOYUTU) break;
+      }
+      const veri = { ok: true, yapilandirildi: true, zaman: new Date(simdi).toISOString(), araclar: tum.map(kayitDuzenle).filter((k) => k.plaka_norm) };
       _onbellek = { zaman: simdi, veri };
       return veri;
     } catch (e) {
