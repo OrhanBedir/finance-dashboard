@@ -7,6 +7,8 @@ let _token = null;
 let _oturumDustu = null;
 
 export function tokenAyarla(t) { _token = t || null; }
+// Yetkili görsel isteği (ör. rapor fotoğrafı <Image headers>) için: token yalnız bellekten okunur, diske yazılmaz
+export const tokenOku = () => _token;
 export function oturumDustuDinleyicisi(fn) { _oturumDustu = fn; }
 
 async function govdeOku(res) {

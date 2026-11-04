@@ -30,13 +30,14 @@ import { ProfilEkrani } from "../ekranlar/ProfilEkrani";
 import { PersonelDetayEkrani, PersonelYonetimiEkrani, YonetimAnaSayfa } from "../ekranlar/YonetimEkranlari";
 import { TaseronAnaSayfa, TaseronBaglantiYokEkrani, TaseronBelgelerEkrani, TaseronFaturaDetayEkrani, TaseronFaturalarEkrani,
   TaseronHakedisEkrani, TaseronIsDetayEkrani, TaseronIslerEkrani } from "../ekranlar/TaseronEkranlari";
-import { deneyim as deneyimSec } from "../mantik/profil";
+import { TaseronMontajTamamlaEkrani, TaseronSahaDetayEkrani, TaseronSahaEkrani } from "../ekranlar/TaseronSahaEkranlari";
+import { deneyim as deneyimSec, sahaRolu } from "../mantik/profil";
 
 const Yigin = createNativeStackNavigator();
 const Sekme = createBottomTabNavigator();
 
 const IKON = { AnaSayfa: "home", Harcamalar: "wallet", Saha: "navigate", Onaylar: "checkmark-done", Profil: "person-circle",
-  TaseronIsler: "briefcase", TaseronHakedis: "cash", TaseronFaturalar: "receipt" };
+  TaseronIsler: "briefcase", TaseronHakedis: "cash", TaseronFaturalar: "receipt", TaseronSaha: "map" };
 const sekmeSecenek = ({ route }) => ({
   headerShown: false,
   tabBarActiveTintColor: renk.lacivert,
@@ -46,10 +47,25 @@ const sekmeSecenek = ({ route }) => ({
   tabBarIcon: ({ color, focused, size }) => <Ionicons name={focused ? IKON[route.name] : `${IKON[route.name]}-outline`} size={size} color={color} />,
 });
 
+// 04.11.2026: firma sorumlusu (ve üyeliği tanımlanmamış firma hesabı) = mevcut taşeron paneli + Sahalar sekmesi.
+// Ekip çalışanı yalnız Sahalar + Profil görür (fiyat / hakediş / fatura sekmesi yok; sunucu da bu uçları 403 yapar).
 function TaseronSekmeleri() {
+  const { kullanici } = useOturum();
+  const rol = sahaRolu(kullanici);
+  if (rol === "CALISAN") {
+    return (
+      <Sekme.Navigator screenOptions={sekmeSecenek}>
+        <Sekme.Screen name="TaseronSaha" component={TaseronSahaEkrani} options={{ title: "Sahalar" }} />
+        <Sekme.Screen name="Profil" component={ProfilEkrani} />
+      </Sekme.Navigator>
+    );
+  }
+  if (rol === "KAPALI") return <BagsizSekmeleri />;
   return (
     <Sekme.Navigator screenOptions={sekmeSecenek}>
-      <Sekme.Screen name="AnaSayfa" component={TaseronAnaSayfa} options={{ title: "Ana sayfa" }} />
+      {/* 6 sekmede "Ana sayfa" kısalıp kesiliyordu → "Özet" */}
+      <Sekme.Screen name="AnaSayfa" component={TaseronAnaSayfa} options={{ title: "Özet" }} />
+      <Sekme.Screen name="TaseronSaha" component={TaseronSahaEkrani} options={{ title: "Sahalar" }} />
       <Sekme.Screen name="TaseronIsler" component={TaseronIslerEkrani} options={{ title: "İşler" }} />
       <Sekme.Screen name="TaseronHakedis" component={TaseronHakedisEkrani} options={{ title: "Hakediş" }} />
       <Sekme.Screen name="TaseronFaturalar" component={TaseronFaturalarEkrani} options={{ title: "Faturalar" }} />
@@ -101,6 +117,8 @@ export function Navigasyon() {
           <Yigin.Screen name="TaseronIsDetay" component={TaseronIsDetayEkrani} />
           <Yigin.Screen name="TaseronFaturaDetay" component={TaseronFaturaDetayEkrani} />
           <Yigin.Screen name="TaseronBelgeler" component={TaseronBelgelerEkrani} />
+          <Yigin.Screen name="TaseronSahaDetay" component={TaseronSahaDetayEkrani} />
+          <Yigin.Screen name="TaseronMontajTamamla" component={TaseronMontajTamamlaEkrani} options={{ gestureEnabled: false }} />
         </Yigin.Navigator>
       </NavigationContainer>
     );

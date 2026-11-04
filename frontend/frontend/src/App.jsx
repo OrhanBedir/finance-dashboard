@@ -17,6 +17,7 @@ import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK, planAdayi, planAdayUygun } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
+import { TaseronSahaRaporlari, TaseronSahaRaporModal } from "./TaseronSahaRaporlari.jsx"; // 04.11.2026: taşeron saha raporları (Teknocenter inceleme / PR durumu)
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -9291,6 +9292,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                       <div className="rhmap-k">{k.taseron}{k.pr_miktar != null ? ` · PR ${k.pr_miktar}` : ""} · fiziki {k.fiziki_miktar != null ? k.fiziki_miktar : "girilmemiş"}{k.qc ? ` · QC ${k.qc}` : ""}{k.onair ? ` · on-air ${k.onair}` : ""}{k.boq_surum ? ` · ${k.boq_surum}` : ""}</div></div>)}
                   </div>}
                   {i.belgeler.length > 0 && <div style={{ marginTop: 6, fontSize: 14.5 }}><b>Belgeler: </b>{i.belgeler.map((b, n) => <a key={n} href={b.url} target="_blank" rel="noreferrer" style={{ marginRight: 10 }}>{b.ad}</a>)}</div>}
+                  <TaseronSahaRaporlari kod={i.site_code} />
                 </div>)}
               </>}
             </div>}
@@ -9312,6 +9314,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   const [showIsAtama, setShowIsAtama] = useState(false);
   const [showHarita, setShowHarita] = useState(false); // 28.10.2026: Rollout saha haritası (salt görüntüleme)
   const [showHaftalik, setShowHaftalik] = useState(false); // 31.10.2026: Rollout Weekly Plan
+  const [showTaseronRapor, setShowTaseronRapor] = useState(false); // 04.11.2026: taşeron saha raporları
   const [isAtamaBaslangic, setIsAtamaBaslangic] = useState(null); // iş kolu görünümünden ön dolu atama
   const [isAtamaYetkili, setIsAtamaYetkili] = useState(false);
   // İş kolu görünümü (03.09.2026): NS sahalarda saha × iş kolu; filtre seçiliyse liste modu
@@ -9994,6 +9997,12 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
             📅 Teknocenter Weekly Plan
           </button>}
           {showHaftalik && <RolloutHaftalikModal onClose={() => setShowHaftalik(false)} />}
+          {/* 04.11.2026: taşeron saha raporları — İş Ata yetkilisi ya da Rollout görüntüleme izni (sunucu da denetler) */}
+          {(isAtamaYetkili || currentUser?.izinler?.rollout_goruntule === true) && <button type="button" onClick={() => setShowTaseronRapor(true)} title="Taşeron montaj tamamlama / kısmi iş raporları, PR durumu"
+            style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
+            🧾 Taşeron Raporları
+          </button>}
+          {showTaseronRapor && <TaseronSahaRaporModal onClose={() => setShowTaseronRapor(false)} />}
         </div>
       </div>
       {firmaSecim.length > 0 && (

@@ -593,6 +593,8 @@ const hwMalzeme = require("./hwMalzeme"); // 31.10.2026: HW (Huawei) saha malzem
 const fiiliDurum = require("./fiiliDurum"); // 31.10.2026: fiilî çalışma durumu (QC'den bağımsız fiziksel montaj)
 const operasyon = require("./operasyon"); // 31.10.2026: Rollout Weekly Plan, ekipler nerede, fiilî bildirim
 const planSenkron = require("./planSenkron");
+const taseronSaha = require("./taseronSaha"); // 04.11.2026: taşeron saha operasyonu (Sahalarım / Harita / Montaja Başla / Tamamla)
+taseronSaha.semaKur(pool).catch((e) => console.error("[taşeron saha]", e.message));
 const mobilIsAtama = require("./mobilIsAtama"); // 03.11.2026: mobil İş Atama uçları (aynı is_atama kayıtları / yetki / kurallar) // 02.11.2026: plan ↔ mobil iş ataması senkronu (ulaşım, idempotent, devir, inceleme)
 const malzemeStok = require("./malzemeStok"); // 29.10.2026: sarf malzeme stok defteri (tek hareket kaynağı)
 const malzemeKatalog = require("./malzemeKatalog"); // 29.10.2026: malzeme kataloğu (fiyatsız), BoQ içe alma, Teknocenter talep kapsamı // 28.10.2026: harita iş yılı / durumu (atanan · devam · tamamlanan)
@@ -1085,6 +1087,8 @@ app.use((req, res, next) => {
     return res.status(403).json({ ok: false, error: "Taşeron hesabı bu işlemi yapamaz" });
   next();
 });
+// 04.11.2026: taşeron ÇALIŞAN hesabı (taseron_saha_uye.rol='CALISAN') firma özeti / iş fiyatı / hakediş / fatura uçlarına giremez
+app.use(taseronSaha.calisanKapisi(pool));
 
 // ═══ İSG SORUMLUSU ROLÜ (21.10.2026, Orhan) — role='isg' ════════════════════════════════════════
 // Kişiye / e-postaya özel değil: izinler ROLDEN gelir, ileride işe alınan her İSG sorumlusuna aynı rol atanır.
@@ -1224,8 +1228,12 @@ async function oturumProfilAlanlari(userId) {
   const pr = await omnixProfil.profilOku(pool, userId).catch(() => ({}));
   const t = pr.kullanici_tipi === "TASERON" ? await omnixProfil.taseronBilgi(pool, pr.taseron_id).catch(() => null) : null;
   return { kullanici_tipi: pr.kullanici_tipi || null, yonetim_profili: pr.kullanici_tipi === "TASERON" ? null : (pr.yonetim_profili || null),
-    taseron: t ? { id: t.id, ad: t.unvan || t.subcon_name, aktif: t.aktif } : null };
+    taseron: t ? { id: t.id, ad: t.unvan || t.subcon_name, aktif: t.aktif } : null,
+    // 04.11.2026: saha ekranı rolü (SORUMLU / CALISAN / KAPALI) — mobil sekme seçimi; yetki her uçta sunucuda
+    taseron_saha: t ? await taseronSaha.sahaRolu(pool, userId, t.id).catch(() => null) : null };
 }
+// 04.11.2026: taşeron hesabının oturum yanıtında ödeme oranı / marka payı yok (taşeron ve çalışanları görmez)
+const taseronOturumTemizle = (user) => { if (user?.kullanici_tipi === "TASERON") { delete user.payment_rate; delete user.marka_pay; } return user; };
 const kayitliRol = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.rol || null;
 const kayitliProfil = (u) => u?.yonetim_profili || _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.profil || null;
 const kayitliId = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.id || 0;
@@ -1793,6 +1801,7 @@ const FIYAT_YOL_ANAHTARLARI = [
   [/^\/malzeme(\/|$)/, ["toplam_tutar"]],
   [/^\/is-atama(\/|$)/, ["fiyat"]],
   [/^\/taseron-panel(\/|$)/, ["fiyat", "tutar", "hesap"]],
+  [/^\/taseron-saha(\/|$)/, ["fiyat", "tutar", "hesap", "hakedis"]],
   [/^\/master\/saha-kalemler\/kaydet$/, ["surum_catisma"]],
   [/^\/dashboard\/summary$/, ["summary"]],
 ];
@@ -3361,7 +3370,7 @@ app.post("/auth/login", async (req, res) => {
     return res.json({
       ok: true,
       token,
-      user: {
+      user: taseronOturumTemizle({
         ..._profil, // 25.10.2026: mobil deneyim seçimi ilk girişte de doğru gelsin
         id: user.id,
         name: user.name,
@@ -3380,7 +3389,7 @@ app.post("/auth/login", async (req, res) => {
         // (menüde Rollout yok); yalnız sayfa yenilenince (/auth/me) düzeliyordu, mobil hiç düzelmiyordu
         ...((() => { const iz = etkinIzinHesapla({ ...user, yonetim_profili: _profil.yonetim_profili, hw_yukleme: hwYukleme }, user.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()), // rol + kullanıcı yetki ayarı
         onay: await onayPanel.onayOzeti({ user: { user_id: user.id, email: user.email, role: user.role } }).catch(() => null),
-      },
+      }),
     });
   } catch (err) {
     console.error("AUTH LOGIN ERROR:", err);
@@ -3424,7 +3433,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       } catch {}
     }
     const _mp = markaKod && !hwYukleme ? markaProfil(markaKod) : null;
-    res.json({ ok: true, user: {
+    res.json({ ok: true, user: taseronOturumTemizle({
       id: u.id, name: u.name, email: u.email, role: u.role,
       subcon_name: u.subcon_name, payment_rate: Number(u.payment_rate || 0.8),
       tenant: userTenant, tenant_name: tenantName,
@@ -3436,7 +3445,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
         const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili, hw_yukleme: hwYukleme }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
       // Onay yetkisi özeti (eski listeler + tarihli devirler): mobil "Onaylar" sekmesi ilk çizimden itibaren doğru olsun
       onay: await onayPanel.onayOzeti({ user: { user_id: u.id, email: u.email, role: u.role } }).catch(() => null),
-    }});
+    })});
   } catch (e) {
     console.error("AUTH ME ERROR:", e.message);
     res.status(500).json({ ok: false, error: "Oturum bilgisi alınamadı" });
@@ -15439,10 +15448,10 @@ async function isAtamaRolloutNotYaz(siteCodes, satir) {
 }
 const isAtamaPersonelIcinde = (row, email) =>
   (Array.isArray(row?.personeller) ? row.personeller : []).some((p) => String(p?.email || "").toLowerCase() === email);
-// Belirtilen sahalarda tarih kolonunu (boşsa) bugünle doldur — tüm site_type satırları
-async function isAtamaRolloutTarihYaz(siteCodes, kolon) {
+// Belirtilen sahalarda tarih kolonunu (boşsa) bugünle doldur — tüm site_type satırları. db: işlem istemcisi (isteğe bağlı)
+async function isAtamaRolloutTarihYaz(siteCodes, kolon, db = pool) {
   if (!kolon || !IS_ATAMA_KOLON_LISTESI.has(kolon) || !siteCodes.length) return;
-  await pool.query(
+  await db.query(
     `UPDATE rollout_progress SET ${kolon} = COALESCE(${kolon}, CURRENT_DATE), updated_at = NOW()
      WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [siteCodes]);
 }
@@ -15508,6 +15517,15 @@ const omnixPanel = omnixProfil.kur(app, {
     return (x) => String(x.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(x.subcon_name);
   },
 });
+// 04.11.2026: taşeron saha operasyonu (/taseron-saha/*) — firma kapsamı omnixProfil.taseronKapsami, montaj yazımı ortak Rollout yolu
+taseronSaha.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPanel.taseronKapsami(...a), planSenkron, fiiliDurum, sahaKimlik,
+  islemGecmisiYaz: (...a) => islemGecmisiYaz(...a), isAtamaRolloutTarihYaz: (...a) => isAtamaRolloutTarihYaz(...a), ROLLOUT_IS_KOLU_ALANLARI, rolloutFirmaAdi, firmaKatla,
+  isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a), taseronMu: (...a) => taseronMu(...a), mobilKonum, ozelYukle, ozelIndir, ozelSil,
+  altMarkaKullanicisi: (...a) => altMarkaKullanicisi(...a),
+  kapsamIsKodlari: async (req) => {
+    const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0], mesaj: fs.hata[1] });
+    const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM); return { kodlar: new Set([...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) }; },
+  firmaYonetebilir: async (req, t) => { const K = await rolloutKapsam(req); return !K || String(t.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(t.subcon_name); } });
 // Tarihli onay devri + mobil "Onaylar" listesi (/onay/bekleyen) + admin devir tanımları. Eski e-posta listeleri
 // (AVANS_YETKI, MASRAF_*_MAIL) dosyanın ilerisinde tanımlıdır; yalnız istek anında okunur.
 const onayPanel = onayDevri.kur(app, {

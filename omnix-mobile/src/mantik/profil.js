@@ -11,4 +11,11 @@ export function deneyim(k) {
   return "personel";
 }
 
+// Taşeron saha rolü (/auth/me → taseron_saha): SORUMLU | CALISAN | KAPALI. Alan yoksa (eski sunucu) firma sorumlusu varsayılır —
+// yetki her uçta sunucuda ayrıca doğrulanır; burada yalnız sekme seçimi yapılır.
+export function sahaRolu(k) {
+  const r = k?.taseron_saha?.rol;
+  return r === "CALISAN" || r === "KAPALI" ? r : "SORUMLU";
+}
+
 export const profilAdi = (k) => ({ SAHIP: "Şirket sahibi", YONETICI: "Yönetici" }[k?.yonetim_profili] || null);

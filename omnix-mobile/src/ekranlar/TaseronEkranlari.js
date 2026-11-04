@@ -92,7 +92,7 @@ export function TaseronAnaSayfa({ navigation }) {
           ) : null}
           <BolumBasligi baslik="Hızlı erişim" />
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
-            {[["briefcase-outline", "Atanan işler", "TaseronIsler"], ["cash-outline", "Hakedişlerim", "TaseronHakedis"],
+            {[["map-outline", "Sahalar", "TaseronSaha"], ["briefcase-outline", "Atanan işler", "TaseronIsler"], ["cash-outline", "Hakedişlerim", "TaseronHakedis"],
               ["receipt-outline", "Faturalar", "TaseronFaturalar"], ["folder-open-outline", "Belgeler", "TaseronBelgeler"]].map(([ikon, ad, ekran]) => (
               <Kart key={ekran} onPress={() => navigation.navigate(ekran)} style={{ width: "48.5%", flexGrow: 1, flexBasis: "45%" }} erisimEtiketi={ad}>
                 <IkonKutu ad={ikon} />

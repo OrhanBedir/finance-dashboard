@@ -126,7 +126,9 @@ function IkonDugme({ ad, onPress, etiket, renkAdi = renk.lacivert, zemin }) {
 }
 
 // ── Harita tuvali: SVG il haritası + pinler + yaklaşık il balonları; sürükle / iki parmakla yakınlaştır ─────────────────────
-function HaritaTuvali({ k, sahalar, secili, onSaha, onIl, aktifIller, alt, toplam, onListe, benimGoster }) {
+// 04.11.2026: taşeron saha ekranı da kullanır — lejant: [{ renk, ad }] (verilmezse saha durum renkleri), yaklasikLejant=false:
+// "Yaklaşık (il)" lejantı gösterilmez (taşeron ekranında konumsuz iş haritaya hiç girmez)
+export function HaritaTuvali({ k, sahalar, secili, onSaha, onIl, aktifIller, alt, toplam, onListe, benimGoster, lejant, yaklasikLejant = true }) {
   const [boyut, setBoyut] = useState(null);
   const kutuRef = useRef(null);
   const oran = boyut ? boyut.w / boyut.h : 0;
@@ -277,16 +279,18 @@ function HaritaTuvali({ k, sahalar, secili, onSaha, onIl, aktifIller, alt, topla
             </Pressable>
           </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 8, gap: 10 }}>
-            {PIN_SIRA.map((r) => (
-              <View key={r} style={{ flexDirection: "row", alignItems: "center" }}>
-                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: PIN_RENK[r], marginRight: 5 }} />
-                <Metin tur="minik" renk={renk.metinIkincil}>{PIN_AD[r]}</Metin>
+            {(lejant || PIN_SIRA.map((r) => ({ renk: r, ad: PIN_AD[r] }))).map((l) => (
+              <View key={l.renk} style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: PIN_RENK[l.renk], marginRight: 5 }} />
+                <Metin tur="minik" renk={renk.metinIkincil}>{l.ad}</Metin>
               </View>
             ))}
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderStyle: "dashed", borderColor: renk.metinSoluk, marginRight: 5 }} />
-              <Metin tur="minik" renk={renk.metinIkincil}>Yaklaşık (il)</Metin>
-            </View>
+            {yaklasikLejant ? (
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderStyle: "dashed", borderColor: renk.metinSoluk, marginRight: 5 }} />
+                <Metin tur="minik" renk={renk.metinIkincil}>Yaklaşık (il)</Metin>
+              </View>
+            ) : null}
             {benimGoster ? (
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: renk.altin, marginRight: 5 }} />

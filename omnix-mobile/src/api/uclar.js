@@ -127,6 +127,17 @@ export const taseronPanelApi = {
   basla: (id) => api.post(`/is-atama/${id}/basla`, {}),
   bitir: (id, not) => api.post(`/is-atama/${id}/bitir`, { tamamlandi: true, not: not || null }),
 };
+// 04.11.2026: taşeron saha operasyonu — Sahalarım / Harita / iş detayı / Montaja Başla / Montajı Tamamla.
+// Kapsam (firma + ekip) sunucuda; her yazma isteği istek_anahtari taşır (çift dokunuş / yeniden gönderim tek kayıt).
+export const taseronSahaApi = {
+  isler: () => api.get("/taseron-saha/isler", { zamanAsimiMs: 60000 }),
+  is: (kod) => api.get(`/taseron-saha/is/${kodla(kod)}`),
+  basla: (kod, istekAnahtari) => api.post(`/taseron-saha/is/${kodla(kod)}/basla`, { onay_kod: kod, istek_anahtari: istekAnahtari }),
+  tamamla: (kod, govde) => api.post(`/taseron-saha/is/${kodla(kod)}/tamamla`, govde),
+  duzelt: (id, govde) => api.put(`/taseron-saha/bildirim/${id}`, govde),
+  fotoYukle: (id, foto, istekAnahtari) => api.yukle(`/taseron-saha/bildirim/${id}/foto`, foto, { istek_anahtari: istekAnahtari, ad: foto.etiket }),
+  fotoYolu: (id, fid) => `/taseron-saha/bildirim/${id}/foto/${fid}`,
+};
 
 // Clean Up (rollout): saha başına eksik kalemler, kalem başına önce/sonra fotoğrafı, onaya gönderme ve bölge onayı.
 // Saha kodu boşluksuz büyük harf (backend aynı biçime çevirir). Onay yetkisi kayıt satırındaki onay_yetkim'den okunur.
