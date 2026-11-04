@@ -320,6 +320,10 @@ const ALT_MARKA_VARSAYILAN = [
   { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-14", bitis: null,         pay: 0.90, devralinan: "AHY" },
 ];
 let ALT_MARKALAR = ALT_MARKA_VARSAYILAN.map((x) => ({ ...x }));
+// 04.11.2026 (Orhan — anlaşma): maaş sorumluluğunun başladığı gün operasyon devrinden ayrı olabilir. Teknocenter 01.10.2026'dan
+// itibaren TÜM maaşları öder → Ekim maaşı Teknocenter'da tam (14.10 yarım ay kuralı maaşa uygulanmaz). İş / fatura / avans /
+// nakit penceresi markanın devir tarihinde (14.10) kalır; yalnız maaş tahakkuku (pay oranı, puantaj günleri) bu tarihi kullanır.
+const MAAS_DEVIR_OZEL = { TEKNO: "2026-10-01" };
 const _ertesiGun = (d) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
 function altMarka(kod) {
   const k = String(kod || "").trim().toUpperCase();
@@ -332,7 +336,9 @@ function markaProfil(kod) {
   const bordro = [m.kod];
   let d = m.devralinan, guard = 0;
   while (d && guard++ < 5) { if (!bordro.includes(d)) bordro.push(d); d = altMarka(d)?.devralinan || null; }
-  return { ...m, son: m.bitis ? _ertesiGun(m.bitis) : "9999-12-31", devirAy: m.devir.slice(0, 7), devirGun: Number(m.devir.slice(8, 10)), bordro };
+  const maasDevir = MAAS_DEVIR_OZEL[m.kod] || m.devir;
+  return { ...m, son: m.bitis ? _ertesiGun(m.bitis) : "9999-12-31", devirAy: m.devir.slice(0, 7), devirGun: Number(m.devir.slice(8, 10)), bordro,
+    maasDevir, maasDevirAy: maasDevir.slice(0, 7), maasDevirGun: Number(maasDevir.slice(8, 10)) };
 }
 const altMarkaKodlari = () => ALT_MARKALAR.map((m) => m.kod);
 const altMarkaMi = (kod) => !!altMarka(kod);
@@ -1576,7 +1582,7 @@ function teknoOncesiMaasDonemi(req) {
   const k = req?.izinler?.mali_kapsam;
   if (!k || k === "ERC" || req.izinler.maas_goruntule !== true) return false;
   const donem = String(req.query?.donem || (req.query?.yil && req.query?.ay ? `${req.query.yil}-${String(req.query.ay).padStart(2, "0")}` : "") || "");
-  return /^\d{4}-\d{2}$/.test(donem) && donem < markaProfil(k).devirAy;
+  return /^\d{4}-\d{2}$/.test(donem) && donem < markaProfil(k).maasDevirAy;
 }
 // Kapsamlı maaş yetkilisinin (ör. İlhami — TEKNO) maaşını görebildiği personel = bordro markası kapsam markası olan kadro
 // (29.10.2026, Orhan kararı: devirle TEKNO bordrosuna geçen kadro da dahil). HARİÇ: personel kartı yönetim / backofis rolündeki
@@ -2052,7 +2058,7 @@ app.get("/finance/hedef-firmalar", authMiddleware, async (req, res) => {
   try {
     const liste = await hedefFirmalari(req.user);
     const rol = String(req.user?.role || "").toLowerCase();
-    const rows = MARKA_KASA_ROLLER.includes(rol) ? liste.map((kod) => { const P = markaProfil(kod); return { kod: P.kod, ad: P.ad, devir: P.devir, bitis: P.bitis || null }; }) : [];
+    const rows = MARKA_KASA_ROLLER.includes(rol) ? liste.map((kod) => { const P = markaProfil(kod); return { kod: P.kod, ad: P.ad, devir: P.devir, maas_devir: P.maasDevir, bitis: P.bitis || null }; }) : [];
     res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ ok: false, error: "Firma listesi alınamadı" }); }
 });
@@ -3339,7 +3345,7 @@ app.post("/auth/login", async (req, res) => {
     }
     const _mp = markaKod && !hwYukleme ? markaProfil(markaKod) : null;
     const markaProfilAlanlari = _mp
-      ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay }
+      ? { marka_devir: _mp.devir, marka_maas_devir: _mp.maasDevir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay }
       : {};
 
     const token = jwt.sign(
@@ -3439,7 +3445,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
       users_admin: u.users_admin === true,
       ...(await oturumProfilAlanlari(u.id)), // mobil deneyim seçimi (personel / yönetim / taşeron)
-      ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
+      ...(_mp ? { marka_devir: _mp.devir, marka_maas_devir: _mp.maasDevir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
       ...(await (async () => { const pr = await omnixProfil.profilOku(pool, u.id).catch(() => ({}));
         const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili, hw_yukleme: hwYukleme }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
       // Onay yetkisi özeti (eski listeler + tarihli devirler): mobil "Onaylar" sekmesi ilk çizimden itibaren doğru olsun
@@ -10028,7 +10034,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const donemler = [];
       // AHY: Haziran'dan başla — devirden (15.07) SONRA ödenmiş eski dönem
       // avansları fazla ödeme olarak Temmuz'a devretsin (İK getDevirFazla kuralı)
-      const [dy0, dm0] = P.devirAy.split("-").map(Number);
+      const [dy0, dm0] = P.maasDevirAy.split("-").map(Number);
       let dd = marka === "AHY" ? new Date(Date.UTC(2026, 5, 1)) : new Date(Date.UTC(dy0, dm0 - 1, 1));
       const sonAy = P.bitis ? P.bitis.slice(0, 7) : "9999-12"; // bitmiş marka (AHY) son dönemini aşmaz
       while (dd.toISOString().slice(0, 7) < buAyStr && dd.toISOString().slice(0, 7) <= sonAy) {
@@ -10090,8 +10096,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           // Devir ayı kuralı: devirden önceki dönem markanın değil; ay ortası devirde
           // (AHY 15.07) o ay yarım, devirden sonra işe girenlerde tam. Ay başı devirde
           // (TEKNO 01.10) ilk ay tam.
-          if (donem < P.devirAy) oran = 0;
-          else if (donem === P.devirAy && P.devirGun > 1) oran = (gStr && gStr >= P.devir) ? 1 : 0.5;
+          // Maaş devri (MAAS_DEVIR_OZEL): TEKNO 01.10 → Ekim tam
+          if (donem < P.maasDevirAy) oran = 0;
+          else if (donem === P.maasDevirAy && P.maasDevirGun > 1) oran = (gStr && gStr >= P.maasDevir) ? 1 : 0.5;
           let hak = Math.round(hakedilen * oran);
           // Ay ortası (2-14.07) girişlilerde anlaşma (17.08.2026): AHY payı tam
           // maaşın yarısı (ör. 55.000 → 27.500), hakedişi aşamaz — İK ekranıyla aynı.

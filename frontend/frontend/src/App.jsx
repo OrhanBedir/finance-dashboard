@@ -2191,7 +2191,7 @@ function MarkaMutabakatBolumu({ marka, markaAd, yenile, onDegisti }) {
 // her istek marka parametresiyle gider ve sunucuda hedef firma hakkı doğrulanır. Firma değişiminde bileşen anahtarla yeniden kurulur.
 function MarkaNakitPanel({ currentUser: oturumKullanici, hedefFirma = null, baslangicAy = null, onFormDurumu = null, gomulu = false }) {
   const currentUser = hedefFirma
-    ? { ...oturumKullanici, marka: hedefFirma.kod, marka_ad: hedefFirma.ad, marka_devir: hedefFirma.devir, marka_bitis: hedefFirma.bitis }
+    ? { ...oturumKullanici, marka: hedefFirma.kod, marka_ad: hedefFirma.ad, marka_devir: hedefFirma.devir, marka_maas_devir: hedefFirma.maas_devir || hedefFirma.devir, marka_bitis: hedefFirma.bitis }
     : oturumKullanici;
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -22304,6 +22304,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Devir penceresi kullanıcının markasından gelir (AHY 15.07.2026, TEKNO 01.10.2026);
   // bordro kapsamı devralınan markayı da içerir (TEKNO → AHY kadrosu).
   const AHY_DEVIR = currentUser?.marka_devir || "2026-07-15";
+  // 04.11.2026 (Orhan — anlaşma): maaş sorumluluğu başlangıcı ayrı — Teknocenter 01.10.2026'dan itibaren tüm maaşları öder
+  // (operasyon devri 14.10). Maaş payı, puantaj günleri ve maaş kadrosu bu tarihle; ödeme sahipliği (tarih kuralı) AHY_DEVIR ile kalır.
+  const MAAS_DEVIR = currentUser?.marka_maas_devir || AHY_DEVIR;
   const AHY_BITIS = currentUser?.marka_bitis || null;
   const _hrBordro = kullaniciBordro(currentUser);
   const _hrVarsayilanFirma = _hrMarka === "ERC" ? GUNCEL_ALT_MARKA : _hrMarka; // yeni kayıt varsayılanı
@@ -22315,7 +22318,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
       if (p.aktif) return true;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
-      return giris >= AHY_DEVIR || (ayrilma && ayrilma >= AHY_DEVIR);
+      return giris >= MAAS_DEVIR || (ayrilma && ayrilma >= MAAS_DEVIR);
     });
   };
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
@@ -23290,20 +23293,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Puantaj yardımcıları — AHY görünümünde devir (15 Temmuz 2026) öncesi günler gösterilmez
   const [yilStr, ayStr] = puantajAy.split("-");
   const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1)
-    .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= AHY_DEVIR);
+    .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= MAAS_DEVIR);
   // AHY maaş sorumluluğu devirle (15.07.2026) başlar: devir öncesi aylar ERC'nin
   // (AHY görmez/ödemez), Temmuz 2026'da 15 öncesi girişlilerde pay %50 (backend
   // marka-pl ile aynı kural), 15.07+ girişlilerde ve sonraki aylarda tam.
   const ahyMaasOran = (p) => {
     if (_hrMarka === "ERC") return 1;
     const ayKey = `${yilStr}-${ayStr}`;
-    const devirAy = AHY_DEVIR.slice(0, 7);
+    const devirAy = MAAS_DEVIR.slice(0, 7);
     if (ayKey < devirAy) return 0;
     if (AHY_BITIS && ayKey > AHY_BITIS.slice(0, 7)) return 0; // bitmiş marka (AHY) sonraki ayları ödemez
     if (ayKey > devirAy) return 1;
-    if (Number(AHY_DEVIR.slice(8, 10)) <= 1) return 1;       // ay başı devir (TEKNO 01.10): ilk ay tam
+    if (Number(MAAS_DEVIR.slice(8, 10)) <= 1) return 1;      // ay başı maaş devri (TEKNO 01.10): ilk ay tam
     const giris = ikDonemTarih(p).giris;
-    if (giris && giris >= AHY_DEVIR) return 1;
+    if (giris && giris >= MAAS_DEVIR) return 1;
     return 0.5;
   };
   // AHY maaş payı (tutar): anlaşma gereği devir öncesi girişlilerde tam aylık
@@ -24126,7 +24129,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                             ₺{Math.round(personelList.filter(p=>puantajIstihdam(p) && !p.bilgi_eksik).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>
-                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${AHY_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
+                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${MAAS_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
                           </span>
                         </div>
                         <div style={labelSt}>
@@ -24215,7 +24218,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                     if (_hrMarka !== "ERC" && puantajAy < "2026-07") {
                       return (
                         <div style={{ marginTop:"14px", background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:"12px", padding:"16px 20px", fontSize:"13.5px", color:"#92400e", fontWeight:600 }}>
-                          🔒 {ayAdi} {yilStr} — devir ({AHY_DEVIR.split("-").reverse().join(".")}) öncesi dönem. Bu dönemin maaş ödemeleri {altMarkaKisa(_hrMarka)} sorumluluğunda değildir; {altMarkaKisa(_hrMarka)} panelinde gösterilmez.
+                          🔒 {ayAdi} {yilStr} — devir ({MAAS_DEVIR.split("-").reverse().join(".")}) öncesi dönem. Bu dönemin maaş ödemeleri {altMarkaKisa(_hrMarka)} sorumluluğunda değildir; {altMarkaKisa(_hrMarka)} panelinde gösterilmez.
                         </div>
                       );
                     }
