@@ -80,6 +80,8 @@ const KODLAR = ["BU8001_NR700", "BU8002_NR700", "BU8003_NR700", "BU8004_NR700", 
   await rp("BU8010_NR700", { rf_subcon: "TEKNO_EMRAH", qc_durum: "NOK", installation_actual_start_date: "2026-10-25", installation_actual_end_date: "2026-10-27" });
   // Günlük İş kalemi (fiyatlı — yanıtta görünmemeli)
   await q(`INSERT INTO master_works (site_code, site_type, item_code, item_description, subcon_name, unit_price, done_qty) VALUES ('BU8009_NR700','5G','8818000001','Anten montajı','TEKNO_2KX', 99999, 1)`);
+  // İş atamaları (montaj — ekipli). ekip_no / taseron_id sunucuda ilk plan / atama isteğinde eklenir; temiz veritabanında önceden açılır
+  await q(`ALTER TABLE is_atama ADD COLUMN IF NOT EXISTS ekip_no INTEGER, ADD COLUMN IF NOT EXISTS taseron_id INTEGER`);
   // İş atamaları (montaj — ekipli)
   const at = (sc, ekip, firma) => q(`INSERT INTO is_atama (kategori, site_codes, bolge, personeller, plan_tarihi, atayan_email, atayan_ad, durum, ekip_no, taseron_id)
     VALUES ('NEW_SITE', $1, 'Bursa', '[]'::jsonb, CURRENT_DATE, 'tekno.yonetici@teknocenter.test', 'Tekno Yönetici', 'ATANDI', $2, $3)`, [[sc], ekip, id[firma]]);

@@ -1240,7 +1240,7 @@ async function oturumProfilAlanlari(userId) {
     taseron_saha: t ? await taseronSaha.sahaRolu(pool, userId, t.id).catch(() => null) : null };
 }
 // 04.11.2026: taşeron hesabının oturum yanıtında ödeme oranı / marka payı yok (taşeron ve çalışanları görmez)
-const taseronOturumTemizle = (user) => { if (user?.kullanici_tipi === "TASERON") { delete user.payment_rate; delete user.marka_pay; } return user; };
+const taseronOturumTemizle = (user) => { if (user?.kullanici_tipi === "TASERON") { delete user.payment_rate; delete user.marka_pay; delete user.marka_maas_devir; } return user; };
 const kayitliRol = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.rol || null;
 const kayitliProfil = (u) => u?.yonetim_profili || _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.profil || null;
 const kayitliId = (u) => _yetkiOnbellek.get(String(u?.email || "").toLowerCase().trim())?.id || 0;
