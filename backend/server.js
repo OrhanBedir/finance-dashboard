@@ -570,6 +570,7 @@ async function devirOdenenKalemleriGeriAl(kaynak = "açılış") {
 // çağrılınca TDZ hatasıyla açılışta çöküyordu; bu yüzden burada duruyor.
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAULT FALSE`).catch(() => {});
 const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant, removeIsolatedTenant } = pool;
+const kiraciSema = require("./kiraciSema"); // 04.11.2026: izole kiracı şeması ↔ public eşitleme (eksik tablo / kolon)
 const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
@@ -31661,6 +31662,8 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     let n = 0;
     for (const r of rows) { if (addIsolatedTenant(r.tenant)) n++; }
     if (n > 0) console.log(`[tenant] ${n} izole tenant allow-list'e yüklendi.`);
+    // 04.11.2026: izole kiracı şemalarını public'e eşitle (sonradan eklenen tablo/kolon) — kiraciSema.js başlığı
+    kiraciSema.kur(pool, { kiracilar: () => pool.ISOLATED_TENANTS, semaAdi: (t) => pool.tenantSchema(t), paylasilan: pool.SHARED_PUBLIC_TABLES });
   } catch (e) {
     console.error("[tenant-registry] başlatma hatası:", e.message);
   }
