@@ -1900,6 +1900,7 @@ app.put("/admin/users/:id/yetkiler", authMiddleware, requireAdmin, async (req, r
 // Aracın kira bedelini gizli yap / aç (yalnız tam admin) — hangi aracın gizleneceği kayıtlardan doğrulanıp seçilir
 app.put("/hr/araclar/:id/kira-gizli", authMiddleware, requireAdmin, async (req, res) => {
   try {
+    if (altMarkaKapsam(req)) return res.status(403).json({ ok: false, error: "Kira gizleme yalnız ERC yöneticisine açıktır" });
     const id = Number(req.params.id);
     const gizli = req.body?.kira_gizli === true;
     const cur = (await pool.query(`SELECT id, plaka, kira_gizli FROM araclar WHERE id=$1`, [id])).rows[0];
@@ -9757,6 +9758,8 @@ app.get("/finance/personel-aylik-ozet", finansOkuma, async (req, res) => {
 // (15.07 devir); araçların hepsi AHY'nin — araclar.firma ile markaya süzülür.
 const PL_KIRA_TUTAR_SQL = `(CASE WHEN o.donem = '2026-07' THEN COALESCE(o.tutar,0) * 0.5 ELSE COALESCE(o.tutar,0) END)`;
 pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS firma TEXT DEFAULT 'AHY'`).catch(() => {});
+// 04.11.2026: ofis / depo firması (NULL = ERC / Şimşek) — firma yöneticisi yalnız kendi firmasının kaydını değiştirir
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS firma TEXT`).catch(() => {});
 pool.query(`ALTER TABLE masraf_belge ADD COLUMN IF NOT EXISTS ocr_para TEXT`).catch(() => {});
 // 15.10.2026 (Orhan): araç DEPOZİTOSU nakit akışında "Araç Kiraları" satırına düşer —
 // ödeme tarihinde gider, iade tarihinde eksi (geri dönüş). Parametreler kira sorgusuyla aynı:
@@ -27398,6 +27401,37 @@ async function aracGecmisYaz(eski, olay, aciklama, bitis) {
   ).catch(e => console.error("[arac-gecmis]", e.message));
 }
 
+// 04.11.2026 (Orhan): Teknocenter panelinde araç / ofis ekle-düzenle (ERC'deki gibi). Firma yöneticisi (alt marka; İK yazma
+// yetkili: teknocenter admin, İlhami direktör) YALNIZ kendi kapsamındaki (bordro: TEKNO + devraldığı AHY) kaydı değiştirir;
+// başka firmanın aracı / ofisi 403. ERC kullanıcıları için davranış aynen.
+const aracKapsamKapisi = (aracIdBul) => async (req, res, next) => {
+  try {
+    if (!altMarkaKapsam(req)) return next();
+    const id = await aracIdBul(req);
+    if (!id) return res.status(404).json({ ok: false, error: "Araç bulunamadı" });
+    const er = await aracErisim(req, id);
+    if (!er.ok) return res.status(er.status).json({ ok: false, error: er.error });
+    next();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+};
+const aracIdParam = (req) => req.params.id;
+const aracIdTablodan = (tablo, param) => async (req) => (await pool.query(`SELECT arac_id FROM ${tablo} WHERE id=$1`, [req.params[param]])).rows[0]?.arac_id;
+// Ofis / depo firması: NULL = ERC (Şimşek). Alt marka yalnız kendi kapsamındaki firmayla işaretli kaydı değiştirir.
+const ofisKapsamda = (k, firma) => !k || (!!firma && k.bordro.map((x) => String(x).toUpperCase()).includes(String(firma).toUpperCase()));
+const ofisKapsamKapisi = (ofisIdBul) => async (req, res, next) => {
+  try {
+    const k = altMarkaKapsam(req);
+    if (!k) return next();
+    const id = await ofisIdBul(req);
+    const o = id ? (await pool.query(`SELECT id, firma FROM ofis_depo WHERE id=$1`, [id])).rows[0] : null;
+    if (!o) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    if (!ofisKapsamda(k, o.firma)) return res.status(403).json({ ok: false, error: "Bu ofis / depo firmanızın kapsamında değil" });
+    next();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+};
+const ofisIdParam = (req) => req.params.id;
+const ofisFirmaGecerli = (v) => { const f = String(v || "").trim().toUpperCase(); return !f || f === "ERC" ? null : (altMarkaMi(f) ? f : undefined); };
+
 app.get("/hr/araclar", async (req, res) => {
   await ensureAracKmTable().catch(() => {});
   const { rows } = await pool.query(`
@@ -27425,7 +27459,7 @@ app.get("/hr/araclar", async (req, res) => {
   res.json(rows);
 });
 
-app.post("/hr/araclar/:id/km", ikYazma, async (req, res) => {
+app.post("/hr/araclar/:id/km", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     await ensureAracKmTable();
     const km = Number(req.body.km);
@@ -27439,7 +27473,7 @@ app.post("/hr/araclar/:id/km", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-km/:id", aracSilme, async (req, res) => {
+app.delete("/hr/arac-km/:id", aracSilme, aracKapsamKapisi(aracIdTablodan("arac_km_log", "id")), async (req, res) => {
   try {
     await pool.query(`DELETE FROM arac_km_log WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
@@ -27457,6 +27491,10 @@ app.post("/hr/araclar", ikYazma, async (req, res) => {
     const gecerliDonem = /^\d{4}-\d{2}$/.test(String(kira_gecerli_donem || "")) ? kira_gecerli_donem : null;
     const mulkiyet = String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK";
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
+    // Firma yöneticisi: aynı plaka başka firmanın aracıysa üzerine yazamaz; yeni araç kendi firmasına kaydedilir
+    const kArac = altMarkaKapsam(req);
+    const varolan = kArac ? (await pool.query(`SELECT id, firma FROM araclar WHERE plaka=$1`, [norm])).rows[0] : null;
+    if (kArac && varolan && !aracKapsamda(kArac, varolan.firma)) return res.status(403).json({ ok: false, error: "Bu plaka başka firmanın aracı olarak kayıtlı" });
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
         kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
@@ -27478,11 +27516,15 @@ app.post("/hr/araclar", ikYazma, async (req, res) => {
        mulkiyet, sahip_firma||null,
        kira_kdv_haric ? Number(kira_kdv_haric) : null, kira_kdv_orani === undefined || kira_kdv_orani === "" ? null : Number(kira_kdv_orani), gecerliDonem]
     );
+    if (kArac && !varolan && rows[0]) {
+      const f = await pool.query(`UPDATE araclar SET firma=$2 WHERE id=$1 RETURNING *`, [rows[0].id, kArac.kod]);
+      return res.json(f.rows[0]);
+    }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/araclar/:id", ikYazma, async (req, res) => {
+app.put("/hr/araclar/:id", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
@@ -27540,7 +27582,7 @@ app.put("/hr/araclar/:id", ikYazma, async (req, res) => {
 });
 
 // Sadece durum güncelle (AKTİF/PASİF/SERVİSTE) — diğer alanları bozmadan
-app.put("/hr/araclar/:id/durum", ikYazma, async (req, res) => {
+app.put("/hr/araclar/:id/durum", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     const { durum } = req.body;
     if (!["AKTİF", "PASİF", "SERVİSTE"].includes(durum))
@@ -28090,13 +28132,13 @@ app.get("/hr/arac-kira-odemeler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/araclar/:id", aracSilme, async (req, res) => {
+app.delete("/hr/araclar/:id", aracSilme, aracKapsamKapisi(aracIdParam), async (req, res) => {
   await pool.query("UPDATE araclar SET aktif=false WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
 // Araç belge upload — turu: SOZLESME | RUHSAT | SIGORTA | MUAYENE | DIGER
-app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (req, res) => {
+app.post("/hr/araclar/:id/belge", ikYazma, aracKapsamKapisi(aracIdParam), aracUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -28118,7 +28160,7 @@ app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-belge/:id", ikYazma, async (req, res) => {
+app.delete("/hr/arac-belge/:id", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_belgeler", "id")), async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
@@ -28318,7 +28360,7 @@ app.put("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
+app.delete("/hr/arac-teslim-foto/:fid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_teslim_foto", "fid")), async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
@@ -28367,7 +28409,7 @@ app.get("/hr/araclar/:id/lastik", async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post("/hr/araclar/:id/lastik", ikYazma, async (req, res) => {
+app.post("/hr/araclar/:id/lastik", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     await ensureAracKmTable().catch(() => {});
     const er = await aracErisim(req, req.params.id);
@@ -28387,7 +28429,7 @@ app.post("/hr/araclar/:id/lastik", ikYazma, async (req, res) => {
     res.json({ ok: true, id: lid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
+app.put("/hr/arac-lastik/:lid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), async (req, res) => {
   try {
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
     const eski = l0.rows[0];
@@ -28413,7 +28455,7 @@ app.put("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
+app.delete("/hr/arac-lastik/:lid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
@@ -28427,7 +28469,7 @@ app.delete("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Lastik fotoğrafı / belgesi (tip=foto | belge)
-app.post("/hr/arac-lastik/:lid/dosya", ikYazma, (req, res, next) => {
+app.post("/hr/arac-lastik/:lid/dosya", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), (req, res, next) => {
   aracFotoUpload.single("dosya")(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
     next();
@@ -28770,7 +28812,7 @@ pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS donem_gunu INTEGER`).
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lat NUMERIC(9,6)`).catch(() => {});
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lng NUMERIC(9,6)`).catch(() => {});
 
-app.post("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
+app.post("/hr/ofis/:id/kira-ode", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const { donem, tutar, tarih, aciklama, kasadan_dus } = req.body;
     if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -28787,7 +28829,7 @@ app.post("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
+app.delete("/hr/ofis/:id/kira-ode", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const donem = String(req.query.donem || "");
     if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -28826,20 +28868,24 @@ app.post("/hr/ofis", ikYazma, async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
+    // Firma: firma yöneticisi kendi firmasına kaydeder; ERC kullanıcısı formdan seçer (boş = ERC / Şimşek)
+    const kOfis = altMarkaKapsam(req);
+    const firma = kOfis ? kOfis.kod : ofisFirmaGecerli(req.body?.firma);
+    if (firma === undefined) return res.status(400).json({ error: "Geçersiz firma" });
     const { rows } = await pool.query(
       `INSERT INTO ofis_depo (tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,
-        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu,firma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [tur||'OFİS',ad,bolge,adres,kiraya_veren,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum||'AKTİF',notlar,
        odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN',
-       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null, firma]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/ofis/:id", ikYazma, async (req, res) => {
+app.put("/hr/ofis/:id", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
@@ -28853,12 +28899,18 @@ app.put("/hr/ofis/:id", ikYazma, async (req, res) => {
        odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
        Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
     );
+    // Firma alanı yalnız ERC kullanıcısının formundan değişir (firma yöneticisi kaydı başka firmaya taşıyamaz)
+    if (rows[0] && !altMarkaKapsam(req) && req.body && Object.prototype.hasOwnProperty.call(req.body, "firma")) {
+      const f = ofisFirmaGecerli(req.body.firma);
+      if (f === undefined) return res.status(400).json({ error: "Geçersiz firma" });
+      return res.json((await pool.query(`UPDATE ofis_depo SET firma=$2 WHERE id=$1 RETURNING *`, [req.params.id, f])).rows[0]);
+    }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Depo/ofis koordinatı (yalnız lat/lng; null → temizle). Diğer alanlara dokunmaz.
-app.put("/hr/ofis/:id/konum", ikYazma, async (req, res) => {
+app.put("/hr/ofis/:id/konum", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
     const lat = num(req.body?.lat), lng = num(req.body?.lng);
@@ -28872,12 +28924,12 @@ app.put("/hr/ofis/:id/konum", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id", ikYazma, async (req, res) => {
+app.delete("/hr/ofis/:id", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   await pool.query("UPDATE ofis_depo SET durum='PASİF' WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
-app.post("/hr/ofis/:id/belge", ikYazma, ofisUpload.single("dosya"), async (req, res) => {
+app.post("/hr/ofis/:id/belge", ikYazma, ofisKapsamKapisi(ofisIdParam), ofisUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -28896,7 +28948,7 @@ app.post("/hr/ofis/:id/belge", ikYazma, ofisUpload.single("dosya"), async (req, 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis-belge/:id", ikYazma, async (req, res) => {
+app.delete("/hr/ofis-belge/:id", ikYazma, ofisKapsamKapisi(async (req) => (await pool.query(`SELECT ofis_id FROM ofis_belgeler WHERE id=$1`, [req.params.id])).rows[0]?.ofis_id), async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);

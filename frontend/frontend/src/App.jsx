@@ -448,6 +448,8 @@ const kullaniciBordro = (u) => {
   const b = Array.isArray(u?.marka_bordro) && u.marka_bordro.length ? u.marka_bordro.map((x) => String(x).toUpperCase()) : [m];
   return b.includes(m) ? b : [m, ...b];
 };
+// 04.11.2026: firma yöneticisi = alt marka (Teknocenter) hesabında admin / direktör — kendi firmasının araç / ofis kaydını yönetir
+const firmaYoneticisiMi = (u) => { const m = String(u?.marka || "ERC").toUpperCase(); return m !== "ERC" && altMarkaMi(m) && u?.hw_yukleme !== true && ["admin", "direktor"].includes(String(u?.role || "").toLowerCase()); };
 // Devir tarihi metni (DD.MM.YYYY) — kullanıcının markasından
 const devirMetni = (u) => String(u?.marka_devir || "2026-07-15").split("-").reverse().join(".");
 // Masraf/avans uçları kapsam için kimlik ister (15.10.2026): başlık yardımcıları
@@ -45632,7 +45634,12 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
   const isRollout = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(currentUser?.email); // filo güncelleme yetkisi
-  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || isRollout);
+  // 04.11.2026 (Orhan): firma yöneticisi (Teknocenter admin / direktör) kendi firmasının araçlarını ekler / düzenler (ERC'deki gibi);
+  // başka firmanın aracında düzenleme düğmesi çıkmaz, sunucu da 403 verir. Yeni araç sunucuda kendi firmasına kaydedilir.
+  const firmaYonetici = firmaYoneticisiMi(currentUser);
+  const _aracBordro = kullaniciBordro(currentUser);
+  const aracKapsamda = (a) => !firmaYonetici || _aracBordro.includes(String(a?.firma || "AHY").toUpperCase());
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || isRollout || firmaYonetici);
 
   const [araclar, setAraclar] = useState([]);
   const [selected, setSelected] = useState(null); // detail/edit araç
@@ -45920,7 +45927,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   // Kira Öde: her kiralık aktif araç için seçili dönem + vadesi geçmiş ödenmemiş dönemler
   const payRowsOlustur = (donemSec) => {
     const rows = [];
-    kiralikAraclar.slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
+    kiralikAraclar.filter(aracKapsamda).sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
       const liste = donemListesi(a);
       const donemler = new Set(liste.filter(x => x.durum === "GECIKTI" || x.durum === "KISMI").map(x => x.donem));
       donemler.add(donemSec);
@@ -46124,7 +46131,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                         </div>
                       </td>
                       <td style={{ ...tdSt, textAlign:"right" }}>
-                        {canEdit && <button onClick={e => { e.stopPropagation(); openEdit(a); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}
+                        {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); openEdit(a); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}
                       </td>
                     </tr>
                     {acik && (
@@ -46139,11 +46146,11 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                                   <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
                                   {d.durum === "ODENDI"
                                     ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}{(d.odeme.odemeler || []).length > 1 ? ` · ${d.odeme.odemeler.length} ödeme` : ""}{(d.odeme.odemeler || []).find(x => x.fatura_no) ? ` · 🧾 ${(d.odeme.odemeler || []).find(x => x.fatura_no).fatura_no}` : ""}
-                                        {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                        {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
                                       </span>
                                     : d.durum === "KISMI"
                                       ? <span style={{ color:"#b45309", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)} · kalan ₺{d.eksik.toLocaleString("tr-TR")}
-                                          {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                          {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
                                         </span>
                                     : d.durum === "GECIKTI"
                                       ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
@@ -46168,7 +46175,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                                 <div key={k.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"12.5px", padding:"3px 0", borderBottom:"1px dashed #e3e8ef", fontVariantNumeric:"tabular-nums" }}><span>{fT(k.tarih)}</span><b>{Number(k.km).toLocaleString("tr-TR")} km</b></div>
                               ))}
                               {!(a.km_log || []).length && <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kayıt yok</div>}
-                              {canEdit && a.aktif && (
+                              {canEdit && aracKapsamda(a) && a.aktif && (
                                 <div style={{ display:"flex", gap:"6px", marginTop:"8px", flexWrap:"wrap" }} onClick={e => e.stopPropagation()}>
                                   <input type="number" placeholder="KM" value={(kmGiris[a.id]?.km) || ""} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), km: e.target.value } }))} style={{ width:"90px", padding:"5px 8px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
                                   <input type="date" value={(kmGiris[a.id]?.tarih) || new Date().toISOString().slice(0, 10)} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), tarih: e.target.value } }))} style={{ padding:"5px 6px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
@@ -46658,7 +46665,11 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe);
+  // 04.11.2026 (Orhan): firma yöneticisi kendi firmasının ofis / depolarını ekler / düzenler; firması boş kayıt ERC (Şimşek) sayılır
+  const firmaYonetici = firmaYoneticisiMi(currentUser);
+  const _ofisBordro = kullaniciBordro(currentUser);
+  const ofisKapsamda = (o) => !firmaYonetici || (!!o?.firma && _ofisBordro.includes(String(o.firma).toUpperCase()));
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || firmaYonetici);
 
   const [liste, setListe] = useState([]);
   const [kiraOdemeler, setKiraOdemeler] = useState([]);
@@ -46753,14 +46764,16 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
       kira_baslangic:f(o.kira_baslangic), kira_bitis:f(o.kira_bitis),
       aylik_kira:o.aylik_kira||"", metrekare:o.metrekare||"", kat:o.kat||"",
       sorumlu:o.sorumlu||"", durum:o.durum||"AKTİF", notlar:o.notlar||"",
-      odeme_tipi:o.odeme_tipi||"PESIN", donem_gunu:o.donem_gunu||"" });
+      odeme_tipi:o.odeme_tipi||"PESIN", donem_gunu:o.donem_gunu||"", firma:o.firma||"" });
     setSelected(o); setShowForm(true);
   };
   const handleSave = async () => {
     if (!form.ad) return alert("Ad zorunlu");
     const method = selected ? "PUT" : "POST";
     const url = selected ? `${API_BASE}/hr/ofis/${selected.id}` : `${API_BASE}/hr/ofis`;
-    const r = await fetch(url, { method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(form) });
+    // Firma alanını yalnız ERC kullanıcısı gönderir; firma yöneticisinin kaydı sunucuda kendi firmasına yazılır
+    const { firma, ...govde } = form;
+    const r = await fetch(url, { method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(firmaYonetici ? govde : { ...govde, firma: firma || "" }) });
     if (!r.ok) { const e = await r.json().catch(() => ({})); return alert(e.error || "Kaydedilemedi"); }
     setShowForm(false); load();
   };
@@ -46797,7 +46810,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
   // Toplu Kira Öde
   const payRowsOlustur = (donemSec) => {
     const rows = [];
-    kiralik.slice().sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).forEach(o => {
+    kiralik.filter(ofisKapsamda).sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).forEach(o => {
       const l = donemListesi(o);
       const donemler = new Set(l.filter(x => x.durum === "GECIKTI").map(x => x.donem));
       donemler.add(donemSec);
@@ -46909,8 +46922,8 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
       {(borclular.length > 0 || sozlesmesiz.length > 0 || bitisYakin.length > 0) && (
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"12px" }}>
           {borclular.map(o => <span key={"b" + o.id} onClick={() => setAcikSatir(o.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c" }}>● {o.ad} · {borcHesap(o).aylar.length} dönem ödenmedi</span>)}
-          {sozlesmesiz.map(o => <span key={"s" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · sözleşme yüklenmemiş</span>)}
-          {bitisYakin.map(o => <span key={"k" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · kira bitişi {fT(o.kira_bitis)}</span>)}
+          {sozlesmesiz.map(o => <span key={"s" + o.id} onClick={() => canEdit && ofisKapsamda(o) && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · sözleşme yüklenmemiş</span>)}
+          {bitisYakin.map(o => <span key={"k" + o.id} onClick={() => canEdit && ofisKapsamda(o) && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · kira bitişi {fT(o.kira_bitis)}</span>)}
         </div>
       )}
 
@@ -46978,7 +46991,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                           : <span style={{ ...pill, background:"#fef3c7", color:"#b45309" }}>Yok</span>}
                         {getEkler(o).length > 0 && <span style={{ ...pill, background:"#dbeafe", color:"#1d4ed8", marginLeft:"4px" }}>+{getEkler(o).length}</span>}
                       </td>
-                      <td style={{ ...tdSt, textAlign:"right" }}>{canEdit && <button onClick={e => { e.stopPropagation(); openEdit(o); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}</td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>{canEdit && ofisKapsamda(o) && <button onClick={e => { e.stopPropagation(); openEdit(o); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}</td>
                     </tr>
                     {acik && (
                       <tr><td colSpan={9} style={{ padding:"0 14px 16px", background:"#eefaf8", borderBottom:"1px solid #e3e8ef" }}>
@@ -46990,7 +47003,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                                 <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
                                 {d.durum === "ODENDI"
                                   ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}
-                                      {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(o, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}</span>
+                                      {canEdit && ofisKapsamda(o) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(o, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}</span>
                                   : d.durum === "GECIKTI" ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
                                   : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
                               </div>
@@ -47001,7 +47014,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                             {soz ? <a href={belgeUrl(soz)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", fontWeight:700, padding:"4px 0" }}>📄 Kira sözleşmesi · {soz.dosya_adi}</a>
                               : <div style={{ fontSize:"12.5px", color:"#b45309", padding:"4px 0" }}>Kira sözleşmesi yüklenmemiş</div>}
                             {getEkler(o).map(b => <a key={b.id} href={belgeUrl(b)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", padding:"3px 0" }}>📎 {b.aciklama || b.dosya_adi}</a>)}
-                            {canEdit && <button onClick={() => openEdit(o)} style={{ marginTop:"8px", padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📁 Belge yükle</button>}
+                            {canEdit && ofisKapsamda(o) && <button onClick={() => openEdit(o)} style={{ marginTop:"8px", padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📁 Belge yükle</button>}
                           </div>
                           <div style={kutu}>
                             <div style={kutuBaslik}>Konum bilgisi</div>
@@ -47011,7 +47024,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                               {(o.metrekare || o.kat) && <div>{o.metrekare ? `${o.metrekare} m²` : ""}{o.kat ? ` · ${o.kat}. kat` : ""}</div>}
                               {o.notlar && <div style={{ color:"#3c4a5d" }}>{o.notlar}</div>}
                             </div>
-                            {canEdit && (
+                            {canEdit && ofisKapsamda(o) && (
                               <div style={{ display:"flex", gap:"6px", marginTop:"8px" }} onClick={e => e.stopPropagation()}>
                                 <select value={o.durum || "AKTİF"} onChange={e => durumDegistir(o, e.target.value)} style={{ padding:"6px 10px", borderRadius:"8px", border:"1px solid #cfd7e2", fontSize:"12px", fontWeight:700 }}>
                                   <option value="AKTİF">🟢 Aktif</option><option value="PASİF">⚪ Pasif</option>
@@ -47109,6 +47122,15 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                   {form.bolge && !(typeof ARAC_BOLGELER !== "undefined" ? ARAC_BOLGELER : []).some(b => b.toLocaleLowerCase("tr") === String(form.bolge).trim().toLocaleLowerCase("tr")) && <option value={form.bolge}>{form.bolge}</option>}
                 </select></div>
               <div><label style={lbl}>Sorumlu Kişi</label><input value={form.sorumlu} onChange={e => setForm(f => ({ ...f, sorumlu: e.target.value }))} style={inp} /></div>
+              {/* 04.11.2026: hangi firmanın ofisi / deposu — firma yöneticisi yalnız kendi firmasının kaydını düzenler */}
+              {!firmaYonetici && (
+                <div><label style={lbl}>Firma</label>
+                  <select value={form.firma || ""} onChange={e => setForm(f => ({ ...f, firma: e.target.value }))} style={inp}>
+                    <option value="">Şimşek (ERC)</option>
+                    {ALT_MARKA_LISTE.map((m) => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
+                  </select>
+                </div>
+              )}
               <div><label style={lbl}>Kiraya Veren</label><input value={form.kiraya_veren} onChange={e => setForm(f => ({ ...f, kiraya_veren: e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>Sözleşme No</label><input value={form.sozlesme_no} onChange={e => setForm(f => ({ ...f, sozlesme_no: e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>Aylık Kira (₺)</label><input type="number" value={form.aylik_kira} onChange={e => setForm(f => ({ ...f, aylik_kira: e.target.value }))} style={inp} /></div>
