@@ -1,7 +1,7 @@
 // Masraf kalemi ekleme + fiş. Girilen her şey yazarken telefona kaydedilir (taslak); bağlantı koparsa
 // form ve fotoğraflar kaybolmaz, "Gönderildi" görünmez; tekrar denemede kalınan adımdan devam edilir.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Image, Linking, Modal, Pressable, ScrollView, Switch, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, Modal, Pressable, ScrollView, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { aralik, kose, renk, yazi } from "../tema";
@@ -41,6 +41,10 @@ export function KalemEkleEkrani({ navigation, route }) {
   const [fotoHazir, setFotoHazir] = useState(false); // fotoğraf seçilip hazırlanıyor
   const kilit = useRef(false);
   const yuklendi = useRef(!taslakId && !mevcutKalem);
+  // 04.11.2026: gönderim ilerlemesi — fiş bulma ~20 sn sürer; kullanıcı ekran dondu sanmasın
+  const [asama, setAsama] = useState(null); // { kod, sira, toplam, t } | null
+  const [baslangic, setBaslangic] = useState(null);
+  const gonderimSuruyor = useRef(false); // geri gitme engeli (başarıyla bitince bırakılır)
 
   // Var olan taslağı aç (ya da mevcut kalem için yeni "fiş ekle" taslağı hazırla)
   useEffect(() => {
@@ -66,6 +70,13 @@ export function KalemEkleEkrani({ navigation, route }) {
       yuklendi.current = true;
     });
   }, [kapsam, taslakId]);
+
+  // Gönderim sürerken geri gitme (geri düğmesi / kaydırma / Android geri) engellenir; kayıt telefonda saklıdır
+  useEffect(() => navigation.addListener("beforeRemove", (e) => {
+    if (!gonderimSuruyor.current) return;
+    e.preventDefault();
+    Alert.alert("Kayıt sürüyor", "Lütfen bitmesini bekleyin. Bilgileriniz telefonda saklı; uygulama kapanırsa 'Kaydet' ile kaldığı yerden devam eder, aynı kayıt ikinci kez oluşmaz.");
+  }), [navigation]);
 
   useEffect(() => {
     avansApi.atananArac(kullanici).then((d) => { if (d?.plaka) setAtananPlaka(String(d.plaka).toUpperCase()); }).catch(() => {});
@@ -171,7 +182,9 @@ export function KalemEkleEkrani({ navigation, route }) {
     const tutar = dogrula();
     if (!tutar) return;
     kilit.current = true;
+    gonderimSuruyor.current = true;
     if (otoKayit.current) { clearTimeout(otoKayit.current); otoKayit.current = null; }
+    setAsama(null); setBaslangic(Date.now());
     setGonderiliyor(true);
     setGonderimHatasi(null);
     try {
@@ -189,10 +202,12 @@ export function KalemEkleEkrani({ navigation, route }) {
         kirpmaSec,
         kimlik: () => yeniKimlik().replace(/-/g, ""),
         fotoVarMi,
+        onAsama: (a) => setAsama({ ...a, t: Date.now() }),
       });
       gecersizKil([`masrafForm:${formId}`, "masrafFormlar", "hesap", "pano"]);
       if (sonuc.yenidenCek) {
         kilit.current = false;
+        gonderimSuruyor.current = false;
         setGonderiliyor(false);
         await yenidenCek(sonuc.yenidenCek);
         return;
@@ -202,6 +217,7 @@ export function KalemEkleEkrani({ navigation, route }) {
         return;
       }
       await taslakSil(kapsam, id);
+      gonderimSuruyor.current = false;
       if (sonuc.uyarilar.length) { setUyarilar({ kalemId: sonuc.kalemId, liste: sonuc.uyarilar, girilen: tutar }); return; }
       navigation.goBack();
     } catch (e) {
@@ -212,7 +228,9 @@ export function KalemEkleEkrani({ navigation, route }) {
       taslakKaydet(kapsam, { id, gonderimHatasi: mesaj }).then(setKayitli).catch(() => {});
     } finally {
       kilit.current = false;
+      gonderimSuruyor.current = false;
       setGonderiliyor(false);
+      setAsama(null); setBaslangic(null);
     }
   };
 
@@ -312,7 +330,77 @@ export function KalemEkleEkrani({ navigation, route }) {
       </Metin>
 
       <KirpmaSecimi durum={kirpma} kapat={(secim) => { kirpma?.coz(secim); setKirpma(null); }} />
+      {/* Kırpma onay ekranı açıkken gizlenir (iki pencere üst üste açılmaz) */}
+      <GonderimIlerlemesi gorunur={gonderiliyor && !kirpma} asama={asama} baslangic={baslangic} />
     </Ekran>
+  );
+}
+
+// ── Gönderim ilerlemesi (04.11.2026) ─────────────────────────────────────────────────────────────────────────────
+// Adım adım ne yapıldığı + geçen süre; bir adım 15 sn'yi geçince "uygulamayı kapatmayın" notu. Tam ekran ve dokunmaya kapalı:
+// ikinci dokunuş / geri gitme olmaz (Android geri tuşu uyarı verir). Fiş işleme tek istektir (yükleme + otomatik kırpma):
+// ilk saniyeler "yükleniyor", sonrası "bulunuyor" yazılır.
+const ASAMA_METNI = {
+  kalem: () => "Kalem kaydediliyor…",
+  fis_isleme: (sn) => (sn < 4 ? "Fiş yükleniyor…" : "Fiş bulunuyor (yaklaşık 20 sn)…"),
+  kirpma_onay: () => "Kırpma onayı bekleniyor…",
+  okuma: () => "Tutar ve plaka okunuyor…",
+  fis_yukleme: () => "Fiş yükleniyor ve okunuyor…",
+  fissiz: () => "Fişsiz kalem bilgisi kaydediliyor…",
+  bitti: () => "Tamamlandı",
+};
+const ADIMLAR = [["kalem", "Kalem kaydı"], ["fis", "Fiş yükleme ve bulma"], ["okuma", "Tutar ve plaka okuma"]];
+const adimGrubu = (kod) => (kod === "kalem" ? 0 : kod === "fis_isleme" || kod === "kirpma_onay" || kod === "fis_yukleme" ? 1 : kod === "okuma" ? 2 : kod === "bitti" || kod === "fissiz" ? 3 : -1);
+
+export function GonderimIlerlemesi({ gorunur, asama, baslangic }) {
+  const [simdi, setSimdi] = useState(Date.now());
+  // iOS: bir Modal kapanırken (kırpma onayı) yenisi açılamaz, sessizce görünmez kalır → açılış kısa gecikmeyle
+  const [acik, setAcik] = useState(false);
+  useEffect(() => {
+    if (!gorunur) { setAcik(false); return undefined; }
+    const t = setTimeout(() => setAcik(true), 450);
+    return () => clearTimeout(t);
+  }, [gorunur]);
+  useEffect(() => {
+    if (!gorunur) return undefined;
+    setSimdi(Date.now());
+    const z = setInterval(() => setSimdi(Date.now()), 1000);
+    return () => clearInterval(z);
+  }, [gorunur]);
+  if (!gorunur || !acik) return null;
+  const adimSn = Math.max(0, Math.floor((simdi - (asama?.t || baslangic || simdi)) / 1000));
+  const toplamSn = Math.max(0, Math.floor((simdi - (baslangic || simdi)) / 1000));
+  const metin = asama ? (ASAMA_METNI[asama.kod] || (() => "İşleniyor…"))(adimSn) : "Hazırlanıyor…";
+  const grup = asama ? adimGrubu(asama.kod) : -1;
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent
+      onRequestClose={() => Alert.alert("Kayıt sürüyor", "Lütfen bitmesini bekleyin. Bilgileriniz telefonda saklı.")}>
+      <View style={{ flex: 1, backgroundColor: "rgba(15,27,45,0.55)", alignItems: "center", justifyContent: "center", padding: aralik.l }}>
+        <View accessibilityLiveRegion="polite" accessibilityLabel={`${metin}${asama?.toplam > 1 ? `, fiş ${asama.sira} / ${asama.toplam}` : ""}, ${toplamSn} saniye`}
+          style={{ width: "100%", maxWidth: 380, backgroundColor: renk.yuzey, borderRadius: kose.l, padding: aralik.l }}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <ActivityIndicator size="large" color={renk.lacivert} />
+            <View style={{ marginLeft: aralik.m, flex: 1 }}>
+              <Metin tur="baslikM">{metin}</Metin>
+              {asama?.toplam > 1 ? <Metin tur="kucukKalin" renk={renk.lacivert} style={{ marginTop: 2 }}>Fiş {asama.sira} / {asama.toplam}</Metin> : null}
+            </View>
+          </View>
+          <View style={{ marginTop: aralik.m }}>
+            {ADIMLAR.map(([kod, ad], i) => {
+              const bitti = grup > i, simdiki = grup === i;
+              return (
+                <View key={kod} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 4 }}>
+                  <Ionicons name={bitti ? "checkmark-circle" : simdiki ? "ellipse" : "ellipse-outline"} size={18} color={bitti ? renk.basari : simdiki ? renk.lacivert : renk.metinSoluk} />
+                  <Metin tur="kucuk" renk={bitti || simdiki ? renk.metin : renk.metinSoluk} style={{ marginLeft: aralik.xs, fontWeight: simdiki ? "700" : "400" }}>{ad}</Metin>
+                </View>
+              );
+            })}
+          </View>
+          <Metin tur="minik" renk={renk.metinIkincil} style={{ marginTop: aralik.s }}>Geçen süre: {toplamSn} sn</Metin>
+          {adimSn >= 15 ? <Bant tonAdi="bilgi" metin="İşlem sürüyor, uygulamayı kapatmayın — kaydınız telefonda saklı." style={{ marginTop: aralik.s }} /> : null}
+        </View>
+      </View>
+    </Modal>
   );
 }
 

@@ -37,10 +37,14 @@ function ocrUyarisi(belge, tutar, kategori) {
  * @param {(yanit:object, foto:object)=>Promise<Array|null>} [p.kirpmaSec] — otomatik kırpma sonucu için kullanıcı seçimi
  * @param {()=>string} p.kimlik — istek kimliği üretir
  * @param {(uri:string)=>boolean} [p.fotoVarMi]
+ * @param {(a:{kod:string, sira?:number, toplam?:number})=>void} [p.onAsama] — ilerleme bildirimi (04.11.2026): ekran kullanıcıya
+ *   hangi adımda olunduğunu gösterir. kod: kalem | fis_isleme (yükle + otomatik kırpma, ~20 sn) | kirpma_onay | okuma (tutar/plaka) |
+ *   fis_yukleme (kırpma servisi yoksa: yükle + oku) | fissiz | bitti. sira/toplam: fiş sırası (1'den), gönderilecek fiş sayısı.
  * @returns {Promise<{ kalemId:number, uyarilar:object[], yarim?:boolean, yenidenCek?:{index:number, uri:string} }>}
  */
-export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, fotoVarMi = () => true }) {
+export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, fotoVarMi = () => true, onAsama }) {
   let t = taslak;
+  const asama = (kod, ek) => { try { onAsama?.({ kod, ...ek }); } catch (_) { /* ekran hatası gönderimi bozmasın */ } };
   const yaz = async (degisim) => { t = await kaydet({ ...t, ...degisim }); return t; };
   const govde = kalemGovdesi(t);
   let form = null;
@@ -59,6 +63,7 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
     if (eslesen) {
       await yaz({ adim: { ...t.adim, kalemId: eslesen.id } });
     } else {
+      asama("kalem");
       await yaz({ adim: { kalemDenendi: true, oncekiKalemIdleri: (form?.kalemler || []).map((k) => k.id) } });
       try {
         const k = await api.kalemEkle(govde);
@@ -75,10 +80,12 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
   const kalemId = t.adim.kalemId;
   const uyarilar = [];
 
-  // 2) Fişler
+  // 2) Fişler — sıra bilgisi yalnız gönderilecek (henüz yüklenmemiş) fişler üzerinden: "Fiş 2/3"
+  const bekleyen = (t.fotolar || []).map((f, i) => (f.durum === "yuklendi" ? -1 : i)).filter((i) => i >= 0);
   for (let i = 0; i < (t.fotolar || []).length; i++) {
     const f = t.fotolar[i];
     if (f.durum === "yuklendi") continue;
+    const sira = { sira: bekleyen.indexOf(i) + 1, toplam: bekleyen.length };
     const fotoGuncelle = async (d) => {
       const fotolar = t.fotolar.map((x, j) => (j === i ? { ...x, ...d } : x));
       await yaz({ fotolar });
@@ -98,23 +105,26 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
     if (api.fisIsle && kirpmaSec && !t.kirpmaServisiYok) {
       let yanit = null;
       try {
+        asama("fis_isleme", sira);
         yanit = await api.fisIsle(kalemId, dosya);
       } catch (e) {
         if (e?.tur === "bulunamadi" && !e?.sunucuMesaji) await yaz({ kirpmaServisiYok: true });
         else throw e;
       }
       if (yanit?.isleme_id) {
+        asama("kirpma_onay", sira);
         const secimler = await kirpmaSec(yanit, f);
         // "Yeniden çek": bu fotoğraf eklenmez (sunucuda ek oluşmadı); çağıran yeni fotoğrafı aynı sıraya koyar
         if (secimler?.yenidenCek) { form = null; return { kalemId, uyarilar, yarim: true, yenidenCek: { index: i, uri: f.uri } }; }
         if (!Array.isArray(secimler) || !secimler.length) { form = null; return { kalemId, uyarilar, yarim: true }; }
         const istekler = secimler.map((s, n) => ({ ...s, istek_id: f.istekler?.[n] || kimlik() }));
         await fotoGuncelle({ istekler: istekler.map((s) => s.istek_id) }); // tekrar denemede aynı istek kimlikleri → çift ek yok
+        asama("okuma", sira);
         const r = await api.fisEkle(kalemId, yanit.isleme_id, istekler);
         belge = (r?.belgeler || [r])[0];
       }
     }
-    if (!belge) belge = await api.belgeYukle(kalemId, dosya);
+    if (!belge) { asama("fis_yukleme", sira); belge = await api.belgeYukle(kalemId, dosya); }
     if (!belge?.id) throw new Error("Fiş yüklenemedi.");
     await fotoGuncelle({ durum: "yuklendi", belgeId: belge.id });
     const u = ocrUyarisi(belge, govde.tutar, govde.kategori);
@@ -124,8 +134,10 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
 
   // 3) Fişsiz kalem
   if (t.fissiz?.aktif && !(t.fotolar || []).length) {
+    asama("fissiz");
     await api.kalemGuncelle(kalemId, { fis_var: false, fis_olmadan_aciklama: t.fissiz.aciklama.trim() });
   }
+  asama("bitti");
   return { kalemId, uyarilar };
 }
 
