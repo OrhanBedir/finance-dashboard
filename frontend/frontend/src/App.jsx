@@ -22367,10 +22367,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Bordro şirketi filtresi (03.09.2026, Orhan): kendi personelimiz (taşeron hariç)
   // Şimşek (marka ERC) mi AHY bordrosunda mı, rozetle görünsün. "TUMU" | "ERC" | "AHY"
   const [hrFirmaFiltre, setHrFirmaFiltre] = useState("TUMU");
+  // 04.11.2026 (Orhan): seçili ayın bordro firması — sunucu firma geçmişinden (personel_firma_gecmisi) o ay için döner
+  // (donem_marka); geçmişi yoksa kartın güncel firması. Böylece Ağustos 2026'da AHY filtresi o ay AHY'de olanları listeler,
+  // kişi bugün Teknocenter kadrosuna geçmiş olsa bile.
+  const ayFirmasi = (p) => String(p?.donem_marka || p?.marka || "ERC").toUpperCase();
   const firmaUygun = (p) => {
     if ((p?.firma_tipi || "simsek") !== "simsek") return false; // taşeron personeli maaş/liste dışı (ISG'de)
-    const marka = String(p?.marka || "ERC").toUpperCase();
-    return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === marka;
+    return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === ayFirmasi(p);
   };
   // 15.10.2026: aktif ama maaşı / işe giriş tarihi eksik (ya da yeniden giriş bekleyen) personel —
   // kadroda "Bilgileri tamamlanacak" rozetiyle görünür, hakediş/bütçe toplamlarına GİRMEZ
@@ -22397,10 +22400,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   const FirmaRozet = ({ p, kucuk }) => {
     // Alt marka panelinde (Teknocenter/AHY) rozet gösterilmez — kadro zaten o markanındır (13.10.2026, Orhan)
     if (_hrMarka !== "ERC") return null;
-    const mk = altMarkaBilgi(p?.marka);
+    const mk = altMarkaBilgi(ayFirmasi(p));          // 04.11.2026: seçili ayın bordro firması (firma geçmişi varsa)
     const ahy = !!mk;
+    const gecmisNot = p?.donem_marka && String(p.donem_marka).toUpperCase() !== String(p?.marka || "ERC").toUpperCase()
+      ? ` (o ay) · güncel kart: ${altMarkaBilgi(p?.marka)?.ad || "Şimşek"}` : "";
     return (
-      <span title={ahy ? `${mk.ad} bordrosu` : "Şimşek bordrosu"} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? mk.kisa : "Şimşek"}</span>
+      <span title={(ahy ? `${mk.ad} bordrosu` : "Şimşek bordrosu") + gecmisNot} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? mk.kisa : "Şimşek"}</span>
     );
   };
   const [hrSearchText, setHrSearchText]         = useState("");

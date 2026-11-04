@@ -22076,6 +22076,29 @@ async function ikDonemleriYukle(ids) {
   r.rows.forEach(d => { if (!m.has(d.personel_id)) m.set(d.personel_id, []); m.get(d.personel_id).push(d); });
   return m;
 }
+// Bordro firması geçmişi (04.11.2026): personel_id → [{marka, baslangic, bitis}] (tablo yoksa boş — eski davranış)
+async function ikFirmaGecmisiYukle(ids) {
+  const m = new Map();
+  if (!ids || !ids.length) return m;
+  const r = await pool.query(
+    `SELECT personel_id, UPPER(marka) AS marka, to_char(baslangic,'YYYY-MM-DD') AS baslangic, to_char(bitis,'YYYY-MM-DD') AS bitis, aciklama
+       FROM personel_firma_gecmisi WHERE personel_id = ANY($1::int[]) ORDER BY baslangic`, [ids]).catch(() => ({ rows: [] }));
+  r.rows.forEach(d => { if (!m.has(d.personel_id)) m.set(d.personel_id, []); m.get(d.personel_id).push(d); });
+  return m;
+}
+// Ayın bordro firması: ay içinde en çok gün kapsayan firma geçmişi satırı (eşitlikte sonraki); kesişen satır yoksa null
+// (kartın güncel firması geçerli kalır). Ör. Temmuz 2026: 01–14 Şimşek, 15–31 AHY → AHY.
+function ikDonemFirmasi(gecmis, ayBas, aySon) {
+  let en = null, enGun = 0;
+  for (const g of gecmis || []) {
+    const bas = g.baslangic > ayBas ? g.baslangic : ayBas;
+    const bit = g.bitis && g.bitis < aySon ? g.bitis : aySon;
+    if (bas > bit) continue;
+    const gun = Math.round((Date.parse(bit) - Date.parse(bas)) / 86400000) + 1;
+    if (gun >= enGun) { en = g.marka; enGun = gun; }
+  }
+  return en;
+}
 // Aynı ay içinde ayrılıp yeniden başlama (20.10.2026): güncel dönem o ayda başlıyorsa ve aynı ayda kapanmış
 // bir dönem varsa, o kapanmış dönem (kendi maaş künyesiyle) ek segment olarak döner — günler iki kez sayılmaz,
 // aradaki boşluk hakedişe girmez. Künyede maaş yoksa segment "bilgi eksik" sayılır (tahmin yok).
@@ -22388,11 +22411,16 @@ app.get("/hr/personel", taseronDegilOkuma, async (req, res) => {
         WHERE p.birlestirildi_personel_id IS NULL
         ORDER BY p.aktif DESC, p.ad_soyad ASC`, [donem]);
       const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
+      const fg = await ikFirmaGecmisiYukle(r.rows.map(x => x.id));
       const [_y, _m] = donem.split("-").map(Number);
       const ayBas = `${donem}-01`, aySon = `${donem}-${String(new Date(_y, _m, 0).getDate()).padStart(2, "0")}`;
       r.rows.forEach(row => {
         const arsiv = dm.get(row.id) || [];
         row.donemler = arsiv;
+        // 04.11.2026: o ayın bordro firması (ör. Ağustos 2026 → AHY); kartın güncel firması (marka) değişmez
+        row.firma_gecmisi = fg.get(row.id) || [];
+        const dmk = ikDonemFirmasi(row.firma_gecmisi, ayBas, aySon);
+        if (dmk) row.donem_marka = dmk;
         const sec = ikDonemSec(row, arsiv, ayBas, aySon);
         if (!sec) return;
         if (sec.disinda) { row.donem_disi = true; return; }
@@ -22408,7 +22436,8 @@ app.get("/hr/personel", taseronDegilOkuma, async (req, res) => {
     }
     const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p WHERE p.birlestirildi_personel_id IS NULL ORDER BY p.aktif DESC, p.ad_soyad ASC`);
     const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
-    r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; });
+    const fg = await ikFirmaGecmisiYukle(r.rows.map(x => x.id));
+    r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; row.firma_gecmisi = fg.get(row.id) || []; });
     res.json(ikMaskele(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -22564,7 +22593,8 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       }
       _ayrYeni = null; _aktifYeni = true;
     }
-    const _ekipOnce = (await pool.query(`SELECT ekip_bilgisi FROM personel WHERE id=$1`, [id])).rows[0]?.ekip_bilgisi || null;
+    const _onceRow = (await pool.query(`SELECT ekip_bilgisi, UPPER(COALESCE(marka,'ERC')) AS marka FROM personel WHERE id=$1`, [id])).rows[0] || {};
+    const _ekipOnce = _onceRow.ekip_bilgisi || null;
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
@@ -22590,7 +22620,61 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       if (a.rows[0]) son = a.rows[0];
     }
     if (son) await orgPanel.uyelikSenkron(req, Number(id), _ekipOnce, son.ekip_bilgisi, { gerekce: "İK personel kartından değişti" });
+    // 04.11.2026: bordro firması değiştiyse firma geçmişine yazılır — eski firma geçerlilik gününden önce kapanır, yeni firma
+    // o günden başlar (marka_gecerli_tarih yoksa bugün). Geçmiş aylar eski firmasıyla listelenmeye devam eder.
+    if (son && marka && String(marka).toUpperCase() !== _onceRow.marka)
+      await ikFirmaGecmisiDegistir(Number(id), _onceRow.marka, String(marka).toUpperCase(), req.body.marka_gecerli_tarih, _eposta(req.user || optionalAuth(req)) || "sistem", "İK personel kartından firma değişti");
     res.json(son);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bordro firması geçmişi (04.11.2026): eski firma satırı geçerlilik gününden önce kapanır, yeni firma o günden açılır.
+// Önceki firmanın açık satırı yoksa işe giriş tarihinden (yoksa geçerlilik gününden) itibaren eski firma yazılır ki
+// geçmiş aylar boş kalmasın. Hiçbir satır silinmez.
+async function ikFirmaGecmisiDegistir(pid, eskiMarka, yeniMarka, gecerliTarih, olusturan, aciklama) {
+  const t = /^\d{4}-\d{2}-\d{2}$/.test(String(gecerliTarih || "")) ? gecerliTarih : ymdYerel(new Date());
+  const acik = (await pool.query(`SELECT id, baslangic FROM personel_firma_gecmisi WHERE personel_id=$1 AND bitis IS NULL ORDER BY baslangic DESC LIMIT 1`, [pid])).rows[0];
+  if (acik) {
+    if (String(acik.baslangic).slice(0, 10) >= t) await pool.query(`UPDATE personel_firma_gecmisi SET marka=$2, aciklama=COALESCE(aciklama,'')||' · aynı gün düzeltildi' WHERE id=$1`, [acik.id, yeniMarka]);
+    else await pool.query(`UPDATE personel_firma_gecmisi SET bitis=$2::date - 1 WHERE id=$1`, [acik.id, t]);
+  } else if (eskiMarka) {
+    const gir = (await pool.query(`SELECT to_char(ise_giris_tarihi,'YYYY-MM-DD') AS g FROM personel WHERE id=$1`, [pid])).rows[0]?.g;
+    const bas = gir && gir < t ? gir : null;
+    if (bas) await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, bitis, aciklama, olusturan) VALUES ($1,$2,$3,$4::date - 1,$5,$6) ON CONFLICT (personel_id, baslangic) DO NOTHING`,
+      [pid, eskiMarka, bas, t, "Önceki firma (otomatik, firma değişiminde)", olusturan]);
+  }
+  if (!(acik && String(acik.baslangic).slice(0, 10) >= t))
+    await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (personel_id, baslangic) DO UPDATE SET marka = EXCLUDED.marka, bitis = NULL, aciklama = EXCLUDED.aciklama`, [pid, yeniMarka, t, aciklama || null, olusturan]);
+  await pool.query(`INSERT INTO ik_islem_log (personel_id, islem, detay, kullanici) VALUES ($1,'FIRMA_DEGISIM',$2,$3)`,
+    [pid, `${eskiMarka || "—"} → ${yeniMarka} (${t})`, olusturan]).catch(() => {});
+}
+
+// Firma geçmişi listesi / elle satır ekleme (İK yazma yetkisi). Satır: marka, baslangic, bitis (boş = devam), aciklama.
+app.get("/hr/personel/:id/firma-gecmisi", ikOkuma, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, UPPER(marka) AS marka, to_char(baslangic,'YYYY-MM-DD') AS baslangic, to_char(bitis,'YYYY-MM-DD') AS bitis, aciklama, olusturan, created_at
+      FROM personel_firma_gecmisi WHERE personel_id=$1 ORDER BY baslangic`, [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/hr/personel/:id/firma-gecmisi", ikYazma, async (req, res) => {
+  try {
+    const pid = Number(req.params.id);
+    const marka = String(req.body?.marka || "").trim().toUpperCase();
+    const bas = String(req.body?.baslangic || "").slice(0, 10), bit = req.body?.bitis ? String(req.body.bitis).slice(0, 10) : null;
+    if (marka !== "ERC" && !altMarkaMi(marka)) return res.status(400).json({ error: "Firma: ERC ya da tanımlı alt marka" });
+    const _gecerliGun = (t) => /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(Date.parse(t)) && new Date(t).toISOString().slice(0, 10) === t;
+    if (!_gecerliGun(bas) || (bit && (!_gecerliGun(bit) || bit < bas))) return res.status(400).json({ error: "Başlangıç (ve varsa bitiş) tarihi YYYY-AA-GG olmalı; bitiş başlangıçtan önce olamaz" });
+    const _kapP = altMarkaKapsam(req);
+    if (_kapP && !_kapP.bordro.includes(marka)) return res.status(403).json({ ok: false, error: "Bu firma kapsamınızda değil" });
+    const _kimdir = _eposta(req.user || optionalAuth(req)) || "sistem";
+    const cak = await pool.query(`SELECT id FROM personel_firma_gecmisi WHERE personel_id=$1 AND baslangic <> $2 AND baslangic <= COALESCE($3::date,'9999-12-31') AND COALESCE(bitis,'9999-12-31') >= $2::date`, [pid, bas, bit]);
+    if (cak.rows.length) return res.status(409).json({ error: "Bu tarihler başka bir firma dönemiyle çakışıyor — önce o satırı düzeltin" });
+    const r = await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, bitis, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5,$6)
+      ON CONFLICT (personel_id, baslangic) DO UPDATE SET marka=EXCLUDED.marka, bitis=EXCLUDED.bitis, aciklama=EXCLUDED.aciklama RETURNING id`, [pid, marka, bas, bit, req.body?.aciklama || null, _kimdir]);
+    await pool.query(`INSERT INTO ik_islem_log (personel_id, islem, detay, kullanici) VALUES ($1,'FIRMA_GECMISI',$2,$3)`, [pid, `${marka} ${bas}–${bit || "devam"}`, _kimdir]).catch(() => {});
+    res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -30973,6 +31057,9 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT",
   "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS olusturan TEXT",
   "ALTER TABLE personel_maas_gecmisi ADD COLUMN IF NOT EXISTS gecerli_tarih DATE",
+  // 04.11.2026 (Orhan): bordro firması geçmişi — kişi hangi tarihler arasında hangi firmanın bordrosundaydı (ör. 15.07–30.09.2026
+  // AHY). Kartın güncel firması (personel.marka) üzerine yazıldığında geçmiş ay listeleri bu tablodan doğru firmayla süzülür.
+  "CREATE TABLE IF NOT EXISTS personel_firma_gecmisi (id SERIAL PRIMARY KEY, personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE, marka TEXT NOT NULL, baslangic DATE NOT NULL, bitis DATE, aciklama TEXT, olusturan TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (personel_id, baslangic))",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS birlestirildi_personel_id INTEGER", // 19.10.2026: mükerrer kayıt → ana kayıt (arşiv; listelenmez)
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
