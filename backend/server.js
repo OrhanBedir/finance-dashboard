@@ -320,6 +320,10 @@ const ALT_MARKA_VARSAYILAN = [
   { kod: "TEKNO", ad: "Teknocenter",  onek: "TEKNO", devir: "2026-10-14", bitis: null,         pay: 0.90, devralinan: "AHY" },
 ];
 let ALT_MARKALAR = ALT_MARKA_VARSAYILAN.map((x) => ({ ...x }));
+// 04.11.2026 (Orhan — anlaşma): maaş sorumluluğunun başladığı gün operasyon devrinden ayrı olabilir. Teknocenter 01.10.2026'dan
+// itibaren TÜM maaşları öder → Ekim maaşı Teknocenter'da tam (14.10 yarım ay kuralı maaşa uygulanmaz). İş / fatura / avans /
+// nakit penceresi markanın devir tarihinde (14.10) kalır; yalnız maaş tahakkuku (pay oranı, puantaj günleri) bu tarihi kullanır.
+const MAAS_DEVIR_OZEL = { TEKNO: "2026-10-01" };
 const _ertesiGun = (d) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
 function altMarka(kod) {
   const k = String(kod || "").trim().toUpperCase();
@@ -332,7 +336,9 @@ function markaProfil(kod) {
   const bordro = [m.kod];
   let d = m.devralinan, guard = 0;
   while (d && guard++ < 5) { if (!bordro.includes(d)) bordro.push(d); d = altMarka(d)?.devralinan || null; }
-  return { ...m, son: m.bitis ? _ertesiGun(m.bitis) : "9999-12-31", devirAy: m.devir.slice(0, 7), devirGun: Number(m.devir.slice(8, 10)), bordro };
+  const maasDevir = MAAS_DEVIR_OZEL[m.kod] || m.devir;
+  return { ...m, son: m.bitis ? _ertesiGun(m.bitis) : "9999-12-31", devirAy: m.devir.slice(0, 7), devirGun: Number(m.devir.slice(8, 10)), bordro,
+    maasDevir, maasDevirAy: maasDevir.slice(0, 7), maasDevirGun: Number(maasDevir.slice(8, 10)) };
 }
 const altMarkaKodlari = () => ALT_MARKALAR.map((m) => m.kod);
 const altMarkaMi = (kod) => !!altMarka(kod);
@@ -564,6 +570,7 @@ async function devirOdenenKalemleriGeriAl(kaynak = "açılış") {
 // çağrılınca TDZ hatasıyla açılışta çöküyordu; bu yüzden burada duruyor.
 pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS users_admin BOOLEAN DEFAULT FALSE`).catch(() => {});
 const { bindRequestToTenant, ensureTenantSchema, isIsolatedTenant, addIsolatedTenant, removeIsolatedTenant } = pool;
+const kiraciSema = require("./kiraciSema"); // 04.11.2026: izole kiracı şeması ↔ public eşitleme (eksik tablo / kolon)
 const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
@@ -1584,16 +1591,22 @@ function teknoOncesiMaasDonemi(req) {
   const k = req?.izinler?.mali_kapsam;
   if (!k || k === "ERC" || req.izinler.maas_goruntule !== true) return false;
   const donem = String(req.query?.donem || (req.query?.yil && req.query?.ay ? `${req.query.yil}-${String(req.query.ay).padStart(2, "0")}` : "") || "");
-  return /^\d{4}-\d{2}$/.test(donem) && donem < markaProfil(k).devirAy;
+  return /^\d{4}-\d{2}$/.test(donem) && donem < markaProfil(k).maasDevirAy;
 }
 // Kapsamlı maaş yetkilisinin (ör. İlhami — TEKNO) maaşını görebildiği personel = bordro markası kapsam markası olan kadro
 // (29.10.2026, Orhan kararı: devirle TEKNO bordrosuna geçen kadro da dahil). HARİÇ: personel kartı yönetim / backofis rolündeki
 // bir kullanıcı hesabına (user_id ya da e-posta) bağlı olanlar ve ERC geneli mali yetkililer — canlı kayıtta Orhan Bedir,
-// Nurcan Kuş, Hatice Omuş, Serdar Altınova (Şimşek yönetimi) TEKNO bordrolu ama maaşları İlhami'ye AÇILMAZ. Ad ile değil,
+// Nurcan Kuş, Hatice Omuş, Serdar Altınova (Şimşek yönetimi) TEKNO bordrolu; 04.11.2026'dan itibaren TEKNO kapsamında AÇIK
+// (bkz. KAPSAM_MAAS_YONETIM_ACIK), diğer alt markalarda bu kural geçerli. Ad ile değil,
 // bağlı hesabın rolüyle karar verilir; yeni atanan bir müdür de kendiliğinden hariç kalır. Kişinin kendi kartı her zaman açık.
 // Dönem kuralı ayrıca geçerli: devir ayından önceki (AHY / Şimşek dönemi) maaş satırı görünmez.
 const KAPSAM_MAAS_HARIC_ROLLER = ["admin", "platform_admin", "direktor", "genel_mudur", "muhasebe", "finance",
   "rollout_mudur", "bolge_mudur", "pm", "isg", "rollout"];
+// 04.11.2026 (Orhan: "burası Teknocenter ve maaşları olmalı — evet, görünsün"): TEKNO bordrolu yönetimin (Orhan Bedir,
+// Nurcan Kuş, Hatice Omuş …) maaşı Teknocenter mali yetkililerine (İlhami Şahin, teknocenter hesabı) AÇIK — rol hariç
+// tutması bu kapsamda uygulanmaz. Diğer alt markalarda (AHY) kural aynen sürer. Erişim yine yalnız maaş görme izni olan
+// ve MALİ YETKİ MATRİSİ'nde TEKNO kapsamlı hesaplara verilir; dönem kuralı (devir öncesi maaş satırı gizli) değişmez.
+const KAPSAM_MAAS_YONETIM_ACIK = new Set(["TEKNO"]);
 const _kapsamPersonelOnbellek = new Map(); // kapsam|kullanıcı → { t, ids }
 async function kapsamMaasPersonelleri(kapsam, u) {
   const benId = Number(u?.user_id || u?.id || 0), benEposta = _eposta(u);
@@ -1603,7 +1616,9 @@ async function kapsamMaasPersonelleri(kapsam, u) {
   let ids = new Set();
   try {
     const ercYetkililer = MALI_YETKI_MATRISI.filter((m) => m.kapsam === "ERC").map((m) => m.id);
-    const r = await pool.query(`SELECT p.id FROM personel p
+    const r = KAPSAM_MAAS_YONETIM_ACIK.has(String(kapsam || "").toUpperCase())
+      ? await pool.query(`SELECT p.id FROM personel p WHERE UPPER(COALESCE(p.marka,'')) = $1`, [kapsam])
+      : await pool.query(`SELECT p.id FROM personel p
       WHERE UPPER(COALESCE(p.marka,'')) = $1
         AND ( p.user_id = $4 OR (COALESCE($5,'') <> '' AND LOWER(TRIM(COALESCE(p.email,''))) = $5)
            OR NOT EXISTS (SELECT 1 FROM users u
@@ -1895,6 +1910,7 @@ app.put("/admin/users/:id/yetkiler", authMiddleware, requireAdmin, async (req, r
 // Aracın kira bedelini gizli yap / aç (yalnız tam admin) — hangi aracın gizleneceği kayıtlardan doğrulanıp seçilir
 app.put("/hr/araclar/:id/kira-gizli", authMiddleware, requireAdmin, async (req, res) => {
   try {
+    if (altMarkaKapsam(req)) return res.status(403).json({ ok: false, error: "Kira gizleme yalnız ERC yöneticisine açıktır" });
     const id = Number(req.params.id);
     const gizli = req.body?.kira_gizli === true;
     const cur = (await pool.query(`SELECT id, plaka, kira_gizli FROM araclar WHERE id=$1`, [id])).rows[0];
@@ -2053,7 +2069,7 @@ app.get("/finance/hedef-firmalar", authMiddleware, async (req, res) => {
   try {
     const liste = await hedefFirmalari(req.user);
     const rol = String(req.user?.role || "").toLowerCase();
-    const rows = MARKA_KASA_ROLLER.includes(rol) ? liste.map((kod) => { const P = markaProfil(kod); return { kod: P.kod, ad: P.ad, devir: P.devir, bitis: P.bitis || null }; }) : [];
+    const rows = MARKA_KASA_ROLLER.includes(rol) ? liste.map((kod) => { const P = markaProfil(kod); return { kod: P.kod, ad: P.ad, devir: P.devir, maas_devir: P.maasDevir, bitis: P.bitis || null }; }) : [];
     res.json({ ok: true, rows });
   } catch (e) { res.status(500).json({ ok: false, error: "Firma listesi alınamadı" }); }
 });
@@ -3340,7 +3356,7 @@ app.post("/auth/login", async (req, res) => {
     }
     const _mp = markaKod && !hwYukleme ? markaProfil(markaKod) : null;
     const markaProfilAlanlari = _mp
-      ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay }
+      ? { marka_devir: _mp.devir, marka_maas_devir: _mp.maasDevir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay }
       : {};
 
     const token = jwt.sign(
@@ -3440,7 +3456,7 @@ app.get("/auth/me", authMiddleware, async (req, res) => {
       marka: markaKod, marka_ad: markaAd, hw_yukleme: hwYukleme,
       users_admin: u.users_admin === true,
       ...(await oturumProfilAlanlari(u.id)), // mobil deneyim seçimi (personel / yönetim / taşeron)
-      ...(_mp ? { marka_devir: _mp.devir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
+      ...(_mp ? { marka_devir: _mp.devir, marka_maas_devir: _mp.maasDevir, marka_bitis: _mp.bitis, marka_bordro: _mp.bordro, marka_onek: _mp.onek, marka_pay: _mp.pay } : {}),
       ...(await (async () => { const pr = await omnixProfil.profilOku(pool, u.id).catch(() => ({}));
         const iz = etkinIzinHesapla({ ...u, yonetim_profili: pr.yonetim_profili, hw_yukleme: hwYukleme }, u.yetki_ayar); return Object.keys(iz).length ? { izinler: iz } : {}; })()),
       // Onay yetkisi özeti (eski listeler + tarihli devirler): mobil "Onaylar" sekmesi ilk çizimden itibaren doğru olsun
@@ -7909,6 +7925,39 @@ app.get("/master/list-detailed", async (req, res) => {
 });
 
 /* ================== DASHBOARD RESULT ================== */
+// Fiyat kaynağı (Bölge Analizi): PO (sahanın / kalemin PO fiyatı) → BOQ (PR satırına kaydedilmiş BoQ fiyatı) → KATALOG (satırın
+// BoQ sürümü, sahanın bölgesi) → YOK. Sıra /master/saha-kalemler ile aynıdır; BoQ/katalog fiyatı tahminidir (fiyat_tahmini).
+async function boqYedekFiyat(rows) {
+  const eksik = rows.filter((r) => !(Number(r.unit_price) > 0) && Number(r.done_qty) > 0 && r.id != null);
+  const boq = new Map(eksik.length ? (await pool.query(`SELECT id, boq_birim_fiyat, boq_para_birimi, boq_surum FROM master_works WHERE id = ANY($1::int[])`,
+    [eksik.map((r) => Number(r.id))])).rows.map((b) => [Number(b.id), b]) : []);
+  const katalogOnbellek = new Map();
+  const katalogFiyati = async (surum, kod, bolge) => {
+    if (!surum || !kod) return null;
+    const k = `${surum}|${kod}|${bolge}`;
+    if (!katalogOnbellek.has(k)) {
+      katalogOnbellek.set(k, await boqKatalog.kalemGetir(pool, surum, kod, bolge)
+        .then((x) => (x && x.birim_fiyat !== null ? { fiyat: Number(x.birim_fiyat), pb: x.para_birimi || "TRY" } : null)).catch(() => null));
+    }
+    return katalogOnbellek.get(k);
+  };
+  const out = [];
+  for (const r of rows) {
+    if (Number(r.unit_price) > 0) { out.push({ ...r, fiyat_kaynak: "PO", fiyat_tahmini: false }); continue; }
+    const b = boq.get(Number(r.id));
+    let fiyat = null, pb = "TRY", kaynak = "YOK", surum = b?.boq_surum || null;
+    if (b && Number(b.boq_birim_fiyat) > 0) { fiyat = Number(b.boq_birim_fiyat); pb = b.boq_para_birimi || "TRY"; kaynak = "BOQ"; }
+    else if (b) {
+      const k = await katalogFiyati(b.boq_surum, String(r.item_code || "").trim(), boqKatalog.bolgeNormalize(getRegionFromSiteCode(r.site_code)));
+      if (k) { fiyat = k.fiyat; pb = k.pb; kaynak = "KATALOG"; }
+    }
+    if (fiyat === null) { out.push({ ...r, fiyat_kaynak: "YOK", fiyat_tahmini: false }); continue; }
+    out.push({ ...r, unit_price: fiyat, total_done_amount: Number(r.done_qty || 0) * fiyat, currency: normalizeCurrency(pb),
+      fiyat_kaynak: kaynak, fiyat_surum: surum, fiyat_tahmini: true });
+  }
+  return out;
+}
+
 app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const isAdmin = req.user?.role === "admin";
   const subconName = req.user?.subcon_name || null;
@@ -7928,6 +7977,9 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
       // FERRUMX kapsamı hem "FERRUMX" hem "AHY_FERRUMX" satırlarını içerir
       rows = rows.filter((row) => subconRowMatches(scopeName, row.subcon_name));
     }
+    // 04.11.2026 (Orhan): Bölge Analizi (boq_yedek=1) — PO fiyatı yoksa işaretli BoQ fiyatı; PO açılınca PO fiyatı esas.
+    // Yalnız bu istekte uygulanır; ortak sorgu (hakediş, ödeme, fatura, diğer raporlar) PO-yalnız kalır.
+    if (req.query.boq_yedek === "1") rows = await boqYedekFiyat(rows);
 
     res.json({ ok: true, rows });
   } catch (err) {
@@ -9716,6 +9768,8 @@ app.get("/finance/personel-aylik-ozet", finansOkuma, async (req, res) => {
 // (15.07 devir); araçların hepsi AHY'nin — araclar.firma ile markaya süzülür.
 const PL_KIRA_TUTAR_SQL = `(CASE WHEN o.donem = '2026-07' THEN COALESCE(o.tutar,0) * 0.5 ELSE COALESCE(o.tutar,0) END)`;
 pool.query(`ALTER TABLE araclar ADD COLUMN IF NOT EXISTS firma TEXT DEFAULT 'AHY'`).catch(() => {});
+// 04.11.2026: ofis / depo firması (NULL = ERC / Şimşek) — firma yöneticisi yalnız kendi firmasının kaydını değiştirir
+pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS firma TEXT`).catch(() => {});
 pool.query(`ALTER TABLE masraf_belge ADD COLUMN IF NOT EXISTS ocr_para TEXT`).catch(() => {});
 // 15.10.2026 (Orhan): araç DEPOZİTOSU nakit akışında "Araç Kiraları" satırına düşer —
 // ödeme tarihinde gider, iade tarihinde eksi (geri dönüş). Parametreler kira sorgusuyla aynı:
@@ -9993,7 +10047,7 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
       const donemler = [];
       // AHY: Haziran'dan başla — devirden (15.07) SONRA ödenmiş eski dönem
       // avansları fazla ödeme olarak Temmuz'a devretsin (İK getDevirFazla kuralı)
-      const [dy0, dm0] = P.devirAy.split("-").map(Number);
+      const [dy0, dm0] = P.maasDevirAy.split("-").map(Number);
       let dd = marka === "AHY" ? new Date(Date.UTC(2026, 5, 1)) : new Date(Date.UTC(dy0, dm0 - 1, 1));
       const sonAy = P.bitis ? P.bitis.slice(0, 7) : "9999-12"; // bitmiş marka (AHY) son dönemini aşmaz
       while (dd.toISOString().slice(0, 7) < buAyStr && dd.toISOString().slice(0, 7) <= sonAy) {
@@ -10055,8 +10109,9 @@ app.get("/finance/marka-ozet", authMiddleware, async (req, res) => {
           // Devir ayı kuralı: devirden önceki dönem markanın değil; ay ortası devirde
           // (AHY 15.07) o ay yarım, devirden sonra işe girenlerde tam. Ay başı devirde
           // (TEKNO 01.10) ilk ay tam.
-          if (donem < P.devirAy) oran = 0;
-          else if (donem === P.devirAy && P.devirGun > 1) oran = (gStr && gStr >= P.devir) ? 1 : 0.5;
+          // Maaş devri (MAAS_DEVIR_OZEL): TEKNO 01.10 → Ekim tam
+          if (donem < P.maasDevirAy) oran = 0;
+          else if (donem === P.maasDevirAy && P.maasDevirGun > 1) oran = (gStr && gStr >= P.maasDevir) ? 1 : 0.5;
           let hak = Math.round(hakedilen * oran);
           // Ay ortası (2-14.07) girişlilerde anlaşma (17.08.2026): AHY payı tam
           // maaşın yarısı (ör. 55.000 → 27.500), hakedişi aşamaz — İK ekranıyla aynı.
@@ -13924,7 +13979,7 @@ async function haritaVerisi(req, { firma } = {}) {
     return ({ ok: true, kapsam: K ? K.ad : null, yil: yilSec, yillar_mevcut: [...new Set(sahalar.flatMap((s) => s.isler.flatMap((x) => x.yillar || [])))].sort(), firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
       hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
       rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
-      kmz_yetkili: !K && ["admin", "platform_admin"].includes(req.user?.role), // KMZ konum içe alma düğmesi (yalnız ERC yöneticisi)
+      kmz_yetkili: !!kmzYetkiKapsam(req.user, K), // KMZ konum içe alma düğmesi (ERC yöneticisi + Teknocenter yöneticisi kendi kapsamında)
       ozet: { saha: sahalar.length, is_kaydi: sahalar.reduce((a, s) => a + s.isler.length, 0), konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
         konum_kmz: sahalar.filter((s) => kullan(s) && s.konum.kaynak === "KMZ").length,
         is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
@@ -14112,12 +14167,19 @@ async function kmzTablolar() {
     degistiren TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
   _kmzTabloHazir = true;
 }
-// Yalnız ERC yöneticisi: alt marka (Teknocenter / AHY) ve taşeron hesabı KMZ içe alamaz, önizleyemez
-async function kmzYetkili(req) {
-  if (!req.user || taseronMu(req.user)) return false;
-  if (!["admin", "platform_admin"].includes(req.user.role)) return false;
-  return !(await rolloutKapsam(req));
+// KMZ içe alma yetkisi: ERC yöneticisi tüm sahalar için ({ tam: true }).
+// 04.11.2026 (Orhan): 1 Kasım'dan itibaren saha işlerinin tamamını Teknocenter yapıyor — Teknocenter yöneticisi
+// (admin / direktor: "teknocenter" ve İlhami Şahin hesabı) KMZ'yi YALNIZ kendi kapsamındaki sahalar için önizler / uygular
+// ({ tam: false, kod: "TEKNO" }); başka firmanın sahası listede, raporda ve yazmada yer almaz. AHY, taşeron, muhasebe, İSG: yok.
+function kmzYetkiKapsam(u, K) {
+  if (!u || taseronMu(u)) return null;
+  if (!K) return ["admin", "platform_admin"].includes(u.role) ? { tam: true } : null;
+  if (K.kod === "TEKNO" && K.goruntule && ["admin", "direktor"].includes(u.role)) return { tam: false, kod: K.kod };
+  return null;
 }
+async function kmzYetki(req) { return req.user ? kmzYetkiKapsam(req.user, await rolloutKapsam(req)) : null; }
+// Yetkinin saha kümesi: tam → sistemdeki tüm fiziksel sahalar; firma → yalnız firma kapsamı (haritadaki kuralla aynı)
+async function kmzKapsamKimlikleri(Y) { return Y.tam ? kmzSistemKimlikleri() : kmzTeknoKimlikleri(); }
 // Sistemdeki doğrulanmış fiziksel Site ID'ler (Rollout + Günlük İş Girişi iş kodları, sahaKimlik ile)
 async function kmzSistemKimlikleri() {
   const r = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc FROM rollout_progress WHERE COALESCE(TRIM(site_code),'') <> ''
@@ -14145,7 +14207,8 @@ const kmzSatir = (x, isKodlari) => ({ fiziksel_id: x.fiziksel_id, sinif: x.sinif
 
 app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC ve Teknocenter yöneticisine açıktır" });
     if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: "KMZ dosyası seçilmedi" });
     if (!/\.kmz$/i.test(req.file.originalname || "")) return res.status(400).json({ ok: false, error: "Yalnız .kmz dosyası yüklenebilir" });
     let okuma;
@@ -14153,13 +14216,15 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
     try { okuma = kmzKonum.kmzOku(req.file.buffer, utf8Name(req.file.originalname)); }
     catch (e) { return res.status(400).json({ ok: false, error: `KMZ okunamadı: ${e.message}` }); }
     await kmzTablolar();
-    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    // Teknocenter hesabında "sistem" = yalnız Teknocenter kapsamı: kapsam dışı saha eşleşmeyen sayılır (adı / konumu dönmez)
+    const [sistem, tekno] = await Promise.all([kmzKapsamKimlikleri(Y), kmzTeknoKimlikleri()]);
     const ids = okuma.gruplar.map((g) => g.fiziksel_id).filter((id) => sistem.has(id));
     const mevcut = new Map((ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []).map((k) => [k.fiziksel_id, k]));
     const E = kmzKonum.eslestir(okuma, { sistemIdler: new Set(sistem.keys()), teknoIdler: new Set(tekno.keys()), mevcut });
     const kmzIdler = new Set(okuma.gruplar.map((g) => g.fiziksel_id));
-    const onceki = (await pool.query(`SELECT id, created_at, durum FROM saha_konum_ice_alma WHERE sha256 = $1 ORDER BY id DESC LIMIT 1`, [okuma.ozet.sha256])).rows[0] || null;
-    const ozet = { ...E.ozet, teknocenter_toplam: tekno.size, teknocenter_kmz_disi: [...tekno.keys()].filter((id) => !kmzIdler.has(id)).length };
+    const onceki = (await pool.query(`SELECT id, created_at, durum FROM saha_konum_ice_alma WHERE sha256 = $1 AND ($2::text IS NULL OR ozet->>'kapsam' = $2)
+      ORDER BY id DESC LIMIT 1`, [okuma.ozet.sha256, Y.tam ? null : Y.kod])).rows[0] || null;
+    const ozet = { ...E.ozet, teknocenter_toplam: tekno.size, teknocenter_kmz_disi: [...tekno.keys()].filter((id) => !kmzIdler.has(id)).length, kapsam: Y.tam ? null : Y.kod };
     const ia = (await pool.query(`INSERT INTO saha_konum_ice_alma (dosya_adi, sha256, boyut, kml_sayisi, okunan_nokta, kayit_tarihleri, ozet, yukleyen)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
       [okuma.ozet.dosya_adi, okuma.ozet.sha256, okuma.ozet.boyut, okuma.ozet.kml_sayisi, okuma.ozet.okunan_nokta, okuma.ozet.kayit_tarihleri,
@@ -14189,16 +14254,20 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
         okuma.ozet.dis_baglanti ? `${okuma.ozet.dis_baglanti} dış bağlantı (NetworkLink) izlenmedi.` : "Dış bağlantı yok; arşiv dışından veri okunmadı.",
         `${okuma.tekrarlayici_sayisi} tekrarlayıcı (repeater) noktası saha sayılmadı; ${okuma.kodsuz.length} noktadan Site ID çıkarılamadı.`,
         ...(okuma.ozet.durum_alani === false ? ["Dosyada saha durumu alanı yok (yalnız Site ID + koordinat) — konum KMZ'si olarak kabul edildi; KMZ konumu TSSR'dan önce gelir, TSSR farkı uyarı olarak kalır."] : []),
+        ...(Y.tam ? [] : [`Yalnız ${markaProfil(Y.kod).ad} kapsamındaki sahalar eşleştirildi ve uygulanabilir; diğer sahalar "eşleşmeyen" sayılır.`]),
       ] });
   } catch (e) { console.error("KMZ ONIZLE ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.get("/saha-konum/kmz/ice-almalar", authMiddleware, async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await kmzTablolar();
+    // Firma hesabı yalnız kendi kapsamıyla yapılmış içe almaları görür
     const r = await pool.query(`SELECT id, dosya_adi, sha256, okunan_nokta, kayit_tarihleri, durum, yukleyen, created_at, uygulayan, uygulandi_at,
-      ozet->'eslesen_fiziksel_saha' AS eslesen, uygulama->'yazilan' AS yazilan FROM saha_konum_ice_alma ORDER BY id DESC LIMIT 30`);
+      ozet->'eslesen_fiziksel_saha' AS eslesen, uygulama->'yazilan' AS yazilan FROM saha_konum_ice_alma
+      WHERE ($1::text IS NULL OR ozet->>'kapsam' = $1) ORDER BY id DESC LIMIT 30`, [Y.tam ? null : Y.kod]);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -14207,18 +14276,19 @@ app.get("/saha-konum/kmz/ice-almalar", authMiddleware, async (req, res) => {
 app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC ve Teknocenter yöneticisine açıktır" });
     await kmzTablolar();
     const iaId = Number(req.params.id);
     const ia = (await client.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
-    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    if (!ia || (!Y.tam && ia.ozet?.kapsam !== Y.kod)) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
     const secimler = (Array.isArray(req.body?.secimler) ? req.body.secimler : []).filter((x) => x && x.kaynak === "KMZ")
       .map((x) => String(x.fiziksel_id || "").toUpperCase().trim()).filter(Boolean);
     const tekil = [...new Set(secimler)];
     if (!tekil.length) return res.status(400).json({ ok: false, error: "Uygulanacak saha seçilmedi" });
     if (tekil.length > 5000) return res.status(400).json({ ok: false, error: "Tek seferde en çok 5000 saha" });
     const adaylar = new Map((await client.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 AND fiziksel_id = ANY($2)`, [iaId, tekil])).rows.map((a) => [a.fiziksel_id, a]));
-    const sistem = await kmzSistemKimlikleri();
+    const sistem = await kmzKapsamKimlikleri(Y); // firma hesabı: yalnız kendi kapsamındaki saha yazılır
     await client.query("BEGIN");
     const mevcutlar = new Map((await client.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1) FOR UPDATE`, [tekil])).rows.map((k) => [k.fiziksel_id, k]));
     const yazilan = [], atlanan = [];
@@ -14226,14 +14296,15 @@ app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
       const a = adaylar.get(id);
       if (!a) { atlanan.push({ fiziksel_id: id, neden: "Bu içe almada aday yok" }); continue; }
       if (a.sinif_kmz !== "KABUL") { atlanan.push({ fiziksel_id: id, neden: `KMZ konumu belirsiz: ${a.neden || ""}` }); continue; }
-      if (!sistem.has(id)) { atlanan.push({ fiziksel_id: id, neden: "Sistemde bu fiziksel saha yok" }); continue; }
+      if (!sistem.has(id)) { atlanan.push({ fiziksel_id: id, neden: Y.tam ? "Sistemde bu fiziksel saha yok" : "Firma kapsamında bu saha yok" }); continue; }
       // Sınıf güncel kayıtla YENİDEN hesaplanır (önizlemeden sonra konum değiştiyse eski karar uygulanmaz)
       const m = mevcutlar.get(id);
       const tek = kmzKonum.eslestir({ gruplar: [{ fiziksel_id: id, lat: Number(a.lat), lng: Number(a.lng), sinif: "KABUL", nedenler: [] }], kodsuz: [], gecersiz: [], ozet: {} },
         { sistemIdler: new Set([id]), mevcut: new Map(m ? [[id, m]] : []) }).satirlar[0];
       if (tek.sinif === "UYUMLU") { atlanan.push({ fiziksel_id: id, neden: `Mevcut konumla uyumlu (${tek.neden}) — değiştirilmedi` }); continue; }
       if (!["YENI", "CELISKI"].includes(tek.sinif)) { atlanan.push({ fiziksel_id: id, neden: tek.neden || tek.sinif }); continue; }
-      if (m && m.kaynak === "MANUEL" && tek.sinif === "CELISKI" && req.body?.manuel_ez !== true) { atlanan.push({ fiziksel_id: id, neden: "Elle girilmiş konum — ayrıca onay gerekir" }); continue; }
+      // Elle girilmiş konumu yalnız ERC yöneticisi (manuel_ez onayıyla) ezebilir; firma hesabı ezemez
+      if (m && m.kaynak === "MANUEL" && tek.sinif === "CELISKI" && (req.body?.manuel_ez !== true || !Y.tam)) { atlanan.push({ fiziksel_id: id, neden: "Elle girilmiş konum — ayrıca onay gerekir" }); continue; }
       const kml = `${a.kml_dosya}#${a.placemark_id || "?"} (${a.ad})`;
       const uyarilar = tek.sinif === "CELISKI" ? [`Önceki ${m.kaynak} konumu (${Number(m.lat).toFixed(6)}, ${Number(m.lng).toFixed(6)}) KMZ ile değiştirildi: ${tek.neden}`] : [];
       await client.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, belge_url, sayfa, ham, adres, saha_adi, il, ilce, kaynak_site_code,
@@ -14259,13 +14330,14 @@ app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
 // Önizleme raporu (Excel): özet + eşleşen / çelişen / belirsiz / geçersiz / eşleşmeyen + Teknocenter'da olup KMZ'de olmayan
 app.get("/saha-konum/kmz/:id/rapor", authMiddleware, async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await kmzTablolar();
     const iaId = Number(req.params.id);
     const ia = (await pool.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
-    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    if (!ia || (!Y.tam && ia.ozet?.kapsam !== Y.kod)) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
     const aday = (await pool.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 ORDER BY fiziksel_id`, [iaId])).rows;
-    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    const [sistem, tekno] = await Promise.all([kmzKapsamKimlikleri(Y), kmzTeknoKimlikleri()]);
     const mevcut = new Map((await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [aday.map((a) => a.fiziksel_id)])).rows.map((k) => [k.fiziksel_id, k]));
     const wb = new ExcelJS.Workbook();
     const sayfa = (ad, kolonlar, satirlar) => {
@@ -22023,6 +22095,29 @@ async function ikDonemleriYukle(ids) {
   r.rows.forEach(d => { if (!m.has(d.personel_id)) m.set(d.personel_id, []); m.get(d.personel_id).push(d); });
   return m;
 }
+// Bordro firması geçmişi (04.11.2026): personel_id → [{marka, baslangic, bitis}] (tablo yoksa boş — eski davranış)
+async function ikFirmaGecmisiYukle(ids) {
+  const m = new Map();
+  if (!ids || !ids.length) return m;
+  const r = await pool.query(
+    `SELECT personel_id, UPPER(marka) AS marka, to_char(baslangic,'YYYY-MM-DD') AS baslangic, to_char(bitis,'YYYY-MM-DD') AS bitis, aciklama
+       FROM personel_firma_gecmisi WHERE personel_id = ANY($1::int[]) ORDER BY baslangic`, [ids]).catch(() => ({ rows: [] }));
+  r.rows.forEach(d => { if (!m.has(d.personel_id)) m.set(d.personel_id, []); m.get(d.personel_id).push(d); });
+  return m;
+}
+// Ayın bordro firması: ay içinde en çok gün kapsayan firma geçmişi satırı (eşitlikte sonraki); kesişen satır yoksa null
+// (kartın güncel firması geçerli kalır). Ör. Temmuz 2026: 01–14 Şimşek, 15–31 AHY → AHY.
+function ikDonemFirmasi(gecmis, ayBas, aySon) {
+  let en = null, enGun = 0;
+  for (const g of gecmis || []) {
+    const bas = g.baslangic > ayBas ? g.baslangic : ayBas;
+    const bit = g.bitis && g.bitis < aySon ? g.bitis : aySon;
+    if (bas > bit) continue;
+    const gun = Math.round((Date.parse(bit) - Date.parse(bas)) / 86400000) + 1;
+    if (gun >= enGun) { en = g.marka; enGun = gun; }
+  }
+  return en;
+}
 // Aynı ay içinde ayrılıp yeniden başlama (20.10.2026): güncel dönem o ayda başlıyorsa ve aynı ayda kapanmış
 // bir dönem varsa, o kapanmış dönem (kendi maaş künyesiyle) ek segment olarak döner — günler iki kez sayılmaz,
 // aradaki boşluk hakedişe girmez. Künyede maaş yoksa segment "bilgi eksik" sayılır (tahmin yok).
@@ -22335,11 +22430,16 @@ app.get("/hr/personel", taseronDegilOkuma, async (req, res) => {
         WHERE p.birlestirildi_personel_id IS NULL
         ORDER BY p.aktif DESC, p.ad_soyad ASC`, [donem]);
       const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
+      const fg = await ikFirmaGecmisiYukle(r.rows.map(x => x.id));
       const [_y, _m] = donem.split("-").map(Number);
       const ayBas = `${donem}-01`, aySon = `${donem}-${String(new Date(_y, _m, 0).getDate()).padStart(2, "0")}`;
       r.rows.forEach(row => {
         const arsiv = dm.get(row.id) || [];
         row.donemler = arsiv;
+        // 04.11.2026: o ayın bordro firması (ör. Ağustos 2026 → AHY); kartın güncel firması (marka) değişmez
+        row.firma_gecmisi = fg.get(row.id) || [];
+        const dmk = ikDonemFirmasi(row.firma_gecmisi, ayBas, aySon);
+        if (dmk) row.donem_marka = dmk;
         const sec = ikDonemSec(row, arsiv, ayBas, aySon);
         if (!sec) return;
         if (sec.disinda) { row.donem_disi = true; return; }
@@ -22355,7 +22455,8 @@ app.get("/hr/personel", taseronDegilOkuma, async (req, res) => {
     }
     const r = await pool.query(`SELECT p.*, ${ikEksikSql("p.net_maas")} FROM personel p WHERE p.birlestirildi_personel_id IS NULL ORDER BY p.aktif DESC, p.ad_soyad ASC`);
     const dm = await ikDonemleriYukle(r.rows.map(x => x.id));
-    r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; });
+    const fg = await ikFirmaGecmisiYukle(r.rows.map(x => x.id));
+    r.rows.forEach(row => { row.donemler = dm.get(row.id) || []; row.firma_gecmisi = fg.get(row.id) || []; });
     res.json(ikMaskele(req, r.rows));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -22511,7 +22612,8 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       }
       _ayrYeni = null; _aktifYeni = true;
     }
-    const _ekipOnce = (await pool.query(`SELECT ekip_bilgisi FROM personel WHERE id=$1`, [id])).rows[0]?.ekip_bilgisi || null;
+    const _onceRow = (await pool.query(`SELECT ekip_bilgisi, UPPER(COALESCE(marka,'ERC')) AS marka FROM personel WHERE id=$1`, [id])).rows[0] || {};
+    const _ekipOnce = _onceRow.ekip_bilgisi || null;
     const r = await pool.query(
       `UPDATE personel SET ad_soyad=$1,tc_no=$2,dogum_tarihi=$3,telefon=$4,email=$5,unvan=$6,
         bolge=$7,ise_giris_tarihi=$8,isten_ayrilma_tarihi=$9,net_maas=$10,bankadan_gosterilen=$11,
@@ -22537,7 +22639,61 @@ app.put("/hr/personel/:id", ikYazma, async (req, res) => {
       if (a.rows[0]) son = a.rows[0];
     }
     if (son) await orgPanel.uyelikSenkron(req, Number(id), _ekipOnce, son.ekip_bilgisi, { gerekce: "İK personel kartından değişti" });
+    // 04.11.2026: bordro firması değiştiyse firma geçmişine yazılır — eski firma geçerlilik gününden önce kapanır, yeni firma
+    // o günden başlar (marka_gecerli_tarih yoksa bugün). Geçmiş aylar eski firmasıyla listelenmeye devam eder.
+    if (son && marka && String(marka).toUpperCase() !== _onceRow.marka)
+      await ikFirmaGecmisiDegistir(Number(id), _onceRow.marka, String(marka).toUpperCase(), req.body.marka_gecerli_tarih, _eposta(req.user || optionalAuth(req)) || "sistem", "İK personel kartından firma değişti");
     res.json(son);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Bordro firması geçmişi (04.11.2026): eski firma satırı geçerlilik gününden önce kapanır, yeni firma o günden açılır.
+// Önceki firmanın açık satırı yoksa işe giriş tarihinden (yoksa geçerlilik gününden) itibaren eski firma yazılır ki
+// geçmiş aylar boş kalmasın. Hiçbir satır silinmez.
+async function ikFirmaGecmisiDegistir(pid, eskiMarka, yeniMarka, gecerliTarih, olusturan, aciklama) {
+  const t = /^\d{4}-\d{2}-\d{2}$/.test(String(gecerliTarih || "")) ? gecerliTarih : ymdYerel(new Date());
+  const acik = (await pool.query(`SELECT id, baslangic FROM personel_firma_gecmisi WHERE personel_id=$1 AND bitis IS NULL ORDER BY baslangic DESC LIMIT 1`, [pid])).rows[0];
+  if (acik) {
+    if (String(acik.baslangic).slice(0, 10) >= t) await pool.query(`UPDATE personel_firma_gecmisi SET marka=$2, aciklama=COALESCE(aciklama,'')||' · aynı gün düzeltildi' WHERE id=$1`, [acik.id, yeniMarka]);
+    else await pool.query(`UPDATE personel_firma_gecmisi SET bitis=$2::date - 1 WHERE id=$1`, [acik.id, t]);
+  } else if (eskiMarka) {
+    const gir = (await pool.query(`SELECT to_char(ise_giris_tarihi,'YYYY-MM-DD') AS g FROM personel WHERE id=$1`, [pid])).rows[0]?.g;
+    const bas = gir && gir < t ? gir : null;
+    if (bas) await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, bitis, aciklama, olusturan) VALUES ($1,$2,$3,$4::date - 1,$5,$6) ON CONFLICT (personel_id, baslangic) DO NOTHING`,
+      [pid, eskiMarka, bas, t, "Önceki firma (otomatik, firma değişiminde)", olusturan]);
+  }
+  if (!(acik && String(acik.baslangic).slice(0, 10) >= t))
+    await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (personel_id, baslangic) DO UPDATE SET marka = EXCLUDED.marka, bitis = NULL, aciklama = EXCLUDED.aciklama`, [pid, yeniMarka, t, aciklama || null, olusturan]);
+  await pool.query(`INSERT INTO ik_islem_log (personel_id, islem, detay, kullanici) VALUES ($1,'FIRMA_DEGISIM',$2,$3)`,
+    [pid, `${eskiMarka || "—"} → ${yeniMarka} (${t})`, olusturan]).catch(() => {});
+}
+
+// Firma geçmişi listesi / elle satır ekleme (İK yazma yetkisi). Satır: marka, baslangic, bitis (boş = devam), aciklama.
+app.get("/hr/personel/:id/firma-gecmisi", ikOkuma, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT id, UPPER(marka) AS marka, to_char(baslangic,'YYYY-MM-DD') AS baslangic, to_char(bitis,'YYYY-MM-DD') AS bitis, aciklama, olusturan, created_at
+      FROM personel_firma_gecmisi WHERE personel_id=$1 ORDER BY baslangic`, [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/hr/personel/:id/firma-gecmisi", ikYazma, async (req, res) => {
+  try {
+    const pid = Number(req.params.id);
+    const marka = String(req.body?.marka || "").trim().toUpperCase();
+    const bas = String(req.body?.baslangic || "").slice(0, 10), bit = req.body?.bitis ? String(req.body.bitis).slice(0, 10) : null;
+    if (marka !== "ERC" && !altMarkaMi(marka)) return res.status(400).json({ error: "Firma: ERC ya da tanımlı alt marka" });
+    const _gecerliGun = (t) => /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(Date.parse(t)) && new Date(t).toISOString().slice(0, 10) === t;
+    if (!_gecerliGun(bas) || (bit && (!_gecerliGun(bit) || bit < bas))) return res.status(400).json({ error: "Başlangıç (ve varsa bitiş) tarihi YYYY-AA-GG olmalı; bitiş başlangıçtan önce olamaz" });
+    const _kapP = altMarkaKapsam(req);
+    if (_kapP && !_kapP.bordro.includes(marka)) return res.status(403).json({ ok: false, error: "Bu firma kapsamınızda değil" });
+    const _kimdir = _eposta(req.user || optionalAuth(req)) || "sistem";
+    const cak = await pool.query(`SELECT id FROM personel_firma_gecmisi WHERE personel_id=$1 AND baslangic <> $2 AND baslangic <= COALESCE($3::date,'9999-12-31') AND COALESCE(bitis,'9999-12-31') >= $2::date`, [pid, bas, bit]);
+    if (cak.rows.length) return res.status(409).json({ error: "Bu tarihler başka bir firma dönemiyle çakışıyor — önce o satırı düzeltin" });
+    const r = await pool.query(`INSERT INTO personel_firma_gecmisi (personel_id, marka, baslangic, bitis, aciklama, olusturan) VALUES ($1,$2,$3,$4,$5,$6)
+      ON CONFLICT (personel_id, baslangic) DO UPDATE SET marka=EXCLUDED.marka, bitis=EXCLUDED.bitis, aciklama=EXCLUDED.aciklama RETURNING id`, [pid, marka, bas, bit, req.body?.aciklama || null, _kimdir]);
+    await pool.query(`INSERT INTO ik_islem_log (personel_id, islem, detay, kullanici) VALUES ($1,'FIRMA_GECMISI',$2,$3)`, [pid, `${marka} ${bas}–${bit || "devam"}`, _kimdir]).catch(() => {});
+    res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -27348,6 +27504,37 @@ async function aracGecmisYaz(eski, olay, aciklama, bitis) {
   ).catch(e => console.error("[arac-gecmis]", e.message));
 }
 
+// 04.11.2026 (Orhan): Teknocenter panelinde araç / ofis ekle-düzenle (ERC'deki gibi). Firma yöneticisi (alt marka; İK yazma
+// yetkili: teknocenter admin, İlhami direktör) YALNIZ kendi kapsamındaki (bordro: TEKNO + devraldığı AHY) kaydı değiştirir;
+// başka firmanın aracı / ofisi 403. ERC kullanıcıları için davranış aynen.
+const aracKapsamKapisi = (aracIdBul) => async (req, res, next) => {
+  try {
+    if (!altMarkaKapsam(req)) return next();
+    const id = await aracIdBul(req);
+    if (!id) return res.status(404).json({ ok: false, error: "Araç bulunamadı" });
+    const er = await aracErisim(req, id);
+    if (!er.ok) return res.status(er.status).json({ ok: false, error: er.error });
+    next();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+};
+const aracIdParam = (req) => req.params.id;
+const aracIdTablodan = (tablo, param) => async (req) => (await pool.query(`SELECT arac_id FROM ${tablo} WHERE id=$1`, [req.params[param]])).rows[0]?.arac_id;
+// Ofis / depo firması: NULL = ERC (Şimşek). Alt marka yalnız kendi kapsamındaki firmayla işaretli kaydı değiştirir.
+const ofisKapsamda = (k, firma) => !k || (!!firma && k.bordro.map((x) => String(x).toUpperCase()).includes(String(firma).toUpperCase()));
+const ofisKapsamKapisi = (ofisIdBul) => async (req, res, next) => {
+  try {
+    const k = altMarkaKapsam(req);
+    if (!k) return next();
+    const id = await ofisIdBul(req);
+    const o = id ? (await pool.query(`SELECT id, firma FROM ofis_depo WHERE id=$1`, [id])).rows[0] : null;
+    if (!o) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı" });
+    if (!ofisKapsamda(k, o.firma)) return res.status(403).json({ ok: false, error: "Bu ofis / depo firmanızın kapsamında değil" });
+    next();
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+};
+const ofisIdParam = (req) => req.params.id;
+const ofisFirmaGecerli = (v) => { const f = String(v || "").trim().toUpperCase(); return !f || f === "ERC" ? null : (altMarkaMi(f) ? f : undefined); };
+
 app.get("/hr/araclar", async (req, res) => {
   await ensureAracKmTable().catch(() => {});
   const { rows } = await pool.query(`
@@ -27375,7 +27562,7 @@ app.get("/hr/araclar", async (req, res) => {
   res.json(rows);
 });
 
-app.post("/hr/araclar/:id/km", ikYazma, async (req, res) => {
+app.post("/hr/araclar/:id/km", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     await ensureAracKmTable();
     const km = Number(req.body.km);
@@ -27389,7 +27576,7 @@ app.post("/hr/araclar/:id/km", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-km/:id", aracSilme, async (req, res) => {
+app.delete("/hr/arac-km/:id", aracSilme, aracKapsamKapisi(aracIdTablodan("arac_km_log", "id")), async (req, res) => {
   try {
     await pool.query(`DELETE FROM arac_km_log WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
@@ -27407,6 +27594,10 @@ app.post("/hr/araclar", ikYazma, async (req, res) => {
     const gecerliDonem = /^\d{4}-\d{2}$/.test(String(kira_gecerli_donem || "")) ? kira_gecerli_donem : null;
     const mulkiyet = String(mulkiyet_turu || "KIRALIK").toUpperCase() === "SIRKET" ? "SIRKET" : "KIRALIK";
     const norm = (plaka || "").replace(/\s+/g, "").toUpperCase();
+    // Firma yöneticisi: aynı plaka başka firmanın aracıysa üzerine yazamaz; yeni araç kendi firmasına kaydedilir
+    const kArac = altMarkaKapsam(req);
+    const varolan = kArac ? (await pool.query(`SELECT id, firma FROM araclar WHERE plaka=$1`, [norm])).rows[0] : null;
+    if (kArac && varolan && !aracKapsamda(kArac, varolan.firma)) return res.status(403).json({ ok: false, error: "Bu plaka başka firmanın aracı olarak kayıtlı" });
     const { rows } = await pool.query(
       `INSERT INTO araclar (plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
         kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,sigorta_bitis,muayene_bitis,durum,notlar,aktif,odeme_tipi,donem_gunu,
@@ -27428,11 +27619,15 @@ app.post("/hr/araclar", ikYazma, async (req, res) => {
        mulkiyet, sahip_firma||null,
        kira_kdv_haric ? Number(kira_kdv_haric) : null, kira_kdv_orani === undefined || kira_kdv_orani === "" ? null : Number(kira_kdv_orani), gecerliDonem]
     );
+    if (kArac && !varolan && rows[0]) {
+      const f = await pool.query(`UPDATE araclar SET firma=$2 WHERE id=$1 RETURNING *`, [rows[0].id, kArac.kod]);
+      return res.json(f.rows[0]);
+    }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/araclar/:id", ikYazma, async (req, res) => {
+app.put("/hr/araclar/:id", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     const { plaka,marka,model,yil,tip,kiralama_firmasi,sozlesme_no,
             kira_baslangic,kira_bitis,aylik_kira,bolge,surucu,
@@ -27490,7 +27685,7 @@ app.put("/hr/araclar/:id", ikYazma, async (req, res) => {
 });
 
 // Sadece durum güncelle (AKTİF/PASİF/SERVİSTE) — diğer alanları bozmadan
-app.put("/hr/araclar/:id/durum", ikYazma, async (req, res) => {
+app.put("/hr/araclar/:id/durum", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     const { durum } = req.body;
     if (!["AKTİF", "PASİF", "SERVİSTE"].includes(durum))
@@ -28040,13 +28235,13 @@ app.get("/hr/arac-kira-odemeler", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/araclar/:id", aracSilme, async (req, res) => {
+app.delete("/hr/araclar/:id", aracSilme, aracKapsamKapisi(aracIdParam), async (req, res) => {
   await pool.query("UPDATE araclar SET aktif=false WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
 // Araç belge upload — turu: SOZLESME | RUHSAT | SIGORTA | MUAYENE | DIGER
-app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (req, res) => {
+app.post("/hr/araclar/:id/belge", ikYazma, aracKapsamKapisi(aracIdParam), aracUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -28068,7 +28263,7 @@ app.post("/hr/araclar/:id/belge", ikYazma, aracUpload.single("dosya"), async (re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/arac-belge/:id", ikYazma, async (req, res) => {
+app.delete("/hr/arac-belge/:id", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_belgeler", "id")), async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM arac_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
@@ -28268,7 +28463,7 @@ app.put("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-teslim-foto/:fid", ikYazma, async (req, res) => {
+app.delete("/hr/arac-teslim-foto/:fid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_teslim_foto", "fid")), async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const f0 = await pool.query(`SELECT * FROM arac_teslim_foto WHERE id=$1`, [req.params.fid]);
@@ -28317,7 +28512,7 @@ app.get("/hr/araclar/:id/lastik", async (req, res) => {
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post("/hr/araclar/:id/lastik", ikYazma, async (req, res) => {
+app.post("/hr/araclar/:id/lastik", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
   try {
     await ensureAracKmTable().catch(() => {});
     const er = await aracErisim(req, req.params.id);
@@ -28337,7 +28532,7 @@ app.post("/hr/araclar/:id/lastik", ikYazma, async (req, res) => {
     res.json({ ok: true, id: lid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
+app.put("/hr/arac-lastik/:lid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), async (req, res) => {
   try {
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
     const eski = l0.rows[0];
@@ -28363,7 +28558,7 @@ app.put("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.delete("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
+app.delete("/hr/arac-lastik/:lid", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), async (req, res) => {
   try {
     if (!aracSilebilir(req)) return res.status(403).json({ error: "Silme yetkiniz yok" });
     const l0 = await pool.query(`SELECT * FROM arac_lastik WHERE id=$1`, [req.params.lid]);
@@ -28377,7 +28572,7 @@ app.delete("/hr/arac-lastik/:lid", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Lastik fotoğrafı / belgesi (tip=foto | belge)
-app.post("/hr/arac-lastik/:lid/dosya", ikYazma, (req, res, next) => {
+app.post("/hr/arac-lastik/:lid/dosya", ikYazma, aracKapsamKapisi(aracIdTablodan("arac_lastik", "lid")), (req, res, next) => {
   aracFotoUpload.single("dosya")(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Dosya 15 MB'ı aşıyor" : err.message });
     next();
@@ -28720,7 +28915,7 @@ pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS donem_gunu INTEGER`).
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lat NUMERIC(9,6)`).catch(() => {});
 pool.query(`ALTER TABLE ofis_depo ADD COLUMN IF NOT EXISTS lng NUMERIC(9,6)`).catch(() => {});
 
-app.post("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
+app.post("/hr/ofis/:id/kira-ode", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const { donem, tutar, tarih, aciklama, kasadan_dus } = req.body;
     if (!/^\d{4}-\d{2}$/.test(String(donem || ""))) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -28737,7 +28932,7 @@ app.post("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id/kira-ode", ikYazma, async (req, res) => {
+app.delete("/hr/ofis/:id/kira-ode", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const donem = String(req.query.donem || "");
     if (!/^\d{4}-\d{2}$/.test(donem)) return res.status(400).json({ error: "Geçersiz dönem (YYYY-AA)" });
@@ -28776,20 +28971,24 @@ app.post("/hr/ofis", ikYazma, async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
+    // Firma: firma yöneticisi kendi firmasına kaydeder; ERC kullanıcısı formdan seçer (boş = ERC / Şimşek)
+    const kOfis = altMarkaKapsam(req);
+    const firma = kOfis ? kOfis.kod : ofisFirmaGecerli(req.body?.firma);
+    if (firma === undefined) return res.status(400).json({ error: "Geçersiz firma" });
     const { rows } = await pool.query(
       `INSERT INTO ofis_depo (tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,
-        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+        kira_bitis,aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu,firma)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [tur||'OFİS',ad,bolge,adres,kiraya_veren,sozlesme_no,
        kira_baslangic||null,kira_bitis||null,aylik_kira||null,metrekare||null,kat,sorumlu,durum||'AKTİF',notlar,
        odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN',
-       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
+       Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null, firma]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put("/hr/ofis/:id", ikYazma, async (req, res) => {
+app.put("/hr/ofis/:id", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const { tur,ad,bolge,adres,kiraya_veren,sozlesme_no,kira_baslangic,kira_bitis,
             aylik_kira,metrekare,kat,sorumlu,durum,notlar,odeme_tipi,donem_gunu } = req.body;
@@ -28803,12 +29002,18 @@ app.put("/hr/ofis/:id", ikYazma, async (req, res) => {
        odeme_tipi ? (odeme_tipi === 'SONRADAN' ? 'SONRADAN' : 'PESIN') : null,
        Number(donem_gunu) >= 1 && Number(donem_gunu) <= 28 ? Number(donem_gunu) : null]
     );
+    // Firma alanı yalnız ERC kullanıcısının formundan değişir (firma yöneticisi kaydı başka firmaya taşıyamaz)
+    if (rows[0] && !altMarkaKapsam(req) && req.body && Object.prototype.hasOwnProperty.call(req.body, "firma")) {
+      const f = ofisFirmaGecerli(req.body.firma);
+      if (f === undefined) return res.status(400).json({ error: "Geçersiz firma" });
+      return res.json((await pool.query(`UPDATE ofis_depo SET firma=$2 WHERE id=$1 RETURNING *`, [req.params.id, f])).rows[0]);
+    }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Depo/ofis koordinatı (yalnız lat/lng; null → temizle). Diğer alanlara dokunmaz.
-app.put("/hr/ofis/:id/konum", ikYazma, async (req, res) => {
+app.put("/hr/ofis/:id/konum", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   try {
     const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
     const lat = num(req.body?.lat), lng = num(req.body?.lng);
@@ -28822,12 +29027,12 @@ app.put("/hr/ofis/:id/konum", ikYazma, async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.delete("/hr/ofis/:id", ikYazma, async (req, res) => {
+app.delete("/hr/ofis/:id", ikYazma, ofisKapsamKapisi(ofisIdParam), async (req, res) => {
   await pool.query("UPDATE ofis_depo SET durum='PASİF' WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
-app.post("/hr/ofis/:id/belge", ikYazma, ofisUpload.single("dosya"), async (req, res) => {
+app.post("/hr/ofis/:id/belge", ikYazma, ofisKapsamKapisi(ofisIdParam), ofisUpload.single("dosya"), async (req, res) => {
   try {
     const { belge_turu, aciklama } = req.body;
     if (!req.file) return res.status(400).json({ error: "Dosya yok" });
@@ -28846,7 +29051,7 @@ app.post("/hr/ofis/:id/belge", ikYazma, ofisUpload.single("dosya"), async (req, 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete("/hr/ofis-belge/:id", ikYazma, async (req, res) => {
+app.delete("/hr/ofis-belge/:id", ikYazma, ofisKapsamKapisi(async (req) => (await pool.query(`SELECT ofis_id FROM ofis_belgeler WHERE id=$1`, [req.params.id])).rows[0]?.ofis_id), async (req, res) => {
   try {
     const b = await pool.query("SELECT dosya_yolu FROM ofis_belgeler WHERE id=$1", [req.params.id]);
     if (b.rows[0]) await deleteFromStorage(b.rows[0].dosya_yolu);
@@ -30871,6 +31076,9 @@ const AUTO_MIGRATIONS = [
   "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS ekip_arac_plaka TEXT",
   "ALTER TABLE personel_calisma_donemi ADD COLUMN IF NOT EXISTS olusturan TEXT",
   "ALTER TABLE personel_maas_gecmisi ADD COLUMN IF NOT EXISTS gecerli_tarih DATE",
+  // 04.11.2026 (Orhan): bordro firması geçmişi — kişi hangi tarihler arasında hangi firmanın bordrosundaydı (ör. 15.07–30.09.2026
+  // AHY). Kartın güncel firması (personel.marka) üzerine yazıldığında geçmiş ay listeleri bu tablodan doğru firmayla süzülür.
+  "CREATE TABLE IF NOT EXISTS personel_firma_gecmisi (id SERIAL PRIMARY KEY, personel_id INTEGER NOT NULL REFERENCES personel(id) ON DELETE CASCADE, marka TEXT NOT NULL, baslangic DATE NOT NULL, bitis DATE, aciklama TEXT, olusturan TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE (personel_id, baslangic))",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS isdp_account TEXT",
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS birlestirildi_personel_id INTEGER", // 19.10.2026: mükerrer kayıt → ana kayıt (arşiv; listelenmez)
   "ALTER TABLE personel ADD COLUMN IF NOT EXISTS iresource_giris TEXT",
@@ -31472,6 +31680,8 @@ pool.query(`UPDATE users SET tenant='2kx' WHERE UPPER(TRIM(COALESCE(subcon_name,
     let n = 0;
     for (const r of rows) { if (addIsolatedTenant(r.tenant)) n++; }
     if (n > 0) console.log(`[tenant] ${n} izole tenant allow-list'e yüklendi.`);
+    // 04.11.2026: izole kiracı şemalarını public'e eşitle (sonradan eklenen tablo/kolon) — kiraciSema.js başlığı
+    kiraciSema.kur(pool, { kiracilar: () => pool.ISOLATED_TENANTS, semaAdi: (t) => pool.tenantSchema(t), paylasilan: pool.SHARED_PUBLIC_TABLES });
   } catch (e) {
     console.error("[tenant-registry] başlatma hatası:", e.message);
   }

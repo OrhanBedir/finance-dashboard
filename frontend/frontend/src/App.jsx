@@ -449,6 +449,8 @@ const kullaniciBordro = (u) => {
   const b = Array.isArray(u?.marka_bordro) && u.marka_bordro.length ? u.marka_bordro.map((x) => String(x).toUpperCase()) : [m];
   return b.includes(m) ? b : [m, ...b];
 };
+// 04.11.2026: firma yöneticisi = alt marka (Teknocenter) hesabında admin / direktör — kendi firmasının araç / ofis kaydını yönetir
+const firmaYoneticisiMi = (u) => { const m = String(u?.marka || "ERC").toUpperCase(); return m !== "ERC" && altMarkaMi(m) && u?.hw_yukleme !== true && ["admin", "direktor"].includes(String(u?.role || "").toLowerCase()); };
 // Devir tarihi metni (DD.MM.YYYY) — kullanıcının markasından
 const devirMetni = (u) => String(u?.marka_devir || "2026-07-15").split("-").reverse().join(".");
 // Masraf/avans uçları kapsam için kimlik ister (15.10.2026): başlık yardımcıları
@@ -2192,7 +2194,7 @@ function MarkaMutabakatBolumu({ marka, markaAd, yenile, onDegisti }) {
 // her istek marka parametresiyle gider ve sunucuda hedef firma hakkı doğrulanır. Firma değişiminde bileşen anahtarla yeniden kurulur.
 function MarkaNakitPanel({ currentUser: oturumKullanici, hedefFirma = null, baslangicAy = null, onFormDurumu = null, gomulu = false }) {
   const currentUser = hedefFirma
-    ? { ...oturumKullanici, marka: hedefFirma.kod, marka_ad: hedefFirma.ad, marka_devir: hedefFirma.devir, marka_bitis: hedefFirma.bitis }
+    ? { ...oturumKullanici, marka: hedefFirma.kod, marka_ad: hedefFirma.ad, marka_devir: hedefFirma.devir, marka_maas_devir: hedefFirma.maas_devir || hedefFirma.devir, marka_bitis: hedefFirma.bitis }
     : oturumKullanici;
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -8511,7 +8513,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
   );
 }
 
-/* ═══ KMZ KONUM İÇE ALMA (29.10.2026, Orhan) — yalnız ERC yöneticisi ═════════════════════════════════════════════════
+/* ═══ KMZ KONUM İÇE ALMA (29.10.2026, Orhan) — ERC yöneticisi; 04.11 Teknocenter yöneticisi kendi kapsamında ═════════════════════════════════════════════════
    1) Dosya seç → önizle (sunucu hiçbir konumu değiştirmez) 2) sınıflara göre incele 3) seçilenleri uygula (onay sorulur).
    Yeni aday: geçerli koordinatı olmayan saha. Çelişen: mevcut konumdan >100 m — varsayılan "mevcut kalsın", KMZ ancak
    açıkça seçilirse yazılır. Belirsiz / geçersiz / eşleşmeyen hiçbir zaman yazılmaz. KMZ yalnız konum kaynağıdır. */
@@ -8781,7 +8783,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const [excelHata, setExcelHata] = useState("");
   const [tumu, setTumu] = useState(false);      // "Tümünü göster" açık: bölge / durum / yıl filtreleri kapalı (firma kapsamı korunur)
   const [ipucu, setIpucu] = useState(null);     // pin üzerine gelince kısa bilgi { s, x, y }
-  const [kmzAcik, setKmzAcik] = useState(false); // KMZ konum içe alma (yalnız ERC yöneticisi)
+  const [kmzAcik, setKmzAcik] = useState(false); // KMZ konum içe alma (ERC yöneticisi + Teknocenter yöneticisi kendi kapsamında)
   const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
   const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null), haritaRef = useRef(null);
   const [svgW, setSvgW] = useState(800);
@@ -22313,6 +22315,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Devir penceresi kullanıcının markasından gelir (AHY 15.07.2026, TEKNO 01.10.2026);
   // bordro kapsamı devralınan markayı da içerir (TEKNO → AHY kadrosu).
   const AHY_DEVIR = currentUser?.marka_devir || "2026-07-15";
+  // 04.11.2026 (Orhan — anlaşma): maaş sorumluluğu başlangıcı ayrı — Teknocenter 01.10.2026'dan itibaren tüm maaşları öder
+  // (operasyon devri 14.10). Maaş payı, puantaj günleri ve maaş kadrosu bu tarihle; ödeme sahipliği (tarih kuralı) AHY_DEVIR ile kalır.
+  const MAAS_DEVIR = currentUser?.marka_maas_devir || AHY_DEVIR;
   const AHY_BITIS = currentUser?.marka_bitis || null;
   const _hrBordro = kullaniciBordro(currentUser);
   const _hrVarsayilanFirma = _hrMarka === "ERC" ? GUNCEL_ALT_MARKA : _hrMarka; // yeni kayıt varsayılanı
@@ -22324,7 +22329,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
       if (p.aktif) return true;
       const giris = (p.ise_giris_tarihi || "").split("T")[0];
       const ayrilma = (p.isten_ayrilma_tarihi || "").split("T")[0];
-      return giris >= AHY_DEVIR || (ayrilma && ayrilma >= AHY_DEVIR);
+      return giris >= MAAS_DEVIR || (ayrilma && ayrilma >= MAAS_DEVIR);
     });
   };
   const _isNurcanHR = _hrEmail.includes("nurcan") || _hrEmail === "nurcan.kus@simsektel.com";
@@ -22371,10 +22376,13 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Bordro şirketi filtresi (03.09.2026, Orhan): kendi personelimiz (taşeron hariç)
   // Şimşek (marka ERC) mi AHY bordrosunda mı, rozetle görünsün. "TUMU" | "ERC" | "AHY"
   const [hrFirmaFiltre, setHrFirmaFiltre] = useState("TUMU");
+  // 04.11.2026 (Orhan): seçili ayın bordro firması — sunucu firma geçmişinden (personel_firma_gecmisi) o ay için döner
+  // (donem_marka); geçmişi yoksa kartın güncel firması. Böylece Ağustos 2026'da AHY filtresi o ay AHY'de olanları listeler,
+  // kişi bugün Teknocenter kadrosuna geçmiş olsa bile.
+  const ayFirmasi = (p) => String(p?.donem_marka || p?.marka || "ERC").toUpperCase();
   const firmaUygun = (p) => {
     if ((p?.firma_tipi || "simsek") !== "simsek") return false; // taşeron personeli maaş/liste dışı (ISG'de)
-    const marka = String(p?.marka || "ERC").toUpperCase();
-    return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === marka;
+    return hrFirmaFiltre === "TUMU" || hrFirmaFiltre === ayFirmasi(p);
   };
   // 15.10.2026: aktif ama maaşı / işe giriş tarihi eksik (ya da yeniden giriş bekleyen) personel —
   // kadroda "Bilgileri tamamlanacak" rozetiyle görünür, hakediş/bütçe toplamlarına GİRMEZ
@@ -22401,10 +22409,12 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   const FirmaRozet = ({ p, kucuk }) => {
     // Alt marka panelinde (Teknocenter/AHY) rozet gösterilmez — kadro zaten o markanındır (13.10.2026, Orhan)
     if (_hrMarka !== "ERC") return null;
-    const mk = altMarkaBilgi(p?.marka);
+    const mk = altMarkaBilgi(ayFirmasi(p));          // 04.11.2026: seçili ayın bordro firması (firma geçmişi varsa)
     const ahy = !!mk;
+    const gecmisNot = p?.donem_marka && String(p.donem_marka).toUpperCase() !== String(p?.marka || "ERC").toUpperCase()
+      ? ` (o ay) · güncel kart: ${altMarkaBilgi(p?.marka)?.ad || "Şimşek"}` : "";
     return (
-      <span title={ahy ? `${mk.ad} bordrosu` : "Şimşek bordrosu"} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? mk.kisa : "Şimşek"}</span>
+      <span title={(ahy ? `${mk.ad} bordrosu` : "Şimşek bordrosu") + gecmisNot} style={{ display:"inline-block", marginLeft:"6px", padding: kucuk ? "1px 6px" : "2px 8px", borderRadius:"999px", fontSize: kucuk ? "10px" : "11px", fontWeight:800, letterSpacing:".02em", background: ahy ? "#f3e8ff" : "#eff6ff", color: ahy ? "#6b21a8" : "#1d4ed8", verticalAlign:"middle" }}>{ahy ? mk.kisa : "Şimşek"}</span>
     );
   };
   const [hrSearchText, setHrSearchText]         = useState("");
@@ -23299,20 +23309,20 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
   // Puantaj yardımcıları — AHY görünümünde devir (15 Temmuz 2026) öncesi günler gösterilmez
   const [yilStr, ayStr] = puantajAy.split("-");
   const ayGunleri = Array.from({ length: new Date(Number(yilStr), Number(ayStr), 0).getDate() }, (_, i) => i+1)
-    .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= AHY_DEVIR);
+    .filter(g => _hrMarka === "ERC" || `${yilStr}-${ayStr}-${String(g).padStart(2, "0")}` >= MAAS_DEVIR);
   // AHY maaş sorumluluğu devirle (15.07.2026) başlar: devir öncesi aylar ERC'nin
   // (AHY görmez/ödemez), Temmuz 2026'da 15 öncesi girişlilerde pay %50 (backend
   // marka-pl ile aynı kural), 15.07+ girişlilerde ve sonraki aylarda tam.
   const ahyMaasOran = (p) => {
     if (_hrMarka === "ERC") return 1;
     const ayKey = `${yilStr}-${ayStr}`;
-    const devirAy = AHY_DEVIR.slice(0, 7);
+    const devirAy = MAAS_DEVIR.slice(0, 7);
     if (ayKey < devirAy) return 0;
     if (AHY_BITIS && ayKey > AHY_BITIS.slice(0, 7)) return 0; // bitmiş marka (AHY) sonraki ayları ödemez
     if (ayKey > devirAy) return 1;
-    if (Number(AHY_DEVIR.slice(8, 10)) <= 1) return 1;       // ay başı devir (TEKNO 01.10): ilk ay tam
+    if (Number(MAAS_DEVIR.slice(8, 10)) <= 1) return 1;      // ay başı maaş devri (TEKNO 01.10): ilk ay tam
     const giris = ikDonemTarih(p).giris;
-    if (giris && giris >= AHY_DEVIR) return 1;
+    if (giris && giris >= MAAS_DEVIR) return 1;
     return 0.5;
   };
   // AHY maaş payı (tutar): anlaşma gereği devir öncesi girişlilerde tam aylık
@@ -24135,7 +24145,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                             ₺{Math.round(personelList.filter(p=>puantajIstihdam(p) && !p.bilgi_eksik).reduce((s,p) => s + Number(p.net_maas||0) * ahyMaasOran(p), 0)).toLocaleString("tr-TR")}
                           </span>
                           <span style={{ fontSize:"11px", color:"#6b7280", marginLeft:"8px", fontWeight:500 }}>
-                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${AHY_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
+                            {_hrMarka === "ERC" ? "(tüm personel tam çalışırsa)" : `(${altMarkaKisa(_hrMarka)} payı — ${MAAS_DEVIR.split("-").reverse().join(".")} devri sonrası dönem)`}
                           </span>
                         </div>
                         <div style={labelSt}>
@@ -24224,7 +24234,7 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
                     if (_hrMarka !== "ERC" && puantajAy < "2026-07") {
                       return (
                         <div style={{ marginTop:"14px", background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:"12px", padding:"16px 20px", fontSize:"13.5px", color:"#92400e", fontWeight:600 }}>
-                          🔒 {ayAdi} {yilStr} — devir ({AHY_DEVIR.split("-").reverse().join(".")}) öncesi dönem. Bu dönemin maaş ödemeleri {altMarkaKisa(_hrMarka)} sorumluluğunda değildir; {altMarkaKisa(_hrMarka)} panelinde gösterilmez.
+                          🔒 {ayAdi} {yilStr} — devir ({MAAS_DEVIR.split("-").reverse().join(".")}) öncesi dönem. Bu dönemin maaş ödemeleri {altMarkaKisa(_hrMarka)} sorumluluğunda değildir; {altMarkaKisa(_hrMarka)} panelinde gösterilmez.
                         </div>
                       );
                     }
@@ -32217,7 +32227,8 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       setLoading(true);
       setErrorMessage("");
 
-      const data = await fetchJson(`${API_BASE}/dashboard/result`, {
+      // 04.11.2026 (Orhan): boq_yedek=1 — PO fiyatı yoksa işaretli BoQ fiyatı (PO açılınca PO fiyatı esas)
+      const data = await fetchJson(`${API_BASE}/dashboard/result?boq_yedek=1`, {
         withAuth: true,
       });
       // 29.10.2026: sunucu fiyat yetkisi kapalı diyor (izin sonradan değişmiş olabilir) → fiyatsız görünüm
@@ -33430,7 +33441,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "QC Durum", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Fiyat Kaynağı",
         "Şimşek Toplam Hakediş (TL)", _hakHdr,
         "Şimşek→HW Fatura Miktarı (KDV Hariç)", "Şimşek→HW Fatura No", "Şimşek→HW Fatura Tarihi",
         "HW Ödeme Durumu", "HW Vade Tarihi",
@@ -33438,7 +33449,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
         `${_tsr} Kalan Bedel (KDV Hariç)`,
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 22, 22, 24, 24, 18, 20, 14, 24, 22, 24, 18, 24, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 18, 22, 22, 24, 24, 18, 20, 14, 24, 22, 24, 18, 24, 18];
+      // 04.11.2026: fiyat kaynağı — PO esas; PO yoksa BoQ (tahmini, turuncu italik)
+      const FIYAT_KAYNAK_AD = { PO: "PO", BOQ: "BoQ (PO yok)", KATALOG: "BoQ katalog (PO yok)", YOK: "Fiyat yok" };
+      const tahminiStyle = (base) => ({ ...base, fill: { patternType: "solid", fgColor: { rgb: "FFEDD5" } }, font: { ...(base.font || {}), italic: true, color: { rgb: "9A3412" } } });
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -33606,6 +33620,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           if (_hwOdemeDurum) a.hwOdemeSet.add(_hwOdemeDurum);
           if (_hwVade) a.hwVadeSet.add(_hwVade);
           if (row.currency) a.currencySet.add(String(row.currency).toUpperCase());
+          a.kaynakSet = a.kaynakSet || new Set(); if (row.fiyat_kaynak) a.kaynakSet.add(row.fiyat_kaynak);
           if (!a.subcon && row.subcon_name) a.subcon = row.subcon_name;
           faturaNo.split(", ").filter(Boolean).forEach(x => a.faturaNos.add(x));
           faturaTarihi.split(", ").filter(Boolean).forEach(x => a.faturaTarihler.add(x));
@@ -33629,9 +33644,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           { v: row.currency || "",                                s: cellStyle(isEven, false) },
           { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
           { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
-          { v: unitPrice,                                         s: cellStyle(isEven, true) },
-          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
-          { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: unitPrice,                                         s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+          { v: FIYAT_KAYNAK_AD[row.fiyat_kaynak] || "",           s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, false)) : cellStyle(isEven, false) },
+          { v: toplamHakedis,                                     s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+          { v: federalHakedis,                                    s: row.fiyat_tahmini ? tahminiStyle(federalStyle(isEven)) : federalStyle(isEven) },
           { v: simsekHwFatura || "",                              s: federalKdvStyle(isEven) },
           { v: _hwInv.no || "",                                   s: cellStyle(isEven, false) },
           { v: _hwInv.tarih || "",                                s: cellStyle(isEven, false) },
@@ -33653,6 +33669,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           // Saha toplamı da KDV hariç: kesilebilir bedel − taşeronun kestiği fatura
           const _aFatHaric = Number(a.faturaMiktar || 0) / 1.20;
           const kalanBedel = Math.max(0, a.faturaKesilecek - _aFatHaric);
+          // Saha fiyat kaynağı: tümü PO → "PO"; içinde BoQ'lu kalem varsa tahmini (turuncu)
+          const _ks = a.kaynakSet || new Set();
+          const _aTahmini = _ks.has("BOQ") || _ks.has("KATALOG");
+          const _aKaynak = _aTahmini ? (_ks.has("PO") ? "PO + BoQ (kısmen PO yok)" : "BoQ (PO yok)") : _ks.has("PO") ? (_ks.has("YOK") ? "PO + fiyat yok" : "PO") : _ks.has("YOK") ? "Fiyat yok" : "";
           aoa.push([
             { v: a.region,                              s: cellStyle(isEven, false) },
             { v: "SAHA",                                s: cellStyle(isEven, false) },
@@ -33671,8 +33691,9 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
             { v: "",                                    s: cellStyle(isEven, true) },
             { v: a.usdToplam || "",                     s: cellStyle(isEven, true) },
             { v: "",                                    s: cellStyle(isEven, true) },
-            { v: a.toplamHakedis,                       s: cellStyle(isEven, true) },
-            { v: a.federalHakedis,                      s: federalStyle(isEven) },
+            { v: _aKaynak,                              s: _aTahmini ? tahminiStyle(cellStyle(isEven, false)) : cellStyle(isEven, false) },
+            { v: a.toplamHakedis,                       s: _aTahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+            { v: a.federalHakedis,                      s: _aTahmini ? tahminiStyle(federalStyle(isEven)) : federalStyle(isEven) },
             { v: a.simsekHwFatura || "",                s: federalKdvStyle(isEven) },
             { v: [...(a.hwInvNos || [])].join(", "),    s: cellStyle(isEven, false) },
             { v: [...(a.hwInvTarihler || [])].join(", "), s: cellStyle(isEven, false) },
@@ -33825,6 +33846,19 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
         🗺️ Bölge Analizi
       </h1>
+      {(() => {
+        // 04.11.2026: PO'su açılmamış kalemler BoQ fiyatıyla (tahmini) — PO açılınca PO fiyatı otomatik esas olur
+        const tah = rows.filter((r) => r.fiyat_tahmini);
+        const yok = rows.filter((r) => r.fiyat_kaynak === "YOK" && Number(r.done_qty || 0) > 0);
+        if (!tah.length && !yok.length) return null;
+        const sahaSay = (a) => new Set(a.map((r) => String(r.site_code || "").toUpperCase())).size;
+        return (
+          <div style={{ maxWidth: 760, margin: "0 auto 12px", padding: "8px 14px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 13.5, lineHeight: 1.5 }}>
+            {tah.length > 0 && <div><b>≈ {tah.length} kalem ({sahaSay(tah)} saha) BoQ fiyatıyla</b> — PO henüz açılmadı; tutarlar tahminidir. PO açılınca PO'daki fiyat esas alınır.</div>}
+            {yok.length > 0 && <div>{yok.length} kalemde ({sahaSay(yok)} saha) ne PO ne BoQ fiyatı var — tutar 0 görünür.</div>}
+          </div>
+        );
+      })()}
 
       <div
         style={{
@@ -33850,7 +33884,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px", letterSpacing: "0.2px", textTransform: "none" }}>
             {_paketTaseron ? "Tutarlar KDV hariç · anlaşma paket fiyatları"
               : _atananOrtak ? "Tutarlar KDV hariç · Atanan İş: PR miktarı × PO fiyatı (PO yoksa BoQ) · diğer satırlar: HW PO fiyatı × gerçekleşen miktar"
-              : `Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
+              : `Tutarlar KDV hariç · HW PO birim fiyatı (PO yoksa ≈ BoQ) × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
           </div>
         </div>
 
@@ -45614,7 +45648,12 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
   const isRollout = ["nurcan.kus@simsektel.com", "serdar.altinova@simsektel.com"].includes(currentUser?.email); // filo güncelleme yetkisi
-  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || isRollout);
+  // 04.11.2026 (Orhan): firma yöneticisi (Teknocenter admin / direktör) kendi firmasının araçlarını ekler / düzenler (ERC'deki gibi);
+  // başka firmanın aracında düzenleme düğmesi çıkmaz, sunucu da 403 verir. Yeni araç sunucuda kendi firmasına kaydedilir.
+  const firmaYonetici = firmaYoneticisiMi(currentUser);
+  const _aracBordro = kullaniciBordro(currentUser);
+  const aracKapsamda = (a) => !firmaYonetici || _aracBordro.includes(String(a?.firma || "AHY").toUpperCase());
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || isRollout || firmaYonetici);
 
   const [araclar, setAraclar] = useState([]);
   const [selected, setSelected] = useState(null); // detail/edit araç
@@ -45902,7 +45941,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   // Kira Öde: her kiralık aktif araç için seçili dönem + vadesi geçmiş ödenmemiş dönemler
   const payRowsOlustur = (donemSec) => {
     const rows = [];
-    kiralikAraclar.slice().sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
+    kiralikAraclar.filter(aracKapsamda).sort((x, y) => String(x.plaka).localeCompare(String(y.plaka))).forEach(a => {
       const liste = donemListesi(a);
       const donemler = new Set(liste.filter(x => x.durum === "GECIKTI" || x.durum === "KISMI").map(x => x.donem));
       donemler.add(donemSec);
@@ -46106,7 +46145,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                         </div>
                       </td>
                       <td style={{ ...tdSt, textAlign:"right" }}>
-                        {canEdit && <button onClick={e => { e.stopPropagation(); openEdit(a); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}
+                        {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); openEdit(a); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}
                       </td>
                     </tr>
                     {acik && (
@@ -46121,11 +46160,11 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                                   <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
                                   {d.durum === "ODENDI"
                                     ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}{(d.odeme.odemeler || []).length > 1 ? ` · ${d.odeme.odemeler.length} ödeme` : ""}{(d.odeme.odemeler || []).find(x => x.fatura_no) ? ` · 🧾 ${(d.odeme.odemeler || []).find(x => x.fatura_no).fatura_no}` : ""}
-                                        {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                        {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
                                       </span>
                                     : d.durum === "KISMI"
                                       ? <span style={{ color:"#b45309", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)} · kalan ₺{d.eksik.toLocaleString("tr-TR")}
-                                          {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
+                                          {canEdit && aracKapsamda(a) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(a, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}
                                         </span>
                                     : d.durum === "GECIKTI"
                                       ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
@@ -46150,7 +46189,7 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
                                 <div key={k.id} style={{ display:"flex", justifyContent:"space-between", fontSize:"12.5px", padding:"3px 0", borderBottom:"1px dashed #e3e8ef", fontVariantNumeric:"tabular-nums" }}><span>{fT(k.tarih)}</span><b>{Number(k.km).toLocaleString("tr-TR")} km</b></div>
                               ))}
                               {!(a.km_log || []).length && <div style={{ fontSize:"12.5px", color:"#6b7a90" }}>Kayıt yok</div>}
-                              {canEdit && a.aktif && (
+                              {canEdit && aracKapsamda(a) && a.aktif && (
                                 <div style={{ display:"flex", gap:"6px", marginTop:"8px", flexWrap:"wrap" }} onClick={e => e.stopPropagation()}>
                                   <input type="number" placeholder="KM" value={(kmGiris[a.id]?.km) || ""} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), km: e.target.value } }))} style={{ width:"90px", padding:"5px 8px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
                                   <input type="date" value={(kmGiris[a.id]?.tarih) || new Date().toISOString().slice(0, 10)} onChange={e => setKmGiris(s => ({ ...s, [a.id]: { ...(s[a.id] || {}), tarih: e.target.value } }))} style={{ padding:"5px 6px", border:"1px solid #cfd7e2", borderRadius:"7px", fontSize:"12px" }} />
@@ -46640,7 +46679,11 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
   const isPM = currentUser?.email === "orhan.bedir@simsektel.com";
   const isDirektor = currentUser?.email === "duzgun.simsek@simsektel.com";
   const isMuhasebe = currentUser?.email === "muhasebe@simsektel.com";
-  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe);
+  // 04.11.2026 (Orhan): firma yöneticisi kendi firmasının ofis / depolarını ekler / düzenler; firması boş kayıt ERC (Şimşek) sayılır
+  const firmaYonetici = firmaYoneticisiMi(currentUser);
+  const _ofisBordro = kullaniciBordro(currentUser);
+  const ofisKapsamda = (o) => !firmaYonetici || (!!o?.firma && _ofisBordro.includes(String(o.firma).toUpperCase()));
+  const canEdit = !saltOkunur && (isPM || isDirektor || isMuhasebe || firmaYonetici);
 
   const [liste, setListe] = useState([]);
   const [kiraOdemeler, setKiraOdemeler] = useState([]);
@@ -46735,14 +46778,16 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
       kira_baslangic:f(o.kira_baslangic), kira_bitis:f(o.kira_bitis),
       aylik_kira:o.aylik_kira||"", metrekare:o.metrekare||"", kat:o.kat||"",
       sorumlu:o.sorumlu||"", durum:o.durum||"AKTİF", notlar:o.notlar||"",
-      odeme_tipi:o.odeme_tipi||"PESIN", donem_gunu:o.donem_gunu||"" });
+      odeme_tipi:o.odeme_tipi||"PESIN", donem_gunu:o.donem_gunu||"", firma:o.firma||"" });
     setSelected(o); setShowForm(true);
   };
   const handleSave = async () => {
     if (!form.ad) return alert("Ad zorunlu");
     const method = selected ? "PUT" : "POST";
     const url = selected ? `${API_BASE}/hr/ofis/${selected.id}` : `${API_BASE}/hr/ofis`;
-    const r = await fetch(url, { method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(form) });
+    // Firma alanını yalnız ERC kullanıcısı gönderir; firma yöneticisinin kaydı sunucuda kendi firmasına yazılır
+    const { firma, ...govde } = form;
+    const r = await fetch(url, { method, headers:{ "Content-Type":"application/json" }, body: JSON.stringify(firmaYonetici ? govde : { ...govde, firma: firma || "" }) });
     if (!r.ok) { const e = await r.json().catch(() => ({})); return alert(e.error || "Kaydedilemedi"); }
     setShowForm(false); load();
   };
@@ -46779,7 +46824,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
   // Toplu Kira Öde
   const payRowsOlustur = (donemSec) => {
     const rows = [];
-    kiralik.slice().sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).forEach(o => {
+    kiralik.filter(ofisKapsamda).sort((a, b) => String(a.ad).localeCompare(String(b.ad), "tr")).forEach(o => {
       const l = donemListesi(o);
       const donemler = new Set(l.filter(x => x.durum === "GECIKTI").map(x => x.donem));
       donemler.add(donemSec);
@@ -46891,8 +46936,8 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
       {(borclular.length > 0 || sozlesmesiz.length > 0 || bitisYakin.length > 0) && (
         <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", marginTop:"12px" }}>
           {borclular.map(o => <span key={"b" + o.id} onClick={() => setAcikSatir(o.id)} style={{ ...chip, background:"#fee2e2", color:"#b91c1c" }}>● {o.ad} · {borcHesap(o).aylar.length} dönem ödenmedi</span>)}
-          {sozlesmesiz.map(o => <span key={"s" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · sözleşme yüklenmemiş</span>)}
-          {bitisYakin.map(o => <span key={"k" + o.id} onClick={() => canEdit && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · kira bitişi {fT(o.kira_bitis)}</span>)}
+          {sozlesmesiz.map(o => <span key={"s" + o.id} onClick={() => canEdit && ofisKapsamda(o) && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · sözleşme yüklenmemiş</span>)}
+          {bitisYakin.map(o => <span key={"k" + o.id} onClick={() => canEdit && ofisKapsamda(o) && openEdit(o)} style={{ ...chip, background:"#fef3c7", color:"#b45309" }}>● {o.ad} · kira bitişi {fT(o.kira_bitis)}</span>)}
         </div>
       )}
 
@@ -46960,7 +47005,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                           : <span style={{ ...pill, background:"#fef3c7", color:"#b45309" }}>Yok</span>}
                         {getEkler(o).length > 0 && <span style={{ ...pill, background:"#dbeafe", color:"#1d4ed8", marginLeft:"4px" }}>+{getEkler(o).length}</span>}
                       </td>
-                      <td style={{ ...tdSt, textAlign:"right" }}>{canEdit && <button onClick={e => { e.stopPropagation(); openEdit(o); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}</td>
+                      <td style={{ ...tdSt, textAlign:"right" }}>{canEdit && ofisKapsamda(o) && <button onClick={e => { e.stopPropagation(); openEdit(o); }} title="Düzenle / Belge" style={icoBtn}>✏️</button>}</td>
                     </tr>
                     {acik && (
                       <tr><td colSpan={9} style={{ padding:"0 14px 16px", background:"#eefaf8", borderBottom:"1px solid #e3e8ef" }}>
@@ -46972,7 +47017,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                                 <span style={{ fontFamily:"ui-monospace, Menlo, monospace" }}>{d.donem} <span style={{ color:"#6b7a90" }}>· vade {fT(d.vade)}</span></span>
                                 {d.durum === "ODENDI"
                                   ? <span style={{ color:"#15803d", fontWeight:700 }}>₺{Number(d.odeme.tutar || 0).toLocaleString("tr-TR")} · {fT(d.odeme.tarih)}{d.odeme.kasadan_dus === false ? " · AHY" : ""}
-                                      {canEdit && <button onClick={e => { e.stopPropagation(); odemeGeriAl(o, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}</span>
+                                      {canEdit && ofisKapsamda(o) && <button onClick={e => { e.stopPropagation(); odemeGeriAl(o, d.donem, d.odeme); }} title="Ödemeyi geri al" style={{ ...icoBtn, width:"22px", height:"22px", marginLeft:"6px", fontSize:"11px" }}>↩︎</button>}</span>
                                   : d.durum === "GECIKTI" ? <span style={{ color:"#b91c1c", fontWeight:700 }}>Ödenmedi</span>
                                   : <span style={{ color:"#6b7a90" }}>Vadesi gelmedi</span>}
                               </div>
@@ -46983,7 +47028,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                             {soz ? <a href={belgeUrl(soz)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", fontWeight:700, padding:"4px 0" }}>📄 Kira sözleşmesi · {soz.dosya_adi}</a>
                               : <div style={{ fontSize:"12.5px", color:"#b45309", padding:"4px 0" }}>Kira sözleşmesi yüklenmemiş</div>}
                             {getEkler(o).map(b => <a key={b.id} href={belgeUrl(b)} target="_blank" rel="noreferrer" style={{ display:"block", fontSize:"12.5px", color:"#1d4ed8", padding:"3px 0" }}>📎 {b.aciklama || b.dosya_adi}</a>)}
-                            {canEdit && <button onClick={() => openEdit(o)} style={{ marginTop:"8px", padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📁 Belge yükle</button>}
+                            {canEdit && ofisKapsamda(o) && <button onClick={() => openEdit(o)} style={{ marginTop:"8px", padding:"6px 12px", background:"#f3f5f8", border:"1px solid #cfd7e2", borderRadius:"8px", fontSize:"12px", fontWeight:700, cursor:"pointer" }}>📁 Belge yükle</button>}
                           </div>
                           <div style={kutu}>
                             <div style={kutuBaslik}>Konum bilgisi</div>
@@ -46993,7 +47038,7 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                               {(o.metrekare || o.kat) && <div>{o.metrekare ? `${o.metrekare} m²` : ""}{o.kat ? ` · ${o.kat}. kat` : ""}</div>}
                               {o.notlar && <div style={{ color:"#3c4a5d" }}>{o.notlar}</div>}
                             </div>
-                            {canEdit && (
+                            {canEdit && ofisKapsamda(o) && (
                               <div style={{ display:"flex", gap:"6px", marginTop:"8px" }} onClick={e => e.stopPropagation()}>
                                 <select value={o.durum || "AKTİF"} onChange={e => durumDegistir(o, e.target.value)} style={{ padding:"6px 10px", borderRadius:"8px", border:"1px solid #cfd7e2", fontSize:"12px", fontWeight:700 }}>
                                   <option value="AKTİF">🟢 Aktif</option><option value="PASİF">⚪ Pasif</option>
@@ -47091,6 +47136,15 @@ function OfisDepoPanel({ currentUser, onBack, onGoArac, saltOkunur = false }) {
                   {form.bolge && !(typeof ARAC_BOLGELER !== "undefined" ? ARAC_BOLGELER : []).some(b => b.toLocaleLowerCase("tr") === String(form.bolge).trim().toLocaleLowerCase("tr")) && <option value={form.bolge}>{form.bolge}</option>}
                 </select></div>
               <div><label style={lbl}>Sorumlu Kişi</label><input value={form.sorumlu} onChange={e => setForm(f => ({ ...f, sorumlu: e.target.value }))} style={inp} /></div>
+              {/* 04.11.2026: hangi firmanın ofisi / deposu — firma yöneticisi yalnız kendi firmasının kaydını düzenler */}
+              {!firmaYonetici && (
+                <div><label style={lbl}>Firma</label>
+                  <select value={form.firma || ""} onChange={e => setForm(f => ({ ...f, firma: e.target.value }))} style={inp}>
+                    <option value="">Şimşek (ERC)</option>
+                    {ALT_MARKA_LISTE.map((m) => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
+                  </select>
+                </div>
+              )}
               <div><label style={lbl}>Kiraya Veren</label><input value={form.kiraya_veren} onChange={e => setForm(f => ({ ...f, kiraya_veren: e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>Sözleşme No</label><input value={form.sozlesme_no} onChange={e => setForm(f => ({ ...f, sozlesme_no: e.target.value }))} style={inp} /></div>
               <div><label style={lbl}>Aylık Kira (₺)</label><input type="number" value={form.aylik_kira} onChange={e => setForm(f => ({ ...f, aylik_kira: e.target.value }))} style={inp} /></div>

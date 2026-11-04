@@ -135,3 +135,25 @@ test("kırpmada yeniden çek: eski fotoğraf eklenmez, yeni fotoğraf yeni istek
   assert.equal(r2.kalemId, r1.kalemId); assert.equal(s.sayac.kalem, 1); assert.equal(s.sayac.ekle, 1);
   assert.equal(s.form.kalemler.find((k) => k.id === r1.kalemId).belgeler.length, 1);
 });
+
+test("ilerleme aşamaları sırayla bildirilir: kalem → fiş 1/2 (işle, kırpma onayı, okuma) → fiş 2/2 → bitti", async () => {
+  const s = sahteSunucu({ isleVar: true });
+  const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "bekliyor" }, { uri: "f2", ad: "f2.jpg", mime: "image/jpeg", durum: "bekliyor" }] }));
+  const asamalar = [];
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], onAsama: (a) => asamalar.push(a.sira ? `${a.kod}:${a.sira}/${a.toplam}` : a.kod) });
+  assert.deepEqual(asamalar, ["kalem", "fis_isleme:1/2", "kirpma_onay:1/2", "okuma:1/2", "fis_isleme:2/2", "kirpma_onay:2/2", "okuma:2/2", "bitti"]);
+});
+
+test("ilerleme: kaldığı yerden devamda kalem adımı yok, sıra yalnız bekleyen fişlerden; ekran hatası gönderimi bozmaz", async () => {
+  const s = sahteSunucu({ isleVar: false });
+  const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "yuklendi", belgeId: 7 }, { uri: "f2", ad: "f2.jpg", mime: "image/jpeg", durum: "bekliyor" }], adim: { kalemId: 1 } }));
+  const asamalar = [];
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }],
+    onAsama: (a) => { asamalar.push(a.sira ? `${a.kod}:${a.sira}/${a.toplam}` : a.kod); throw new Error("ekran hatası"); } });
+  assert.deepEqual(asamalar, ["fis_isleme:1/1", "fis_yukleme:1/1", "bitti"], "kırpma servisi yoksa yükle + oku tek adım");
+  assert.equal(s.sayac.kalem, 0); assert.equal(s.sayac.belge, 1); assert.equal(d.t.fotolar[1].durum, "yuklendi");
+  const s2 = sahteSunucu(); const d2 = depo(taslakYap({ fotolar: [], fissiz: { aktif: true, aciklama: "Fiş verilmedi" } }));
+  const a2 = [];
+  await kalemGonder({ taslak: d2.t, kaydet: d2.kaydet, api: s2.api, kimlik, onAsama: (a) => a2.push(a.kod) });
+  assert.deepEqual(a2, ["kalem", "fissiz", "bitti"]);
+});
