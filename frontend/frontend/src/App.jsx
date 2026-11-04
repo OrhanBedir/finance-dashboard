@@ -32208,7 +32208,8 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       setLoading(true);
       setErrorMessage("");
 
-      const data = await fetchJson(`${API_BASE}/dashboard/result`, {
+      // 04.11.2026 (Orhan): boq_yedek=1 — PO fiyatı yoksa işaretli BoQ fiyatı (PO açılınca PO fiyatı esas)
+      const data = await fetchJson(`${API_BASE}/dashboard/result?boq_yedek=1`, {
         withAuth: true,
       });
       // 29.10.2026: sunucu fiyat yetkisi kapalı diyor (izin sonradan değişmiş olabilir) → fiyatsız görünüm
@@ -33421,7 +33422,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
         "Bölge", "Status", "Analiz", "Project Code", "Site Code",
         "Item Description", "Item Code", "OnAir Date",
         "Done Qty", "Requested Qty", "QC Durum", "Billed Qty", "Due Qty",
-        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)",
+        "Currency", "USD Birim Fiyat", "USD Toplam Fiyat", "Unit Price (TRY)", "Fiyat Kaynağı",
         "Şimşek Toplam Hakediş (TL)", _hakHdr,
         "Şimşek→HW Fatura Miktarı (KDV Hariç)", "Şimşek→HW Fatura No", "Şimşek→HW Fatura Tarihi",
         "HW Ödeme Durumu", "HW Vade Tarihi",
@@ -33429,7 +33430,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
         `${_tsr} Kalan Bedel (KDV Hariç)`,
         "Taşeron",
       ];
-      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 22, 22, 24, 24, 18, 20, 14, 24, 22, 24, 18, 24, 18];
+      const COL_WIDTHS = [12, 12, 12, 16, 22, 45, 16, 12, 10, 14, 11, 10, 10, 10, 14, 16, 14, 18, 22, 22, 24, 24, 18, 20, 14, 24, 22, 24, 18, 24, 18];
+      // 04.11.2026: fiyat kaynağı — PO esas; PO yoksa BoQ (tahmini, turuncu italik)
+      const FIYAT_KAYNAK_AD = { PO: "PO", BOQ: "BoQ (PO yok)", KATALOG: "BoQ katalog (PO yok)", YOK: "Fiyat yok" };
+      const tahminiStyle = (base) => ({ ...base, fill: { patternType: "solid", fgColor: { rgb: "FFEDD5" } }, font: { ...(base.font || {}), italic: true, color: { rgb: "9A3412" } } });
       const NCOLS = headers.length;
 
       const titleStyle = {
@@ -33597,6 +33601,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           if (_hwOdemeDurum) a.hwOdemeSet.add(_hwOdemeDurum);
           if (_hwVade) a.hwVadeSet.add(_hwVade);
           if (row.currency) a.currencySet.add(String(row.currency).toUpperCase());
+          a.kaynakSet = a.kaynakSet || new Set(); if (row.fiyat_kaynak) a.kaynakSet.add(row.fiyat_kaynak);
           if (!a.subcon && row.subcon_name) a.subcon = row.subcon_name;
           faturaNo.split(", ").filter(Boolean).forEach(x => a.faturaNos.add(x));
           faturaTarihi.split(", ").filter(Boolean).forEach(x => a.faturaTarihler.add(x));
@@ -33620,9 +33625,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           { v: row.currency || "",                                s: cellStyle(isEven, false) },
           { v: usdBirimFiyat,                                     s: cellStyle(isEven, true) },
           { v: usdToplamFiyat,                                    s: cellStyle(isEven, true) },
-          { v: unitPrice,                                         s: cellStyle(isEven, true) },
-          { v: toplamHakedis,                                     s: cellStyle(isEven, true) },
-          { v: federalHakedis,                                    s: federalStyle(isEven) },
+          { v: unitPrice,                                         s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+          { v: FIYAT_KAYNAK_AD[row.fiyat_kaynak] || "",           s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, false)) : cellStyle(isEven, false) },
+          { v: toplamHakedis,                                     s: row.fiyat_tahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+          { v: federalHakedis,                                    s: row.fiyat_tahmini ? tahminiStyle(federalStyle(isEven)) : federalStyle(isEven) },
           { v: simsekHwFatura || "",                              s: federalKdvStyle(isEven) },
           { v: _hwInv.no || "",                                   s: cellStyle(isEven, false) },
           { v: _hwInv.tarih || "",                                s: cellStyle(isEven, false) },
@@ -33644,6 +33650,10 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           // Saha toplamı da KDV hariç: kesilebilir bedel − taşeronun kestiği fatura
           const _aFatHaric = Number(a.faturaMiktar || 0) / 1.20;
           const kalanBedel = Math.max(0, a.faturaKesilecek - _aFatHaric);
+          // Saha fiyat kaynağı: tümü PO → "PO"; içinde BoQ'lu kalem varsa tahmini (turuncu)
+          const _ks = a.kaynakSet || new Set();
+          const _aTahmini = _ks.has("BOQ") || _ks.has("KATALOG");
+          const _aKaynak = _aTahmini ? (_ks.has("PO") ? "PO + BoQ (kısmen PO yok)" : "BoQ (PO yok)") : _ks.has("PO") ? (_ks.has("YOK") ? "PO + fiyat yok" : "PO") : _ks.has("YOK") ? "Fiyat yok" : "";
           aoa.push([
             { v: a.region,                              s: cellStyle(isEven, false) },
             { v: "SAHA",                                s: cellStyle(isEven, false) },
@@ -33662,8 +33672,9 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
             { v: "",                                    s: cellStyle(isEven, true) },
             { v: a.usdToplam || "",                     s: cellStyle(isEven, true) },
             { v: "",                                    s: cellStyle(isEven, true) },
-            { v: a.toplamHakedis,                       s: cellStyle(isEven, true) },
-            { v: a.federalHakedis,                      s: federalStyle(isEven) },
+            { v: _aKaynak,                              s: _aTahmini ? tahminiStyle(cellStyle(isEven, false)) : cellStyle(isEven, false) },
+            { v: a.toplamHakedis,                       s: _aTahmini ? tahminiStyle(cellStyle(isEven, true)) : cellStyle(isEven, true) },
+            { v: a.federalHakedis,                      s: _aTahmini ? tahminiStyle(federalStyle(isEven)) : federalStyle(isEven) },
             { v: a.simsekHwFatura || "",                s: federalKdvStyle(isEven) },
             { v: [...(a.hwInvNos || [])].join(", "),    s: cellStyle(isEven, false) },
             { v: [...(a.hwInvTarihler || [])].join(", "), s: cellStyle(isEven, false) },
@@ -33816,6 +33827,19 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
       <h1 style={{ marginBottom: "10px", textAlign: "center" }}>
         🗺️ Bölge Analizi
       </h1>
+      {(() => {
+        // 04.11.2026: PO'su açılmamış kalemler BoQ fiyatıyla (tahmini) — PO açılınca PO fiyatı otomatik esas olur
+        const tah = rows.filter((r) => r.fiyat_tahmini);
+        const yok = rows.filter((r) => r.fiyat_kaynak === "YOK" && Number(r.done_qty || 0) > 0);
+        if (!tah.length && !yok.length) return null;
+        const sahaSay = (a) => new Set(a.map((r) => String(r.site_code || "").toUpperCase())).size;
+        return (
+          <div style={{ maxWidth: 760, margin: "0 auto 12px", padding: "8px 14px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 13.5, lineHeight: 1.5 }}>
+            {tah.length > 0 && <div><b>≈ {tah.length} kalem ({sahaSay(tah)} saha) BoQ fiyatıyla</b> — PO henüz açılmadı; tutarlar tahminidir. PO açılınca PO'daki fiyat esas alınır.</div>}
+            {yok.length > 0 && <div>{yok.length} kalemde ({sahaSay(yok)} saha) ne PO ne BoQ fiyatı var — tutar 0 görünür.</div>}
+          </div>
+        );
+      })()}
 
       <div
         style={{
@@ -33841,7 +33865,7 @@ function RegionAnalysisFiyatli({ isSubconUser, userSubconName, userPaymentRate, 
           <div style={{ fontSize: "10.5px", fontWeight: 500, color: "#cbd5e1", marginTop: "3px", letterSpacing: "0.2px", textTransform: "none" }}>
             {_paketTaseron ? "Tutarlar KDV hariç · anlaşma paket fiyatları"
               : _atananOrtak ? "Tutarlar KDV hariç · Atanan İş: PR miktarı × PO fiyatı (PO yoksa BoQ) · diğer satırlar: HW PO fiyatı × gerçekleşen miktar"
-              : `Tutarlar KDV hariç · HW PO birim fiyatı × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
+              : `Tutarlar KDV hariç · HW PO birim fiyatı (PO yoksa ≈ BoQ) × tamamlanan adet${isSubconUser ? " × hakediş oranı" : ""}`}
           </div>
         </div>
 

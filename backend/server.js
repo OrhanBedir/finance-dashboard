@@ -7900,6 +7900,39 @@ app.get("/master/list-detailed", async (req, res) => {
 });
 
 /* ================== DASHBOARD RESULT ================== */
+// Fiyat kaynağı (Bölge Analizi): PO (sahanın / kalemin PO fiyatı) → BOQ (PR satırına kaydedilmiş BoQ fiyatı) → KATALOG (satırın
+// BoQ sürümü, sahanın bölgesi) → YOK. Sıra /master/saha-kalemler ile aynıdır; BoQ/katalog fiyatı tahminidir (fiyat_tahmini).
+async function boqYedekFiyat(rows) {
+  const eksik = rows.filter((r) => !(Number(r.unit_price) > 0) && Number(r.done_qty) > 0 && r.id != null);
+  const boq = new Map(eksik.length ? (await pool.query(`SELECT id, boq_birim_fiyat, boq_para_birimi, boq_surum FROM master_works WHERE id = ANY($1::int[])`,
+    [eksik.map((r) => Number(r.id))])).rows.map((b) => [Number(b.id), b]) : []);
+  const katalogOnbellek = new Map();
+  const katalogFiyati = async (surum, kod, bolge) => {
+    if (!surum || !kod) return null;
+    const k = `${surum}|${kod}|${bolge}`;
+    if (!katalogOnbellek.has(k)) {
+      katalogOnbellek.set(k, await boqKatalog.kalemGetir(pool, surum, kod, bolge)
+        .then((x) => (x && x.birim_fiyat !== null ? { fiyat: Number(x.birim_fiyat), pb: x.para_birimi || "TRY" } : null)).catch(() => null));
+    }
+    return katalogOnbellek.get(k);
+  };
+  const out = [];
+  for (const r of rows) {
+    if (Number(r.unit_price) > 0) { out.push({ ...r, fiyat_kaynak: "PO", fiyat_tahmini: false }); continue; }
+    const b = boq.get(Number(r.id));
+    let fiyat = null, pb = "TRY", kaynak = "YOK", surum = b?.boq_surum || null;
+    if (b && Number(b.boq_birim_fiyat) > 0) { fiyat = Number(b.boq_birim_fiyat); pb = b.boq_para_birimi || "TRY"; kaynak = "BOQ"; }
+    else if (b) {
+      const k = await katalogFiyati(b.boq_surum, String(r.item_code || "").trim(), boqKatalog.bolgeNormalize(getRegionFromSiteCode(r.site_code)));
+      if (k) { fiyat = k.fiyat; pb = k.pb; kaynak = "KATALOG"; }
+    }
+    if (fiyat === null) { out.push({ ...r, fiyat_kaynak: "YOK", fiyat_tahmini: false }); continue; }
+    out.push({ ...r, unit_price: fiyat, total_done_amount: Number(r.done_qty || 0) * fiyat, currency: normalizeCurrency(pb),
+      fiyat_kaynak: kaynak, fiyat_surum: surum, fiyat_tahmini: true });
+  }
+  return out;
+}
+
 app.get("/dashboard/result", authMiddleware, async (req, res) => {
   const isAdmin = req.user?.role === "admin";
   const subconName = req.user?.subcon_name || null;
@@ -7919,6 +7952,9 @@ app.get("/dashboard/result", authMiddleware, async (req, res) => {
       // FERRUMX kapsamı hem "FERRUMX" hem "AHY_FERRUMX" satırlarını içerir
       rows = rows.filter((row) => subconRowMatches(scopeName, row.subcon_name));
     }
+    // 04.11.2026 (Orhan): Bölge Analizi (boq_yedek=1) — PO fiyatı yoksa işaretli BoQ fiyatı; PO açılınca PO fiyatı esas.
+    // Yalnız bu istekte uygulanır; ortak sorgu (hakediş, ödeme, fatura, diğer raporlar) PO-yalnız kalır.
+    if (req.query.boq_yedek === "1") rows = await boqYedekFiyat(rows);
 
     res.json({ ok: true, rows });
   } catch (err) {
