@@ -79,20 +79,40 @@ async function sonKonumlar({ env = process.env, fetchFn = fetch, simdi = Date.no
     const a = ayar(env);
     try {
       let tok = _token && _token.api === a.api && _token.kullanici === a.kullanici ? _token.deger : await _tokenAl(a, fetchFn);
-      // 04.11.2026 canlı düzeltme: bu raporda _perPage en çok 50 (500 → HTTP 400); adres yalnız _pull=location.address ile gelir.
-      // Sayfa sayfa okunur (50'den az dönen sayfa son sayfadır; güvenlik için en çok SAYFA_SINIRI sayfa).
-      const cagir = (t, sayfa) => _istek(`${a.api}/reports/vehicle/locations/latest?_perPage=${SAYFA_BOYUTU}&_page=${sayfa}&_pull=location.address`,
-        { headers: { Authorization: t, Accept: "application/json" } }, fetchFn);
-      const tum = [];
+      // 04.11.2026 canlı düzeltmeler: _perPage en çok 50 (500 → HTTP 400); rapor vehicleId İSTER ("Either `vehicleId` or
+      // `trackerId` query-string parameter should be specified") → önce GET /vehicles ile hesabın araç kimlikleri alınır,
+      // sonra konum raporu bu kimliklerle (50'lik gruplar) istenir. Adres yalnız _pull=location.address ile gelir.
+      const al = async (yol, ad) => {
+        let r = await _istek(`${a.api}${yol}`, { headers: { Authorization: tok, Accept: "application/json" } }, fetchFn);
+        if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await _istek(`${a.api}${yol}`, { headers: { Authorization: tok, Accept: "application/json" } }, fetchFn); } // süresi dolmuş anahtar: bir kez yenile
+        return r;
+      };
+      const hata = (ad, r) => {
+        const ayrinti = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : "";
+        return new Error(`Triomobil ${ad} alınamadı (HTTP ${r.durum}${ayrinti ? `: ${ayrinti}` : ""})`);
+      };
+      // 1) Araç listesi (sayfa sayfa)
+      const kimlikler = [];
       for (let sayfa = 1; sayfa <= SAYFA_SINIRI; sayfa++) {
-        let r = await cagir(tok, sayfa);
-        if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await cagir(tok, sayfa); } // süresi dolmuş anahtar: bir kez yenile
-        if (r.durum >= 300 || !Array.isArray(r.govde)) {
-          const ayrinti = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : "";
-          throw new Error(`Triomobil konum raporu alınamadı (HTTP ${r.durum}${ayrinti ? `: ${ayrinti}` : ""})`);
-        }
-        tum.push(...r.govde);
+        const r = await al(`/vehicles?_perPage=${SAYFA_BOYUTU}&_page=${sayfa}`);
+        if (r.durum >= 300 || !Array.isArray(r.govde)) throw hata("araç listesi", r);
+        for (const v of r.govde) if (v && /^[0-9a-fA-F]{24}$/.test(String(v._id || ""))) kimlikler.push(String(v._id));
         if (r.govde.length < SAYFA_BOYUTU) break;
+      }
+      // 2) Son konumlar: kimlikler 50'lik gruplar halinde (vehicleId tekrarlı parametre). Triomobil grubu 400 ile
+      //    reddederse (dizi biçimi uyuşmazlığı) o grup araç başına tek tek sorulur.
+      const konumSor = (ids) => al(`/reports/vehicle/locations/latest?${ids.map((id) => `vehicleId=${id}`).join("&")}&_perPage=${SAYFA_BOYUTU}&_page=1&_pull=location.address`);
+      const tum = [];
+      for (let i = 0; i < kimlikler.length; i += SAYFA_BOYUTU) {
+        const grup = kimlikler.slice(i, i + SAYFA_BOYUTU);
+        const r = await konumSor(grup);
+        if (r.durum < 300 && Array.isArray(r.govde)) { tum.push(...r.govde); continue; }
+        if (r.durum !== 400 || grup.length === 1) throw hata("konum raporu", r);
+        for (const id of grup) {
+          const t = await konumSor([id]);
+          if (t.durum >= 300 || !Array.isArray(t.govde)) throw hata("konum raporu", t);
+          tum.push(...t.govde);
+        }
       }
       const veri = { ok: true, yapilandirildi: true, zaman: new Date(simdi).toISOString(), araclar: tum.map(kayitDuzenle).filter((k) => k.plaka_norm) };
       _onbellek = { zaman: simdi, veri };
