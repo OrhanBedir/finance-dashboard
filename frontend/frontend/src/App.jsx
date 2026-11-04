@@ -17,7 +17,7 @@ import { RolloutSutunFiltreSatiri, SutunFiltreDugmesi, SutunFiltreBilgi, sutunFi
 import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, kalemGovde, kalemdenEditore, katalogApi } from "./MalzemeKatalog.jsx"; // 29.10.2026: Teknocenter talep + katalog
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK, planAdayi, planAdayUygun } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
-import { TaseronSahaRaporlari, TaseronSahaRaporModal } from "./TaseronSahaRaporlari.jsx"; // 04.11.2026: taşeron saha raporları (Teknocenter inceleme / PR durumu)
+import { TaseronSahaRaporlari, TaseronSahaRaporModal, TaseronHesapModal } from "./TaseronSahaRaporlari.jsx"; // 04.11.2026: taşeron saha raporları (Teknocenter inceleme / PR durumu)
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -9317,6 +9317,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
   const [showHarita, setShowHarita] = useState(false); // 28.10.2026: Rollout saha haritası (salt görüntüleme)
   const [showHaftalik, setShowHaftalik] = useState(false); // 31.10.2026: Rollout Weekly Plan
   const [showTaseronRapor, setShowTaseronRapor] = useState(false); // 04.11.2026: taşeron saha raporları
+  const [showTaseronHesap, setShowTaseronHesap] = useState(false); // 04.11.2026: taşeron uygulama hesapları (rol / ekip)
   const [isAtamaBaslangic, setIsAtamaBaslangic] = useState(null); // iş kolu görünümünden ön dolu atama
   const [isAtamaYetkili, setIsAtamaYetkili] = useState(false);
   // İş kolu görünümü (03.09.2026): NS sahalarda saha × iş kolu; filtre seçiliyse liste modu
@@ -10005,6 +10006,12 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
             🧾 Taşeron Raporları
           </button>}
           {showTaseronRapor && <TaseronSahaRaporModal onClose={() => setShowTaseronRapor(false)} />}
+          {/* 04.11.2026: taşeron uygulama hesapları — İş Ata yetkilisi (yetki ve firma kapsamı sunucuda) */}
+          {isAtamaYetkili && <button type="button" onClick={() => setShowTaseronHesap(true)} title="Taşeronların Omnix Field Operation hesapları: rol, ekip, yeni hesap, şifre sıfırlama"
+            style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
+            👷 Taşeron Hesapları
+          </button>}
+          {showTaseronHesap && <TaseronHesapModal onClose={() => setShowTaseronHesap(false)} />}
         </div>
       </div>
       {firmaSecim.length > 0 && (

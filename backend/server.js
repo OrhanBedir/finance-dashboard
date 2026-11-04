@@ -15597,7 +15597,14 @@ taseronSaha.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPane
   kapsamIsKodlari: async (req) => {
     const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0], mesaj: fs.hata[1] });
     const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM); return { kodlar: new Set([...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) }; },
-  firmaYonetebilir: async (req, t) => { const K = await rolloutKapsam(req); return !K || String(t.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(t.subcon_name); } });
+  firmaYonetebilir: async (req, t) => { const K = await rolloutKapsam(req); return !K || String(t.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(t.subcon_name); },
+  // 04.11.2026: taşeron hesabı açma — kullanıcı yöneticisi (admin / users_admin) ya da alt marka (Teknocenter) İş Ata yetkilisi
+  hesapAcabilir: async (req) => {
+    if (["admin", "platform_admin"].includes(req.user?.role) || req.user?.users_admin === true) return true;
+    const r = await pool.query(`SELECT users_admin FROM users WHERE id = $1`, [Number(req.user?.user_id) || 0]).catch(() => ({ rows: [] }));
+    if (r.rows[0]?.users_admin === true) return true;
+    return altMarkaKullanicisi(req.user) && isAtamaYetkiliMi(req);
+  } });
 // Tarihli onay devri + mobil "Onaylar" listesi (/onay/bekleyen) + admin devir tanımları. Eski e-posta listeleri
 // (AVANS_YETKI, MASRAF_*_MAIL) dosyanın ilerisinde tanımlıdır; yalnız istek anında okunur.
 const onayPanel = onayDevri.kur(app, {

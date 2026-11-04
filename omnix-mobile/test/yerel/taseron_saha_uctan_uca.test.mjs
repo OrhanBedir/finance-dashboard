@@ -238,3 +238,43 @@ test("üyelik yönetimi: Teknocenter rol / ekip atar, başka firmanın ekibi red
   await q(`DELETE FROM taseron_saha_uye WHERE user_id = $1`, [uid]);
 });
 test.after(() => db?.end());
+
+test("hesap yönetimi: firma listesi, hesap açma (rol + ekip), mükerrer ad, kapsam, şifre sıfırlama, hesap kapatma", async () => {
+  const em = (await q(`SELECT id FROM subcons WHERE subcon_name = 'TEKNO_EMRAH'`)).rows[0].id;
+  const b2 = (await q(`SELECT id FROM subcons WHERE subcon_name = '2KX'`)).rows[0].id;
+  // Her çalıştırmada yeni kullanıcı adı (hesap silinip aynı adla açılırsa sunucunun e-posta→kimlik önbelleği eski kimliği tutar)
+  const ek = Date.now().toString(36), Y1 = `emrah.yeni.${ek}`, Y2 = `iztas.yeni.${ek}`;
+  // Teknocenter yöneticisi yalnız kendi kapsamındaki firmaları görür
+  const fl = await ok(T.tekno, "/taseron-saha/yonetim/firmalar?q=2KX");
+  assert.ok(fl.firmalar.some((f) => f.kod === "TEKNO_2KX") && !fl.firmalar.some((f) => f.kod === "2KX"), "bağımsız 2KX Teknocenter listesinde yok");
+  assert.equal(fl.hesap_acabilir, true);
+  assert.equal((await istek(T.emrah, "/taseron-saha/yonetim/firmalar")).durum, 403, "taşeron yönetim listesine giremez");
+  // Hesap aç
+  const zayif = await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Emrah Yeni", kullanici_adi: Y1, sifre: "kisa", rol: "CALISAN", ekip_no: 303 } });
+  assert.equal(zayif.durum, 400);
+  assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Emrah Yeni", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 311 } })).durum, 400, "başka firmanın ekibi");
+  assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: b2, ad: "X", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN" } })).durum, 404, "kapsam dışı firma");
+  const a = await ok(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Emrah Yeni", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } });
+  assert.equal(a.kullanici.rol, "CALISAN"); assert.equal(JSON.stringify(a).includes("Saha2026x"), false, "şifre yanıtta dönmez");
+  assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Başka", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } })).durum, 409, "aynı kullanıcı adı");
+  assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Erc Hesabı", kullanici_adi: E.erc, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } })).durum, 409, "var olan ERC hesabı ele geçirilemez");
+  // Yeni hesap giriş yapar, yalnız kendi ekibini görür
+  const tk = (await ok(null, "/auth/login", { method: "POST", govde: { email: Y1, password: "Saha2026x" } })).token;
+  const v = await ok(tk, "/taseron-saha/isler");
+  assert.equal(v.rol, "CALISAN"); assert.deepEqual(kodlar(v), ["BU8002_NR700"]);
+  const u = (await q(`SELECT role, marka, kullanici_tipi, taseron_id FROM users WHERE email = $1`, [Y1])).rows[0];
+  assert.deepEqual([u.role, u.marka, u.kullanici_tipi, u.taseron_id], ["subcon", "TEKNO", "TASERON", em]);
+  // Şifre sıfırla → eski şifre geçmez, yeni geçer; hesap kapat → giriş yok
+  await ok(T.tekno, `/taseron-saha/yonetim/hesap/${a.kullanici.id}`, { method: "PUT", govde: { sifre: "Yeni2026y" } });
+  assert.notEqual((await istek(null, "/auth/login", { method: "POST", govde: { email: Y1, password: "Saha2026x" } })).durum, 200);
+  await ok(null, "/auth/login", { method: "POST", govde: { email: Y1, password: "Yeni2026y" } });
+  await ok(T.tekno, `/taseron-saha/yonetim/hesap/${a.kullanici.id}`, { method: "PUT", govde: { hesap_aktif: false } });
+  assert.notEqual((await istek(null, "/auth/login", { method: "POST", govde: { email: Y1, password: "Yeni2026y" } })).durum, 200, "kapalı hesap giriş yapamaz");
+  // ERC dışı / taşeron olmayan kullanıcıya şifre ucu çalışmaz
+  const ercId = (await q(`SELECT id FROM users WHERE email = $1`, [E.erc])).rows[0].id;
+  assert.equal((await istek(T.tekno, `/taseron-saha/yonetim/hesap/${ercId}`, { method: "PUT", govde: { sifre: "Ele2026gec" } })).durum, 404);
+  // Ana firması boş taşeron (İZTAŞ) için ERC yöneticisi ana firmayı seçer
+  const iz = (await q(`SELECT id FROM subcons WHERE subcon_name = 'TEKNO_İZTAŞ'`)).rows[0].id;
+  const b = await ok(T.erc, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: iz, ad: "İztaş Yeni", kullanici_adi: Y2, sifre: "Saha2026x", rol: "SORUMLU", marka: "TEKNO" } });
+  assert.equal((await q(`SELECT marka FROM users WHERE id = $1`, [b.kullanici.id])).rows[0].marka, "TEKNO");
+});

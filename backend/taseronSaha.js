@@ -20,6 +20,7 @@
 
 const crypto = require("crypto");
 const multer = require("multer");
+const bcrypt = require("bcrypt");
 
 const kodT = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
 const temiz = (s, n = 2000) => String(s ?? "").trim().replace(/[ \t]+/g, " ").slice(0, n);
@@ -148,7 +149,7 @@ function calisanKapisi(pool) {
 
 function kur(app, deps) {
   const { pool, authMiddleware, taseronKapsami, planSenkron, fiiliDurum, sahaKimlik, islemGecmisiYaz, isAtamaRolloutTarihYaz, ROLLOUT_IS_KOLU_ALANLARI,
-    rolloutFirmaAdi, firmaKatla, isAtamaYetkiliMi, taseronMu, mobilKonum, ozelYukle, ozelIndir, ozelSil, altMarkaKullanicisi, kapsamIsKodlari, firmaYonetebilir } = deps;
+    rolloutFirmaAdi, firmaKatla, isAtamaYetkiliMi, taseronMu, mobilKonum, ozelYukle, ozelIndir, ozelSil, altMarkaKullanicisi, kapsamIsKodlari, firmaYonetebilir, hesapAcabilir } = deps;
   const ALANLAR = ROLLOUT_IS_KOLU_ALANLARI;
   const H = (durum, mesaj, ek) => Object.assign(new Error(mesaj), { durum, mesaj, ek });
   const hata = (res, e) => {
@@ -607,7 +608,8 @@ function kur(app, deps) {
       const hesaplar = (await pool.query(`SELECT u.id, u.name, LOWER(u.email) AS email, COALESCE(u.is_active, true) AS aktif_hesap, m.rol, m.ekip_no, m.aktif, m.updated_at
         FROM users u LEFT JOIN taseron_saha_uye m ON m.user_id = u.id
         WHERE to_jsonb(u)->>'kullanici_tipi' = 'TASERON' AND (to_jsonb(u)->>'taseron_id')::int = $1 ORDER BY u.name`, [t.id])).rows;
-      res.json({ ok: true, firma: { id: t.id, ad: t.unvan || t.subcon_name, kod: t.subcon_name }, ekipler,
+      res.json({ ok: true, firma: { id: t.id, ad: t.unvan || t.subcon_name, kod: t.subcon_name, ana_firma: t.ana_firma || null }, ekipler,
+        hesap_acabilir: !!(await hesapAcabilir(req)),
         hesaplar: hesaplar.map((h) => ({ ...h, rol: h.rol || "SORUMLU", varsayilan: !h.rol })),
         bilgi: "Üyelik satırı olmayan taşeron hesabı firma geneli (SORUMLU) görür. Çalışan hesabına ekip seçin." });
     } catch (e) { hata(res, e); }
@@ -633,6 +635,82 @@ function kur(app, deps) {
       _uyeOnbellek.delete(uid);
       await islemGecmisiYaz(req, "taseron_saha_uye", uid, "UYELIK", eski, { rol, ekip_no: ekipNo, aktif, taseron_id: t.id }, `${u.name}: ${rol}${ekipNo != null ? ` · ekip ${ekipNo}` : ""}`);
       res.json({ ok: true, mesaj: "Saha rolü kaydedildi" });
+    } catch (e) { hata(res, e); }
+  });
+
+  // ── FİRMA LİSTESİ + HESAP AÇMA / ŞİFRE (04.11.2026) ────────────────────────────────────────────────────────────
+  // Firma listesi: yöneticinin kapsamındaki taşeron firmalar — ana firması olan, ekibi ya da taşeron hesabı bulunan (q ile hepsinde arama)
+  app.get("/taseron-saha/yonetim/firmalar", authMiddleware, async (req, res) => {
+    try {
+      if (taseronMu(req.user) || req.user?.kullanici_tipi === "TASERON" || !isAtamaYetkiliMi(req)) throw H(403, "Yetkiniz yok");
+      const q = temiz(req.query.q, 60).toLocaleUpperCase("tr-TR");
+      const r = (await pool.query(`SELECT s.id, s.subcon_name, s.unvan, s.ana_firma,
+          (SELECT COUNT(*)::int FROM ekipler e WHERE (to_jsonb(e)->>'firma_id')::int = s.id) AS ekip_sayisi,
+          (SELECT COUNT(*)::int FROM users u WHERE to_jsonb(u)->>'kullanici_tipi' = 'TASERON' AND (to_jsonb(u)->>'taseron_id')::int = s.id) AS hesap_sayisi
+        FROM subcons s WHERE COALESCE(s.aktif, true)
+          AND (${q ? `UPPER(s.subcon_name) LIKE $1 OR UPPER(COALESCE(s.unvan,'')) LIKE $1` : `s.ana_firma IS NOT NULL
+            OR EXISTS (SELECT 1 FROM ekipler e WHERE (to_jsonb(e)->>'firma_id')::int = s.id)
+            OR EXISTS (SELECT 1 FROM users u WHERE to_jsonb(u)->>'kullanici_tipi' = 'TASERON' AND (to_jsonb(u)->>'taseron_id')::int = s.id)`})
+        ORDER BY s.subcon_name LIMIT 200`, q ? [`%${q}%`] : [])).rows;
+      const out = [];
+      for (const t of r) if (await firmaYonetebilir(req, t)) out.push({ id: t.id, ad: t.unvan || t.subcon_name, kod: t.subcon_name, ana_firma: t.ana_firma, ekip_sayisi: t.ekip_sayisi, hesap_sayisi: t.hesap_sayisi });
+      res.json({ ok: true, firmalar: out, hesap_acabilir: !!(await hesapAcabilir(req)) });
+    } catch (e) { hata(res, e); }
+  });
+  const sifreHatasi = (s) => (String(s || "").length < 8 ? "Şifre en az 8 karakter olmalı" : !/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(s) || !/\d/.test(s) ? "Şifrede en az bir harf ve bir rakam olmalı" : null);
+  // Hesap açma: taşeron kullanıcısı (kullanici_tipi TASERON + taseron_id) + saha rolü / ekibi tek işlemde. Şifreyi açan kişi
+  // girer ve taşerona kendisi iletir (sunucu düz metin saklamaz, yanıtta döndürmez). Var olan kullanıcı adı → 409 (hesap ele geçirme yok).
+  app.post("/taseron-saha/yonetim/hesap", authMiddleware, async (req, res) => {
+    try {
+      const t = await yonetimKapisi(req, req.body?.taseron_id);
+      if (!(await hesapAcabilir(req))) throw H(403, "Hesap açma yetkiniz yok (kullanıcı yöneticisi ya da Teknocenter yöneticisi)");
+      const ad = temiz(req.body?.ad, 120), kadi = temiz(req.body?.kullanici_adi, 120).toLowerCase(), sifre = String(req.body?.sifre || "");
+      if (ad.length < 3) throw H(400, "Ad soyad zorunlu", { alan: "ad" });
+      if (!/^[a-z0-9._@+-]{3,}$/.test(kadi)) throw H(400, "Kullanıcı adı en az 3 karakter; harf, rakam, nokta, @ ve - kullanılabilir", { alan: "kullanici_adi" });
+      const sh = sifreHatasi(sifre); if (sh) throw H(400, sh, { alan: "sifre" });
+      const rol = String(req.body?.rol || "CALISAN").toUpperCase();
+      if (!["SORUMLU", "CALISAN"].includes(rol)) throw H(400, "Rol SORUMLU ya da CALISAN olmalı", { alan: "rol" });
+      const ekipNo = req.body?.ekip_no == null || req.body.ekip_no === "" ? null : Number(req.body.ekip_no);
+      if (ekipNo != null && !(await pool.query(`SELECT 1 FROM ekipler WHERE ekip_no = $1 AND (to_jsonb(ekipler)->>'firma_id')::int = $2`, [ekipNo, t.id])).rowCount)
+        throw H(400, "Seçilen ekip bu firmaya bağlı değil", { alan: "ekip_no" });
+      if ((await pool.query(`SELECT 1 FROM users WHERE LOWER(TRIM(email)) = $1`, [kadi])).rowCount) throw H(409, "Bu kullanıcı adı kullanılıyor; başka bir ad seçin", { alan: "kullanici_adi" });
+      // Ana firma: taşeron kaydındaki ana firma; yoksa yöneticinin firması (alt marka) ya da formdaki seçim
+      const ben_ = (await pool.query(`SELECT marka, tenant FROM users WHERE id = $1`, [Number(req.user.user_id) || 0])).rows[0] || {};
+      let marka = String(t.ana_firma || "").toUpperCase() || (altMarkaKullanicisi(req.user) ? String(ben_.marka || "").toUpperCase() : String(req.body?.marka || "").toUpperCase()) || "ERC";
+      if (!(await pool.query(`SELECT 1 FROM markalar WHERE kod = $1 AND COALESCE(aktif, true)`, [marka]).catch(() => ({ rowCount: 0 }))).rowCount && marka !== "ERC") throw H(400, "Geçersiz ana firma", { alan: "marka" });
+      const hash = await bcrypt.hash(sifre, 10);
+      const c = await pool.connect();
+      let yeni;
+      try {
+        await c.query("BEGIN");
+        yeni = (await c.query(`INSERT INTO users (name, email, password_hash, role, is_active, status, tenant, marka, subcon_name, kullanici_tipi, taseron_id)
+          VALUES ($1,$2,$3,'subcon',true,'active',$4,$5,$6,'TASERON',$7) RETURNING id, name, email`, [ad, kadi, hash, ben_.tenant || "erc", marka, t.subcon_name, t.id])).rows[0];
+        await c.query(`INSERT INTO taseron_saha_uye (user_id, taseron_id, ekip_no, rol, aktif, ekleyen) VALUES ($1,$2,$3,$4,true,$5)`, [yeni.id, t.id, ekipNo, rol, ben(req)]);
+        await c.query("COMMIT");
+      } catch (e) { await c.query("ROLLBACK").catch(() => {}); if (e.code === "23505") throw H(409, "Bu kullanıcı adı kullanılıyor", { alan: "kullanici_adi" }); throw e; } finally { c.release(); }
+      await islemGecmisiYaz(req, "taseron_saha_uye", yeni.id, "HESAP_ACILDI", null, { taseron_id: t.id, rol, ekip_no: ekipNo, marka }, `${t.subcon_name}: ${ad} (${kadi}) hesabı açıldı`);
+      // Alan adı "kullanici": "hesap" anahtarı gizlilik katmanında (banka hesabı) /taseron-saha yanıtlarından silinir
+      res.json({ ok: true, mesaj: "Hesap açıldı. Kullanıcı adı ve şifreyi taşerona siz iletin.", kullanici: { id: yeni.id, ad: yeni.name, kullanici_adi: yeni.email, rol, ekip_no: ekipNo } });
+    } catch (e) { hata(res, e); }
+  });
+  // Şifre sıfırlama (unutulan şifre) ve hesabı tamamen kapatma / açma — yalnız bu firmanın taşeron hesapları
+  app.put("/taseron-saha/yonetim/hesap/:userId", authMiddleware, async (req, res) => {
+    try {
+      const uid = Number(req.params.userId) || 0;
+      const u = (await pool.query(`SELECT id, name, to_jsonb(users)->>'kullanici_tipi' AS tip, (to_jsonb(users)->>'taseron_id')::int AS taseron_id FROM users WHERE id = $1`, [uid])).rows[0];
+      if (!u || u.tip !== "TASERON" || !u.taseron_id) throw H(404, "Taşeron hesabı bulunamadı");
+      const t = await yonetimKapisi(req, u.taseron_id);
+      if (!(await hesapAcabilir(req))) throw H(403, "Hesap yönetme yetkiniz yok");
+      const deg = {};
+      if (req.body?.sifre !== undefined) {
+        const sh = sifreHatasi(req.body.sifre); if (sh) throw H(400, sh, { alan: "sifre" });
+        await pool.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [uid, await bcrypt.hash(String(req.body.sifre), 10)]); deg.sifre = "sıfırlandı";
+      }
+      if (typeof req.body?.hesap_aktif === "boolean") { await pool.query(`UPDATE users SET is_active = $2 WHERE id = $1`, [uid, req.body.hesap_aktif]); deg.hesap_aktif = req.body.hesap_aktif; }
+      if (!Object.keys(deg).length) throw H(400, "Değişiklik yok");
+      _uyeOnbellek.delete(uid);
+      await islemGecmisiYaz(req, "taseron_saha_uye", uid, "HESAP_GUNCELLENDI", null, deg, `${t.subcon_name}: ${u.name} — ${Object.keys(deg).join(", ")}`);
+      res.json({ ok: true, mesaj: deg.sifre ? "Şifre sıfırlandı. Yeni şifreyi taşerona siz iletin." : deg.hesap_aktif ? "Hesap açıldı" : "Hesap kapatıldı (giriş yapamaz)" });
     } catch (e) { hata(res, e); }
   });
 
