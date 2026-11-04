@@ -593,6 +593,7 @@ const sahaKonum = require("./sahaKonum");
 const haritaIsDurumu = require("./haritaIsDurumu");
 const sahaFiltre = require("./sahaFiltre"); // 29.10.2026: harita filtreleri, kapsam rengi, iş süresi
 const kmzKonum = require("./kmzKonum"); // 29.10.2026: Türk Telekom KMZ konum kaynağı (yalnız konum)
+const aracTakip = require("./aracTakip"); // 04.11.2026: Triomobil GPS araç konumu (yalnız okuma)
 const haritaPinDurum = require("./haritaPinDurum");
 const planAraMod = require("./planAra"); // 02.11.2026: Plan Yap 3. adım Site ID / iş kodu öneri araması // 29.10.2026: pin rengi = iş durumu; anten / bant detayı
 const planlayici = require("./planlayici"); // 29.10.2026: ekip planlama (Plan Yap)
@@ -27567,6 +27568,24 @@ app.get("/hr/araclar", async (req, res) => {
     for (const a of rows) if (taseronMu(u) || !aracKapsamda(k, a.firma)) a.belgeler = null;
   }
   res.json(rows);
+});
+
+// 04.11.2026 (Orhan): Triomobil canlı araç konumu (yalnız okuma). Konum kişisel veri sayılır: yalnız İK/finans
+// okuma yetkilisi + rollout rolü görür, taşeron hiç; alt marka (Teknocenter) yalnız kendi kapsamındaki araçları.
+// ERC'de kaydı olmayan Triomobil plakaları yalnız ana yönetime "eşleşmeyen" olarak döner.
+const aracTakipOkuma = okumaKapisi((u) => !taseronMu(u) && (ikOkumaYetkili(u) || _rol(u) === "rollout"), "Araç konumunu görme yetkiniz yok");
+app.get("/hr/arac-takip", aracTakipOkuma, async (req, res) => {
+  try {
+    const t = await aracTakip.sonKonumlar({ zorla: req.query.yenile === "1" && ikYazmaYetkili(req.user) });
+    if (!t.ok) return res.status(502).json({ ok: false, yapilandirildi: true, error: t.error });
+    if (!t.yapilandirildi) return res.json({ ok: true, yapilandirildi: false, araclar: [] });
+    const { rows } = await pool.query(`SELECT id, plaka, firma, marka, model, surucu, bolge FROM araclar WHERE aktif IS DISTINCT FROM false`);
+    const k = altMarkaKapsam(req);
+    const { eslesen, eslesmeyen } = aracTakip.eslestir(rows, t.araclar);
+    res.json({ ok: true, yapilandirildi: true, zaman: t.zaman, eski: !!t.eski, uyari: t.uyari || null,
+      araclar: eslesen.filter((a) => aracKapsamda(k, a.firma)).map(({ plaka_norm, ...a }) => a),
+      eslesmeyen: k ? [] : eslesmeyen.map((x) => ({ plaka: x.plaka, son_sinyal: x.son_sinyal })) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.post("/hr/araclar/:id/km", ikYazma, aracKapsamKapisi(aracIdParam), async (req, res) => {
