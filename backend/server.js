@@ -13915,7 +13915,7 @@ async function haritaVerisi(req, { firma } = {}) {
     return ({ ok: true, kapsam: K ? K.ad : null, yil: yilSec, yillar_mevcut: [...new Set(sahalar.flatMap((s) => s.isler.flatMap((x) => x.yillar || [])))].sort(), firma: FM ? { kod: FM.kod, ad: FM.ad } : null,
       hizli_firmalar: HARITA_FIRMA_IZINLI.filter((f) => !K || K.kod === f), depo, sahalar, fiziksel_olmayan: fizikselOlmayan,
       rota_servisi: !!process.env.ROTA_SERVIS_URL, adres_kodlama: false,
-      kmz_yetkili: !K && ["admin", "platform_admin"].includes(req.user?.role), // KMZ konum içe alma düğmesi (yalnız ERC yöneticisi)
+      kmz_yetkili: !!kmzYetkiKapsam(req.user, K), // KMZ konum içe alma düğmesi (ERC yöneticisi + Teknocenter yöneticisi kendi kapsamında)
       ozet: { saha: sahalar.length, is_kaydi: sahalar.reduce((a, s) => a + s.isler.length, 0), konumlu: sahalar.filter(kullan).length, konum_eksik: sahalar.filter((s) => !kullan(s)).length,
         konum_kmz: sahalar.filter((s) => kullan(s) && s.konum.kaynak === "KMZ").length,
         is_2026: sahalar.filter((x) => x.is_2026).length, yil_dogrulanamadi: sahalar.filter((x) => x.yil_dogrulanamadi).length,
@@ -14103,12 +14103,19 @@ async function kmzTablolar() {
     degistiren TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
   _kmzTabloHazir = true;
 }
-// Yalnız ERC yöneticisi: alt marka (Teknocenter / AHY) ve taşeron hesabı KMZ içe alamaz, önizleyemez
-async function kmzYetkili(req) {
-  if (!req.user || taseronMu(req.user)) return false;
-  if (!["admin", "platform_admin"].includes(req.user.role)) return false;
-  return !(await rolloutKapsam(req));
+// KMZ içe alma yetkisi: ERC yöneticisi tüm sahalar için ({ tam: true }).
+// 04.11.2026 (Orhan): 1 Kasım'dan itibaren saha işlerinin tamamını Teknocenter yapıyor — Teknocenter yöneticisi
+// (admin / direktor: "teknocenter" ve İlhami Şahin hesabı) KMZ'yi YALNIZ kendi kapsamındaki sahalar için önizler / uygular
+// ({ tam: false, kod: "TEKNO" }); başka firmanın sahası listede, raporda ve yazmada yer almaz. AHY, taşeron, muhasebe, İSG: yok.
+function kmzYetkiKapsam(u, K) {
+  if (!u || taseronMu(u)) return null;
+  if (!K) return ["admin", "platform_admin"].includes(u.role) ? { tam: true } : null;
+  if (K.kod === "TEKNO" && K.goruntule && ["admin", "direktor"].includes(u.role)) return { tam: false, kod: K.kod };
+  return null;
 }
+async function kmzYetki(req) { return req.user ? kmzYetkiKapsam(req.user, await rolloutKapsam(req)) : null; }
+// Yetkinin saha kümesi: tam → sistemdeki tüm fiziksel sahalar; firma → yalnız firma kapsamı (haritadaki kuralla aynı)
+async function kmzKapsamKimlikleri(Y) { return Y.tam ? kmzSistemKimlikleri() : kmzTeknoKimlikleri(); }
 // Sistemdeki doğrulanmış fiziksel Site ID'ler (Rollout + Günlük İş Girişi iş kodları, sahaKimlik ile)
 async function kmzSistemKimlikleri() {
   const r = await pool.query(`SELECT UPPER(TRIM(site_code)) AS sc FROM rollout_progress WHERE COALESCE(TRIM(site_code),'') <> ''
@@ -14136,7 +14143,8 @@ const kmzSatir = (x, isKodlari) => ({ fiziksel_id: x.fiziksel_id, sinif: x.sinif
 
 app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC ve Teknocenter yöneticisine açıktır" });
     if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: "KMZ dosyası seçilmedi" });
     if (!/\.kmz$/i.test(req.file.originalname || "")) return res.status(400).json({ ok: false, error: "Yalnız .kmz dosyası yüklenebilir" });
     let okuma;
@@ -14144,13 +14152,15 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
     try { okuma = kmzKonum.kmzOku(req.file.buffer, utf8Name(req.file.originalname)); }
     catch (e) { return res.status(400).json({ ok: false, error: `KMZ okunamadı: ${e.message}` }); }
     await kmzTablolar();
-    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    // Teknocenter hesabında "sistem" = yalnız Teknocenter kapsamı: kapsam dışı saha eşleşmeyen sayılır (adı / konumu dönmez)
+    const [sistem, tekno] = await Promise.all([kmzKapsamKimlikleri(Y), kmzTeknoKimlikleri()]);
     const ids = okuma.gruplar.map((g) => g.fiziksel_id).filter((id) => sistem.has(id));
     const mevcut = new Map((ids.length ? (await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [ids])).rows : []).map((k) => [k.fiziksel_id, k]));
     const E = kmzKonum.eslestir(okuma, { sistemIdler: new Set(sistem.keys()), teknoIdler: new Set(tekno.keys()), mevcut });
     const kmzIdler = new Set(okuma.gruplar.map((g) => g.fiziksel_id));
-    const onceki = (await pool.query(`SELECT id, created_at, durum FROM saha_konum_ice_alma WHERE sha256 = $1 ORDER BY id DESC LIMIT 1`, [okuma.ozet.sha256])).rows[0] || null;
-    const ozet = { ...E.ozet, teknocenter_toplam: tekno.size, teknocenter_kmz_disi: [...tekno.keys()].filter((id) => !kmzIdler.has(id)).length };
+    const onceki = (await pool.query(`SELECT id, created_at, durum FROM saha_konum_ice_alma WHERE sha256 = $1 AND ($2::text IS NULL OR ozet->>'kapsam' = $2)
+      ORDER BY id DESC LIMIT 1`, [okuma.ozet.sha256, Y.tam ? null : Y.kod])).rows[0] || null;
+    const ozet = { ...E.ozet, teknocenter_toplam: tekno.size, teknocenter_kmz_disi: [...tekno.keys()].filter((id) => !kmzIdler.has(id)).length, kapsam: Y.tam ? null : Y.kod };
     const ia = (await pool.query(`INSERT INTO saha_konum_ice_alma (dosya_adi, sha256, boyut, kml_sayisi, okunan_nokta, kayit_tarihleri, ozet, yukleyen)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, created_at`,
       [okuma.ozet.dosya_adi, okuma.ozet.sha256, okuma.ozet.boyut, okuma.ozet.kml_sayisi, okuma.ozet.okunan_nokta, okuma.ozet.kayit_tarihleri,
@@ -14180,16 +14190,20 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
         okuma.ozet.dis_baglanti ? `${okuma.ozet.dis_baglanti} dış bağlantı (NetworkLink) izlenmedi.` : "Dış bağlantı yok; arşiv dışından veri okunmadı.",
         `${okuma.tekrarlayici_sayisi} tekrarlayıcı (repeater) noktası saha sayılmadı; ${okuma.kodsuz.length} noktadan Site ID çıkarılamadı.`,
         ...(okuma.ozet.durum_alani === false ? ["Dosyada saha durumu alanı yok (yalnız Site ID + koordinat) — konum KMZ'si olarak kabul edildi; KMZ konumu TSSR'dan önce gelir, TSSR farkı uyarı olarak kalır."] : []),
+        ...(Y.tam ? [] : [`Yalnız ${markaProfil(Y.kod).ad} kapsamındaki sahalar eşleştirildi ve uygulanabilir; diğer sahalar "eşleşmeyen" sayılır.`]),
       ] });
   } catch (e) { console.error("KMZ ONIZLE ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.get("/saha-konum/kmz/ice-almalar", authMiddleware, async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await kmzTablolar();
+    // Firma hesabı yalnız kendi kapsamıyla yapılmış içe almaları görür
     const r = await pool.query(`SELECT id, dosya_adi, sha256, okunan_nokta, kayit_tarihleri, durum, yukleyen, created_at, uygulayan, uygulandi_at,
-      ozet->'eslesen_fiziksel_saha' AS eslesen, uygulama->'yazilan' AS yazilan FROM saha_konum_ice_alma ORDER BY id DESC LIMIT 30`);
+      ozet->'eslesen_fiziksel_saha' AS eslesen, uygulama->'yazilan' AS yazilan FROM saha_konum_ice_alma
+      WHERE ($1::text IS NULL OR ozet->>'kapsam' = $1) ORDER BY id DESC LIMIT 30`, [Y.tam ? null : Y.kod]);
     res.json({ ok: true, rows: r.rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -14198,18 +14212,19 @@ app.get("/saha-konum/kmz/ice-almalar", authMiddleware, async (req, res) => {
 app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC yöneticisine açıktır" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "KMZ konum içe alma yalnız ERC ve Teknocenter yöneticisine açıktır" });
     await kmzTablolar();
     const iaId = Number(req.params.id);
     const ia = (await client.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
-    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    if (!ia || (!Y.tam && ia.ozet?.kapsam !== Y.kod)) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
     const secimler = (Array.isArray(req.body?.secimler) ? req.body.secimler : []).filter((x) => x && x.kaynak === "KMZ")
       .map((x) => String(x.fiziksel_id || "").toUpperCase().trim()).filter(Boolean);
     const tekil = [...new Set(secimler)];
     if (!tekil.length) return res.status(400).json({ ok: false, error: "Uygulanacak saha seçilmedi" });
     if (tekil.length > 5000) return res.status(400).json({ ok: false, error: "Tek seferde en çok 5000 saha" });
     const adaylar = new Map((await client.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 AND fiziksel_id = ANY($2)`, [iaId, tekil])).rows.map((a) => [a.fiziksel_id, a]));
-    const sistem = await kmzSistemKimlikleri();
+    const sistem = await kmzKapsamKimlikleri(Y); // firma hesabı: yalnız kendi kapsamındaki saha yazılır
     await client.query("BEGIN");
     const mevcutlar = new Map((await client.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1) FOR UPDATE`, [tekil])).rows.map((k) => [k.fiziksel_id, k]));
     const yazilan = [], atlanan = [];
@@ -14217,14 +14232,15 @@ app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
       const a = adaylar.get(id);
       if (!a) { atlanan.push({ fiziksel_id: id, neden: "Bu içe almada aday yok" }); continue; }
       if (a.sinif_kmz !== "KABUL") { atlanan.push({ fiziksel_id: id, neden: `KMZ konumu belirsiz: ${a.neden || ""}` }); continue; }
-      if (!sistem.has(id)) { atlanan.push({ fiziksel_id: id, neden: "Sistemde bu fiziksel saha yok" }); continue; }
+      if (!sistem.has(id)) { atlanan.push({ fiziksel_id: id, neden: Y.tam ? "Sistemde bu fiziksel saha yok" : "Firma kapsamında bu saha yok" }); continue; }
       // Sınıf güncel kayıtla YENİDEN hesaplanır (önizlemeden sonra konum değiştiyse eski karar uygulanmaz)
       const m = mevcutlar.get(id);
       const tek = kmzKonum.eslestir({ gruplar: [{ fiziksel_id: id, lat: Number(a.lat), lng: Number(a.lng), sinif: "KABUL", nedenler: [] }], kodsuz: [], gecersiz: [], ozet: {} },
         { sistemIdler: new Set([id]), mevcut: new Map(m ? [[id, m]] : []) }).satirlar[0];
       if (tek.sinif === "UYUMLU") { atlanan.push({ fiziksel_id: id, neden: `Mevcut konumla uyumlu (${tek.neden}) — değiştirilmedi` }); continue; }
       if (!["YENI", "CELISKI"].includes(tek.sinif)) { atlanan.push({ fiziksel_id: id, neden: tek.neden || tek.sinif }); continue; }
-      if (m && m.kaynak === "MANUEL" && tek.sinif === "CELISKI" && req.body?.manuel_ez !== true) { atlanan.push({ fiziksel_id: id, neden: "Elle girilmiş konum — ayrıca onay gerekir" }); continue; }
+      // Elle girilmiş konumu yalnız ERC yöneticisi (manuel_ez onayıyla) ezebilir; firma hesabı ezemez
+      if (m && m.kaynak === "MANUEL" && tek.sinif === "CELISKI" && (req.body?.manuel_ez !== true || !Y.tam)) { atlanan.push({ fiziksel_id: id, neden: "Elle girilmiş konum — ayrıca onay gerekir" }); continue; }
       const kml = `${a.kml_dosya}#${a.placemark_id || "?"} (${a.ad})`;
       const uyarilar = tek.sinif === "CELISKI" ? [`Önceki ${m.kaynak} konumu (${Number(m.lat).toFixed(6)}, ${Number(m.lng).toFixed(6)}) KMZ ile değiştirildi: ${tek.neden}`] : [];
       await client.query(`INSERT INTO saha_konum (fiziksel_id, lat, lng, kaynak, dogruluk, uyarilar, belge_url, sayfa, ham, adres, saha_adi, il, ilce, kaynak_site_code,
@@ -14250,13 +14266,14 @@ app.post("/saha-konum/kmz/:id/uygula", authMiddleware, async (req, res) => {
 // Önizleme raporu (Excel): özet + eşleşen / çelişen / belirsiz / geçersiz / eşleşmeyen + Teknocenter'da olup KMZ'de olmayan
 app.get("/saha-konum/kmz/:id/rapor", authMiddleware, async (req, res) => {
   try {
-    if (!(await kmzYetkili(req))) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
+    const Y = await kmzYetki(req);
+    if (!Y) return res.status(403).json({ ok: false, error: "Yetkiniz yok" });
     await kmzTablolar();
     const iaId = Number(req.params.id);
     const ia = (await pool.query(`SELECT * FROM saha_konum_ice_alma WHERE id = $1`, [iaId])).rows[0];
-    if (!ia) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
+    if (!ia || (!Y.tam && ia.ozet?.kapsam !== Y.kod)) return res.status(404).json({ ok: false, error: "İçe alma kaydı bulunamadı" });
     const aday = (await pool.query(`SELECT * FROM saha_konum_kmz_aday WHERE ice_alma_id = $1 ORDER BY fiziksel_id`, [iaId])).rows;
-    const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
+    const [sistem, tekno] = await Promise.all([kmzKapsamKimlikleri(Y), kmzTeknoKimlikleri()]);
     const mevcut = new Map((await pool.query(`SELECT * FROM saha_konum WHERE fiziksel_id = ANY($1)`, [aday.map((a) => a.fiziksel_id)])).rows.map((k) => [k.fiziksel_id, k]));
     const wb = new ExcelJS.Workbook();
     const sayfa = (ad, kolonlar, satirlar) => {

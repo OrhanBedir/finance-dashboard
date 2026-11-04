@@ -8510,7 +8510,7 @@ function PlanYapModal({ adaylar, firma, onClose, onKaydedildi, cleanup = false }
   );
 }
 
-/* ═══ KMZ KONUM İÇE ALMA (29.10.2026, Orhan) — yalnız ERC yöneticisi ═════════════════════════════════════════════════
+/* ═══ KMZ KONUM İÇE ALMA (29.10.2026, Orhan) — ERC yöneticisi; 04.11 Teknocenter yöneticisi kendi kapsamında ═════════════════════════════════════════════════
    1) Dosya seç → önizle (sunucu hiçbir konumu değiştirmez) 2) sınıflara göre incele 3) seçilenleri uygula (onay sorulur).
    Yeni aday: geçerli koordinatı olmayan saha. Çelişen: mevcut konumdan >100 m — varsayılan "mevcut kalsın", KMZ ancak
    açıkça seçilirse yazılır. Belirsiz / geçersiz / eşleşmeyen hiçbir zaman yazılmaz. KMZ yalnız konum kaynağıdır. */
@@ -8780,7 +8780,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const [excelHata, setExcelHata] = useState("");
   const [tumu, setTumu] = useState(false);      // "Tümünü göster" açık: bölge / durum / yıl filtreleri kapalı (firma kapsamı korunur)
   const [ipucu, setIpucu] = useState(null);     // pin üzerine gelince kısa bilgi { s, x, y }
-  const [kmzAcik, setKmzAcik] = useState(false); // KMZ konum içe alma (yalnız ERC yöneticisi)
+  const [kmzAcik, setKmzAcik] = useState(false); // KMZ konum içe alma (ERC yöneticisi + Teknocenter yöneticisi kendi kapsamında)
   const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
   const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null), haritaRef = useRef(null);
   const [svgW, setSvgW] = useState(800);
