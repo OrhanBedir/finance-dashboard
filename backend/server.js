@@ -1581,11 +1581,17 @@ function teknoOncesiMaasDonemi(req) {
 // Kapsamlı maaş yetkilisinin (ör. İlhami — TEKNO) maaşını görebildiği personel = bordro markası kapsam markası olan kadro
 // (29.10.2026, Orhan kararı: devirle TEKNO bordrosuna geçen kadro da dahil). HARİÇ: personel kartı yönetim / backofis rolündeki
 // bir kullanıcı hesabına (user_id ya da e-posta) bağlı olanlar ve ERC geneli mali yetkililer — canlı kayıtta Orhan Bedir,
-// Nurcan Kuş, Hatice Omuş, Serdar Altınova (Şimşek yönetimi) TEKNO bordrolu ama maaşları İlhami'ye AÇILMAZ. Ad ile değil,
+// Nurcan Kuş, Hatice Omuş, Serdar Altınova (Şimşek yönetimi) TEKNO bordrolu; 04.11.2026'dan itibaren TEKNO kapsamında AÇIK
+// (bkz. KAPSAM_MAAS_YONETIM_ACIK), diğer alt markalarda bu kural geçerli. Ad ile değil,
 // bağlı hesabın rolüyle karar verilir; yeni atanan bir müdür de kendiliğinden hariç kalır. Kişinin kendi kartı her zaman açık.
 // Dönem kuralı ayrıca geçerli: devir ayından önceki (AHY / Şimşek dönemi) maaş satırı görünmez.
 const KAPSAM_MAAS_HARIC_ROLLER = ["admin", "platform_admin", "direktor", "genel_mudur", "muhasebe", "finance",
   "rollout_mudur", "bolge_mudur", "pm", "isg", "rollout"];
+// 04.11.2026 (Orhan: "burası Teknocenter ve maaşları olmalı — evet, görünsün"): TEKNO bordrolu yönetimin (Orhan Bedir,
+// Nurcan Kuş, Hatice Omuş …) maaşı Teknocenter mali yetkililerine (İlhami Şahin, teknocenter hesabı) AÇIK — rol hariç
+// tutması bu kapsamda uygulanmaz. Diğer alt markalarda (AHY) kural aynen sürer. Erişim yine yalnız maaş görme izni olan
+// ve MALİ YETKİ MATRİSİ'nde TEKNO kapsamlı hesaplara verilir; dönem kuralı (devir öncesi maaş satırı gizli) değişmez.
+const KAPSAM_MAAS_YONETIM_ACIK = new Set(["TEKNO"]);
 const _kapsamPersonelOnbellek = new Map(); // kapsam|kullanıcı → { t, ids }
 async function kapsamMaasPersonelleri(kapsam, u) {
   const benId = Number(u?.user_id || u?.id || 0), benEposta = _eposta(u);
@@ -1595,7 +1601,9 @@ async function kapsamMaasPersonelleri(kapsam, u) {
   let ids = new Set();
   try {
     const ercYetkililer = MALI_YETKI_MATRISI.filter((m) => m.kapsam === "ERC").map((m) => m.id);
-    const r = await pool.query(`SELECT p.id FROM personel p
+    const r = KAPSAM_MAAS_YONETIM_ACIK.has(String(kapsam || "").toUpperCase())
+      ? await pool.query(`SELECT p.id FROM personel p WHERE UPPER(COALESCE(p.marka,'')) = $1`, [kapsam])
+      : await pool.query(`SELECT p.id FROM personel p
       WHERE UPPER(COALESCE(p.marka,'')) = $1
         AND ( p.user_id = $4 OR (COALESCE($5,'') <> '' AND LOWER(TRIM(COALESCE(p.email,''))) = $5)
            OR NOT EXISTS (SELECT 1 FROM users u
