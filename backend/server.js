@@ -14140,7 +14140,8 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
     if (!req.file?.buffer?.length) return res.status(400).json({ ok: false, error: "KMZ dosyası seçilmedi" });
     if (!/\.kmz$/i.test(req.file.originalname || "")) return res.status(400).json({ ok: false, error: "Yalnız .kmz dosyası yüklenebilir" });
     let okuma;
-    try { okuma = kmzKonum.kmzOku(req.file.buffer, req.file.originalname); }
+    // 04.11.2026: "Türk Telekom.kmz" gibi Türkçe adlar multer'da latin1 bozuluyordu (TÃ¼rk) — utf8Name ile düzeltilir
+    try { okuma = kmzKonum.kmzOku(req.file.buffer, utf8Name(req.file.originalname)); }
     catch (e) { return res.status(400).json({ ok: false, error: `KMZ okunamadı: ${e.message}` }); }
     await kmzTablolar();
     const [sistem, tekno] = await Promise.all([kmzSistemKimlikleri(), kmzTeknoKimlikleri()]);
@@ -14178,6 +14179,7 @@ app.post("/saha-konum/kmz/onizle", authMiddleware, uploadKmz.single("dosya"), as
         `Dosya içi kayıt tarihi: ${okuma.ozet.kayit_tarihleri.join(", ") || "yok"} — konum tarihidir, iş yılı filtresini etkilemez.`,
         okuma.ozet.dis_baglanti ? `${okuma.ozet.dis_baglanti} dış bağlantı (NetworkLink) izlenmedi.` : "Dış bağlantı yok; arşiv dışından veri okunmadı.",
         `${okuma.tekrarlayici_sayisi} tekrarlayıcı (repeater) noktası saha sayılmadı; ${okuma.kodsuz.length} noktadan Site ID çıkarılamadı.`,
+        ...(okuma.ozet.durum_alani === false ? ["Dosyada saha durumu alanı yok (yalnız Site ID + koordinat) — konum KMZ'si olarak kabul edildi; KMZ konumu TSSR'dan önce gelir, TSSR farkı uyarı olarak kalır."] : []),
       ] });
   } catch (e) { console.error("KMZ ONIZLE ERROR:", e.message); res.status(500).json({ ok: false, error: e.message }); }
 });

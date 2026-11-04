@@ -8603,6 +8603,8 @@ function KmzIceAlmaModal({ onClose, onUygulandi }) {
               {!["GECERSIZ", "KMZ_DISI"].includes(sekme) && <label style={{ marginLeft: 8, fontSize: 13.5, display: "inline-flex", gap: 5, alignItems: "center" }}>
                 <input type="checkbox" checked={yalnizTekno} onChange={(e) => setYalnizTekno(e.target.checked)} /> Yalnız Teknocenter kapsamı</label>}
               {sekme === "YENI" && <button type="button" className="rhmap-btn" onClick={() => setSecim((m) => ({ ...m, ...Object.fromEntries(satirlar.map((x) => [x.fiziksel_id, "KMZ"])) }))}>Görünen yenileri seç</button>}
+              {/* 04.11.2026 (Orhan): KMZ konum için esas — çelişenlerde KMZ toplu seçilebilir (elle girilmiş konum yine ayrıca onay ister) */}
+              {sekme === "CELISKI" && <button type="button" className="rhmap-btn" onClick={() => setSecim((m) => ({ ...m, ...Object.fromEntries(satirlar.map((x) => [x.fiziksel_id, "KMZ"])) }))}>Görünen çelişenlerde KMZ'yi seç</button>}
               <button type="button" className="rhmap-btn" onClick={() => setSecim({})} disabled={!seciliSayi}>Seçimleri kaldır</button>
             </div>
             <div style={{ overflowX: "auto", marginTop: 8, maxHeight: 380, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 10 }}>

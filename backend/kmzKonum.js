@@ -183,6 +183,10 @@ function kmzOku(buf, dosyaAdi = "") {
   }
   ozet.okunan_nokta = hamNoktalar.length;
   ozet.kayit_tarihleri = [...tarihler].sort();
+  // 04.11.2026 (Orhan — TT 2026-2027 KMZ, 11 bölge): dosyada saha durumu alanı HİÇ yoksa (yalnız Site ID adı + koordinat,
+  // "konum KMZ'si") durum yazmaması tek tek belirsizlik sayılmaz — Orhan kararı: bu KMZ konum için esastır, TSSR yanlış olabilir.
+  // Durum alanı taşıyan dosyalarda (29.10 KMZ biçimi) PLANNED / durumsuz / taşınabilir kuralları aynen geçerlidir.
+  ozet.durum_alani = hamNoktalar.some((n) => !bos(n.alan.saha_durum));
 
   const gecersiz = [], kodsuz = [], tekrarlayici = [];
   const grup = new Map();
@@ -210,7 +214,8 @@ function kmzOku(buf, dosyaAdi = "") {
     if (kayitlar.some((k) => k.koord.durum === "COKLU")) nedenler.push("Kayıtta birden fazla farklı nokta var");
     if (kayitlar.some((k) => k.kimlik_celiski)) nedenler.push(kayitlar.find((k) => k.kimlik_celiski).kimlik_celiski);
     const durum = String(alan.saha_durum || "").toUpperCase();
-    if (!durum) nedenler.push(alan.plan_proje || alan.plan_kategori ? "Saha durumu yazmıyor; plan / aday saha noktası (kesin konum değil)" : "Saha durumu yazmıyor — kesin konum olduğu doğrulanamadı");
+    if (!durum && !ozet.durum_alani) { /* konum KMZ'si: dosyada durum alanı yok — konum esas kabul edilir */ }
+    else if (!durum) nedenler.push(alan.plan_proje || alan.plan_kategori ? "Saha durumu yazmıyor; plan / aday saha noktası (kesin konum değil)" : "Saha durumu yazmıyor — kesin konum olduğu doğrulanamadı");
     else if (durum === "PLANNED") nedenler.push("Saha durumu PLANNED — konum kesinleşmemiş olabilir");
     else if (!["ACTIVE", "HALTED"].includes(durum)) nedenler.push(`Saha durumu tanınmıyor (${alan.saha_durum})`);
     if (TASINABILIR_RX.test(String(alan.saha_tipi || "").trim())) nedenler.push(`Saha tipi ${alan.saha_tipi} — taşınabilir saha, konum değişebilir`);
