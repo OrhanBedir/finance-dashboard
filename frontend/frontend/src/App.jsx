@@ -8783,6 +8783,27 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const [excelHata, setExcelHata] = useState("");
   const [tumu, setTumu] = useState(false);      // "Tümünü göster" açık: bölge / durum / yıl filtreleri kapalı (firma kapsamı korunur)
   const [ipucu, setIpucu] = useState(null);     // pin üzerine gelince kısa bilgi { s, x, y }
+  // 04.11.2026 (Orhan): Triomobil canlı araç konumu — harita üstünde araç katmanı. Yetkisiz hesapta (401/403) ya da
+  // bağlantı kurulmamışsa katman ve düğme hiç görünmez; açıkken 60 sn'de bir tazelenir (sunucu Triomobil'e dakikada en çok 1 istek atar).
+  const [araclar, setAraclar] = useState(null); // { zaman, araclar[] } | null
+  const [aracGoster, setAracGoster] = useState(true);
+  const [aracIpucu, setAracIpucu] = useState(null); // { a, x, y }
+  useEffect(() => {
+    let iptal = false;
+    const yukle = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/hr/arac-takip`, { headers: aracHdr() });
+        if (!r.ok) { if (!iptal) setAraclar(null); return; }
+        const d = await r.json().catch(() => null);
+        if (!iptal) setAraclar(d?.ok && d.yapilandirildi && Array.isArray(d.araclar) ? d : null);
+      } catch { if (!iptal) setAraclar(null); }
+    };
+    yukle(); const t = setInterval(yukle, 60 * 1000);
+    return () => { iptal = true; clearInterval(t); };
+  }, []);
+  const aracPinler = useMemo(() => (araclar?.araclar || []).filter((a) => a.lat !== null && a.lng !== null && Number.isFinite(a.lat)).map((a) => { const [x, y] = proj(a.lng, a.lat); return { a, x, y }; }), [araclar]); // eslint-disable-line
+  const aracEski = (a) => !a.son_sinyal || Date.now() - new Date(a.son_sinyal).getTime() > 6 * 3600 * 1000;
+  const aracSure = (ts) => { if (!ts) return "sinyal yok"; const dk = Math.round((Date.now() - new Date(ts).getTime()) / 60000); return dk < 1 ? "az önce" : dk < 60 ? `${dk} dk önce` : dk < 1440 ? `${Math.floor(dk / 60)} sa önce` : `${Math.floor(dk / 1440)} gün önce`; };
   const [kmzAcik, setKmzAcik] = useState(false); // KMZ konum içe alma (ERC yöneticisi + Teknocenter yöneticisi kendi kapsamında)
   const [view, setView] = useState({ x: 0, y: 0, w: 1800, h: 900 });
   const svgRef = useRef(null), drag = useRef(null), aramaRef = useRef(null), haritaRef = useRef(null);
@@ -9032,6 +9053,8 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
             style={tumu ? { borderColor: "#1e3a5f", background: "#eff6ff" } : undefined}>{tumu ? "✓ " : ""}Tümünü göster</button>
           {/* 02.11.2026: "Teknocenter · 2026" hızlı düğmesi ve "Firma görünümünden çık" kaldırıldı — kapsam her zaman Teknocenter */}
           {veri?.kmz_yetkili && <button type="button" className="rhmap-btn" onClick={() => setKmzAcik(true)} title="Türk Telekom KMZ dosyasından konum önizle / içe al">📥 KMZ konum</button>}
+          {araclar && <button type="button" className="rhmap-btn" aria-pressed={aracGoster} onClick={() => setAracGoster((x) => !x)} title="Triomobil canlı araç konumu (yalnız okuma, dakikada bir tazelenir)"
+            style={aracGoster ? { borderColor: "#1e3a5f", background: "#eff6ff" } : undefined}>🚗 Araçlar{aracPinler.length ? ` (${aracPinler.length})` : ""}</button>}
           <button type="button" className="rhmap-btn" style={{ marginLeft: "auto" }} onClick={onClose} aria-label="Haritayı kapat (Esc)">✕</button>
         </div>
         {filtreAcik && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10, padding: "10px 14px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc", maxHeight: 260, overflowY: "auto" }}>
@@ -9083,8 +9106,24 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                     onMouseEnter={ipucuAyarla(s)} onMouseLeave={() => setIpucu(null)}>
                     <text x={9} y={-16} fontSize={s.fiziksel_id === secili ? 16 : 13} fontWeight="800" fill={s.fiziksel_id === secili ? "#b91c1c" : "#0f172a"} stroke="#fff" strokeWidth={3.5} paintOrder="stroke">{s.fiziksel_id}</text>
                   </g>))}
+                {/* Triomobil canlı araç konumu: yeşil kontak açık, lacivert park, gri 6 saatten eski sinyal */}
+                {aracGoster && aracPinler.map(({ a, x, y }) => { const eski = aracEski(a); const renk = eski ? "#94a3b8" : a.kontak === "ACIK" ? "#16a34a" : "#1e3a5f"; return (
+                  <g key={`arac-${a.arac_id}`} transform={`translate(${x},${y}) scale(${pinK})`} style={{ cursor: "default" }} role="img" aria-label={`Araç ${a.plaka}: ${eski ? "eski sinyal" : a.kontak === "ACIK" ? "kontak açık" : "park halinde"}`}
+                    onMouseEnter={(e) => { const r = haritaRef.current?.getBoundingClientRect(); setAracIpucu({ a, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }); }} onMouseLeave={() => setAracIpucu(null)}>
+                    <rect x="-13" y="-13" width="26" height="26" rx="7" fill={renk} stroke="#fff" strokeWidth="2.5" />
+                    <text y="5" textAnchor="middle" fontSize="15" style={{ pointerEvents: "none" }}>🚗</text>
+                    <text x="16" y="4" fontSize="11" fontWeight="800" fill="#0f172a" stroke="#fff" strokeWidth="3" paintOrder="stroke" style={{ pointerEvents: "none" }}>{a.plaka}</text>
+                  </g>); })}
               </svg>
             )}
+            {aracIpucu && <div className="rhmap-ipucu" role="tooltip" style={{ left: Math.min(aracIpucu.x + 14, (haritaRef.current?.clientWidth || 600) - 300), top: Math.max(aracIpucu.y - 10, 6) }}>
+              <div style={{ fontSize: 17, fontWeight: 900 }}>🚗 {aracIpucu.a.plaka}</div>
+              <div style={{ margin: "2px 0 4px", fontWeight: 800, color: aracEski(aracIpucu.a) ? "#64748b" : aracIpucu.a.kontak === "ACIK" ? "#15803d" : "#1e3a5f" }}>
+                {aracEski(aracIpucu.a) ? "Sinyal yok / eski veri" : aracIpucu.a.kontak === "ACIK" ? (aracIpucu.a.hiz > 0 ? `Hareket halinde · ${aracIpucu.a.hiz} km/s` : "Kontak açık") : "Park halinde"}</div>
+              {[aracIpucu.a.marka, aracIpucu.a.model].filter(Boolean).length > 0 && <div>{[aracIpucu.a.marka, aracIpucu.a.model].filter(Boolean).join(" ")}{aracIpucu.a.surucu ? ` · ${aracIpucu.a.surucu}` : ""}</div>}
+              {aracIpucu.a.adres && <div>{aracIpucu.a.adres}</div>}
+              <div className="rhmap-k">Son sinyal: {aracSure(aracIpucu.a.son_sinyal)} · Triomobil</div>
+            </div>}
             {veri && <div className="rhmap-zoom"><button type="button" onClick={() => zoom(1 / 1.4)} aria-label="Yakınlaştır">+</button><button type="button" onClick={() => zoom(1.4)} aria-label="Uzaklaştır">−</button></div>}
             {veri && !pinli.length && <div style={{ position: "absolute", left: 16, top: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 12px", fontSize: 14, color: "#475569" }}>
               {!kapsamdaki.length ? "Bu görünümde saha yok." : !yilaGore.length ? "Bu görünümde 2026 işi olan saha yok." : "Bu görünümdeki sahaların konumu eksik — sağdaki listeye bakın."}</div>}
@@ -9102,6 +9141,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
               {Object.keys(yaklasikIl).length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, height: 18, borderRadius: 9, border: "2px dashed #64748b", fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>≈</span>Yaklaşık konum · yalnız il bilgisi</div>}
               {Object.entries(pinPalet).map(([k, v]) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 18, height: 18, borderRadius: 9, background: v.renk, color: v.yazi, fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{v.harf}</span>{v.ad}</div>)}
+              {araclar && aracGoster && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}><span style={{ width: 18, height: 18, borderRadius: 5, background: "#16a34a", fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>🚗</span>Araç (canlı): yeşil kontak açık · lacivert park · gri eski sinyal</div>}
               <div className="rhmap-k rhmap-uzun" style={{ fontSize: 11 }}>Antenli / antensiz bilgisi renkte değil: pinin üzerine gelin ya da dokunun. Kesikli çerçeve: konum uyarılı.</div>
             </div>}
             <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0){rotaYolu ? <> · Güzergâh: OSRM, harita verisi © OpenStreetMap katkıcıları (ODbL)</> : null}</div>
@@ -45707,6 +45747,21 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
   };
 
   useEffect(() => { load(); }, []);
+  // 04.11.2026 (Orhan): Triomobil canlı araç konumu — sunucu dakikada bir Triomobil'den çeker; ekran açıkken 60 sn'de bir tazelenir.
+  // Yetkisiz hesapta (403) bölüm hiç görünmez; Triomobil bağlantısı tanımlı değilse kurulum notu gösterilir.
+  const [takip, setTakip] = useState(null); // { yapilandirildi, zaman, araclar[], eslesmeyen[], eski, uyari } | { hata } | null (yetki yok / yüklenmedi)
+  const takipYukle = async (yenile = false) => {
+    try {
+      const r = await fetch(`${API_BASE}/hr/arac-takip${yenile ? "?yenile=1" : ""}`, { headers: aracHdr() });
+      if (r.status === 401 || r.status === 403) { setTakip(null); return; }
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.ok) { setTakip({ hata: d?.error || `Canlı konum alınamadı (HTTP ${r.status})` }); return; }
+      setTakip(d);
+    } catch (e) { setTakip({ hata: e.message }); }
+  };
+  useEffect(() => { takipYukle(); const t = setInterval(() => takipYukle(), 60 * 1000); return () => clearInterval(t); }, []); // eslint-disable-line
+  const takipSure = (ts) => { if (!ts) return "—"; const dk = Math.round((Date.now() - new Date(ts).getTime()) / 60000); return dk < 1 ? "az önce" : dk < 60 ? `${dk} dk önce` : dk < 1440 ? `${Math.floor(dk / 60)} sa ${dk % 60} dk önce` : `${Math.floor(dk / 1440)} gün önce`; };
+  const takipEski = (ts) => !ts || Date.now() - new Date(ts).getTime() > 6 * 3600 * 1000; // 6 saatten eski sinyal: cihaz kapalı / sinyal yok olabilir
 
   const today = new Date();
   const dayDiff = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
@@ -46048,6 +46103,48 @@ function AraclarPanel({ currentUser, onBack, onGoOfis, saltOkunur = false }) {
           </div>
         ))}
       </div>
+
+      {/* ── Canlı konum (Triomobil GPS, 04.11.2026) ─────────────────── */}
+      {takip && (takip.hata || takip.yapilandirildi === false || takip.araclar?.length > 0 || takip.eslesmeyen?.length > 0) && (
+        <div style={{ background:"#fff", border:"1px solid #e3e8ef", borderRadius:"16px", marginTop:"14px", overflow:"hidden", boxShadow:"0 1px 2px rgba(15,28,46,.05)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", padding:"12px 16px", borderBottom:"1px solid #e3e8ef", flexWrap:"wrap" }}>
+            <div>
+              <h3 style={{ margin:0, fontSize:"15px", fontWeight:800, color:"#0f1c2e" }}>📍 Canlı Konum <span style={{ fontWeight:600, color:"#6b7a90", fontSize:"12.5px" }}>· Triomobil araç takip</span></h3>
+              <div style={{ fontSize:"12px", color:"#6b7a90", marginTop:"2px" }}>
+                {takip.hata ? "Bağlantı sorunu" : takip.yapilandirildi === false ? "Bağlantı henüz kurulmadı" : `Son güncelleme ${takip.zaman ? new Date(takip.zaman).toLocaleTimeString("tr-TR", { hour:"2-digit", minute:"2-digit" }) : "—"}${takip.eski ? " · ⚠ eski veri (Triomobil'e şu an ulaşılamıyor)" : ""} · otomatik tazelenir`}
+              </div>
+            </div>
+            {canEdit && takip.yapilandirildi !== false && <button onClick={() => takipYukle(true)} style={{ ...btnBase, background:"#f3f5f8", color:"#0f1c2e", border:"1px solid #e3e8ef" }}>↻ Şimdi yenile</button>}
+          </div>
+          {takip.hata && <div style={{ padding:"12px 16px", color:"#b91c1c", fontSize:"13.5px" }}>Canlı konum alınamadı: {takip.hata}</div>}
+          {takip.yapilandirildi === false && <div style={{ padding:"12px 16px", color:"#475569", fontSize:"13.5px", lineHeight:1.5 }}>
+            Triomobil API bağlantısı için sunucuya <code>TRIOMOBIL_USERNAME</code> ve <code>TRIOMOBIL_PASSWORD</code> ortam değişkenleri girilmeli (Triomobil web girişindeki kullanıcı adı / şifre). Girilince bu bölüm plakaya göre otomatik eşleşen araçların son konumunu gösterir.</div>}
+          {takip.araclar?.length > 0 && (
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"13.5px" }}>
+                <thead><tr style={{ background:"#f8fafc", color:"#6b7a90", fontSize:"11px", textTransform:"uppercase", letterSpacing:".05em" }}>
+                  {["Plaka", "Durum", "Hız", "Son konum (adres)", "Sayaç", "Son sinyal", ""].map(h => <th key={h} style={{ textAlign:"left", padding:"9px 14px", fontWeight:700, whiteSpace:"nowrap" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {takip.araclar.map(a => { const eski = takipEski(a.son_sinyal); const kontakRenk = eski ? ["#f1f5f9", "#475569"] : a.kontak === "ACIK" ? ["#dcfce7", "#166534"] : ["#fee2e2", "#991b1b"]; return (
+                    <tr key={a.arac_id} style={{ borderTop:"1px solid #eef2f7" }}>
+                      <td style={{ padding:"9px 14px", fontWeight:800, whiteSpace:"nowrap" }}>{a.plaka}<div style={{ fontWeight:500, fontSize:"12px", color:"#6b7a90" }}>{[a.marka, a.model].filter(Boolean).join(" ")}{a.surucu ? ` · ${a.surucu}` : ""}</div></td>
+                      <td style={{ padding:"9px 14px", whiteSpace:"nowrap" }}><span style={{ ...chip, background:kontakRenk[0], color:kontakRenk[1] }}>{eski ? "Sinyal yok / eski" : a.kontak === "ACIK" ? (a.hiz > 0 ? "● Hareket halinde" : "● Kontak açık") : a.kontak === "KAPALI" ? "○ Park halinde" : "Bilinmiyor"}</span></td>
+                      <td style={{ padding:"9px 14px", whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" }}>{a.hiz === null ? "—" : `${a.hiz} km/s`}</td>
+                      <td style={{ padding:"9px 14px", minWidth:"220px" }}>{a.adres || (a.lat !== null ? `${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}` : "Konum yok")}</td>
+                      <td style={{ padding:"9px 14px", whiteSpace:"nowrap", fontVariantNumeric:"tabular-nums" }}>{a.km === null ? "—" : a.km.toLocaleString("tr-TR")}</td>
+                      <td style={{ padding:"9px 14px", whiteSpace:"nowrap", color: eski ? "#b45309" : "#475569" }} title={a.son_sinyal ? new Date(a.son_sinyal).toLocaleString("tr-TR") : ""}>{takipSure(a.son_sinyal)}</td>
+                      <td style={{ padding:"9px 14px", whiteSpace:"nowrap" }}>{a.lat !== null && <a href={`https://maps.apple.com/?ll=${a.lat},${a.lng}&q=${encodeURIComponent(a.plaka)}`} target="_blank" rel="noopener noreferrer" style={{ color:"#1d4ed8", fontWeight:700, textDecoration:"none" }}>🗺 Haritada aç</a>}</td>
+                    </tr>); })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {takip.eslesmeyen?.length > 0 && <div style={{ padding:"10px 16px", borderTop:"1px solid #eef2f7", fontSize:"12.5px", color:"#6b7a90" }}>
+            Triomobil'de olup Araç Filosu'nda plakası eşleşmeyen: {takip.eslesmeyen.map(x => x.plaka).join(", ")} — aynı plakayla araç eklenirse burada görünür.</div>}
+          {takip.yapilandirildi !== false && !takip.hata && <div style={{ padding:"8px 16px", borderTop:"1px solid #eef2f7", fontSize:"11.5px", color:"#94a3b8" }}>Konum verisi Triomobil'den yalnız okunur; araç komutu / ayar gönderilmez. Sahadaki saha haritasında (Rollout → Harita) araçlar "🚗 Araçlar" ile de görünür.</div>}
+        </div>
+      )}
 
       {/* ── Uyarı çipleri ───────────────────────────────────────────── */}
       {(borcluAraclar.length > 0 || belgeUyari.length > 0) && (
