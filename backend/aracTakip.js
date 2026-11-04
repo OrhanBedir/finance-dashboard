@@ -140,6 +140,142 @@ function eslestir(erc, trio) {
   return { eslesen, eslesmeyen };
 }
 
-const _sifirla = () => { _token = null; _onbellek = null; _bekleyen = null; }; // yalnız test
+// ═══ ARAÇ GEÇMİŞİ: GÜNLÜK KİLOMETRE (04.11.2026, Orhan) ═══════════════════════════════════════════════════
+// Kaynak: Triomobil "Driving Summary" raporu (GET /reports/vehicle/driving/summary) — cihazın kendi kilometre sayacından
+// hesaplanan mileage.delta + kontak açık/kapalı + rölanti süreleri. GPS noktasından mesafe ÜRETİLMEZ.
+// Gün sınırı Türkiye saati (UTC+3, yaz saati yok): rapor SAATLİK (_groupBy=hour) istenir, saatler TR gününe toplanır —
+// Triomobil'in "gün" gruplamasının hangi saat dilimini kullandığı belgede yazmadığı için ona güvenilmez.
+// Rapor satırı olmayan gün "Veri yok" (null), satırı olup farkı 0 olan gün ölçülmüş "0 km".
+// Birim doğrulaması: dönem başı / sonu sayaç değeri (locations/history ilk–son nokta, aynı cihaz sayacı) ile toplam fark
+// karşılaştırılır. Belgede mesafe ve süre birimi yazmadığı için birim, sayaçla tutarlılıktan belirlenir; tutmazsa açıkça yazılır.
+const TR_OFSET_MS = 3 * 3600 * 1000;
+const GECMIS_AZAMI_GUN = 92;
+const GECMIS_ONBELLEK_MS = 10 * 60 * 1000;
+const _gecmisOnbellek = new Map(); // anahtar → { zaman, veri }
+const trGun = (ms) => new Date(ms + TR_OFSET_MS).toISOString().slice(0, 10);
+const trGunBasMs = (gun) => Date.parse(`${gun}T00:00:00+03:00`);
+const gunEkle = (gun, n) => new Date(Date.parse(`${gun}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+const gunAraligi = (bas, bit) => { const l = []; for (let g = bas; g <= bit; g = gunEkle(g, 1)) l.push(g); return l; };
+const sayiVeyaNull = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
-module.exports = { sonKonumlar, eslestir, plakaNorm, kayitDuzenle, yapilandirildi, ONBELLEK_MS, _sifirla };
+// Saatlik rapor satırlarını TR günlerine toplar. Süre birimi: bir saatlik dilimde kontak açık + kapalı toplamı
+// 3600'ü belirgin aşıyorsa milisaniyedir (aksi halde saniye). Dönen süreler her zaman SANİYE.
+function saatlikToplaGunluk(satirlar, gunler) {
+  const g = new Map(gunler.map((d) => [d, null]));
+  let msMi = false;
+  for (const s of satirlar) {
+    const on = sayiVeyaNull(s?.ignition?.on?.duration?.total) || 0, off = sayiVeyaNull(s?.ignition?.off?.duration?.total) || 0;
+    if (on + off > 3600 * 1.5) { msMi = true; break; }
+  }
+  const bolen = msMi ? 1000 : 1;
+  for (const s of satirlar) {
+    const t = Date.parse(s?.ts?.since || "");
+    if (!Number.isFinite(t)) continue;
+    const gun = trGun(t);
+    if (!g.has(gun)) continue;
+    const d = g.get(gun) || { ham_delta: 0, kontak_acik_sn: 0, kontak_kapali_sn: 0, rolanti_sn: 0, max_hiz: null, satir: 0, sure_var: false };
+    const delta = sayiVeyaNull(s?.mileage?.delta);
+    if (delta !== null) d.ham_delta += delta;
+    const on = sayiVeyaNull(s?.ignition?.on?.duration?.total), off = sayiVeyaNull(s?.ignition?.off?.duration?.total), idle = sayiVeyaNull(s?.idle?.duration?.total);
+    if (on !== null) { d.kontak_acik_sn += on / bolen; d.sure_var = true; }
+    if (off !== null) { d.kontak_kapali_sn += off / bolen; d.sure_var = true; }
+    if (idle !== null) { d.rolanti_sn += idle / bolen; d.sure_var = true; }
+    const mx = sayiVeyaNull(s?.speed?.max?.measurement);
+    if (mx !== null) d.max_hiz = Math.max(d.max_hiz ?? 0, mx);
+    d.satir++;
+    g.set(gun, d);
+  }
+  return { gunluk: g, sure_birimi: msMi ? "ms" : "sn" };
+}
+
+// Toplam rapor farkını cihaz sayacıyla karşılaştırır → { durum, carpan, ... }. carpan: rapor farkını km'ye çevirir.
+function birimDogrula(toplamHam, sayacBas, sayacBit) {
+  if (sayacBas === null || sayacBit === null) return { durum: "DOGRULANAMADI", carpan: 1, neden: "Dönem başı / sonu sayaç değeri alınamadı" };
+  const fark = sayacBit - sayacBas;
+  if (fark < 0) return { durum: "DOGRULANAMADI", carpan: 1, sayac_fark: fark, neden: "Sayaç dönem içinde geri gitti (cihaz değişimi / sıfırlama olabilir)" };
+  if (fark === 0 && toplamHam === 0) return { durum: "DOGRULANDI", carpan: 1, sayac_fark: 0 };
+  const yakin = (a, b) => Math.abs(a - b) <= Math.max(1, b * 0.03);
+  if (yakin(toplamHam, fark)) return { durum: "DOGRULANDI", carpan: 1, sayac_fark: fark };
+  if (yakin(toplamHam / 1000, fark)) return { durum: "DOGRULANDI", carpan: 1 / 1000, sayac_fark: fark, neden: "Rapor farkı metre, sayaç km — km'ye çevrildi" };
+  return { durum: "UYUMSUZ", carpan: 1, sayac_fark: fark, neden: "Günlük farkların toplamı cihaz sayacındaki değişimle tutmuyor" };
+}
+
+// Tek aracın dönem istatistiği. trioId: Triomobil araç kimliği (son konum raporundan). bas/bit: TR günleri (YYYY-MM-DD).
+async function aracGecmisi({ trioId, bas, bit, env = process.env, fetchFn = fetch, simdi = Date.now() } = {}) {
+  if (!yapilandirildi(env)) return { ok: true, yapilandirildi: false };
+  if (!/^[0-9a-fA-F]{24}$/.test(String(trioId || ""))) return { ok: false, error: "Triomobil araç kimliği bulunamadı" };
+  const bugun = trGun(simdi);
+  if (bit > bugun) bit = bugun;
+  if (bas > bit) return { ok: false, error: "Başlangıç tarihi bitişten sonra olamaz" };
+  const gunler = gunAraligi(bas, bit);
+  if (gunler.length > GECMIS_AZAMI_GUN) return { ok: false, error: `En çok ${GECMIS_AZAMI_GUN} günlük dönem seçilebilir` };
+  const anahtar = `${trioId}|${bas}|${bit}`;
+  const ob = _gecmisOnbellek.get(anahtar);
+  // Bugünü içeren dönem 10 dk, tamamen geçmiş dönem 6 saat önbellekte kalır (geçmiş gün değişmez)
+  if (ob && simdi - ob.zaman < (bit === bugun ? GECMIS_ONBELLEK_MS : 6 * 3600 * 1000)) return ob.veri;
+  const a = ayar(env);
+  let tok = _token && _token.api === a.api && _token.kullanici === a.kullanici ? _token.deger : await _tokenAl(a, fetchFn);
+  const al = async (yol) => {
+    let r = await _istek(`${a.api}${yol}`, { headers: { Authorization: tok, Accept: "application/json" } }, fetchFn);
+    if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await _istek(`${a.api}${yol}`, { headers: { Authorization: tok, Accept: "application/json" } }, fetchFn); }
+    return r;
+  };
+  const hata = (ad, r) => { const ay = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : ""; return new Error(`Triomobil ${ad} alınamadı (HTTP ${r.durum}${ay ? `: ${ay}` : ""})`); };
+  const since = new Date(trGunBasMs(bas)).toISOString();
+  const until = new Date(Math.min(trGunBasMs(gunEkle(bit, 1)), simdi)).toISOString();
+  const zaman = `ts.since=${encodeURIComponent(since)}&ts.until=${encodeURIComponent(until)}`;
+  // Dizi parametresi (_pull) biçimi belgede yazmıyor: önce tekrarlı, reddedilirse virgüllü, o da olmazsa _pull'suz istenir
+  const PULL = ["ignition", "mileage", "idle", "speed"];
+  const pullBicim = [PULL.map((p) => `_pull=${p}`).join("&"), `_pull=${PULL.join(",")}`, ""];
+  let satirlar = null, sonHata = null;
+  for (const pb of pullBicim) {
+    const tum = []; let red = false;
+    for (let sayfa = 1; sayfa <= 10; sayfa++) {
+      const r = await al(`/reports/vehicle/driving/summary?vehicleId=${trioId}&${zaman}&_groupBy=hour&_perPage=500&_page=${sayfa}${pb ? `&${pb}` : ""}`);
+      if (r.durum === 400) { red = true; sonHata = hata("sürüş özeti", r); break; }
+      if (r.durum >= 300 || !Array.isArray(r.govde)) throw hata("sürüş özeti", r);
+      tum.push(...r.govde);
+      if (r.govde.length < 500) break;
+    }
+    if (!red) { satirlar = tum; break; }
+  }
+  if (!satirlar) throw sonHata || new Error("Triomobil sürüş özeti alınamadı");
+  const { gunluk, sure_birimi } = saatlikToplaGunluk(satirlar, gunler);
+  // Sayaç doğrulaması: dönemin ilk ve son konum noktası (cihaz sayacı)
+  const nokta = async (sira) => {
+    const r = await al(`/reports/vehicle/locations/history?vehicleId=${trioId}&${zaman}&_limit=1&_sortOrder=${sira}`).catch(() => null);
+    const x = r && r.durum < 300 && Array.isArray(r.govde) ? r.govde[0] : null;
+    return x ? { ts: x.ts || null, sayac: sayiVeyaNull(x.mileage) } : null;
+  };
+  const [ilk, son] = await Promise.all([nokta("ASC"), nokta("DESC")]);
+  const toplamHam = [...gunluk.values()].reduce((t, d) => t + (d ? d.ham_delta : 0), 0);
+  const dog = birimDogrula(toplamHam, ilk?.sayac ?? null, son?.sayac ?? null);
+  const yuvarla = (v) => Math.round(v * 10) / 10;
+  const satirGun = gunler.map((tarih) => {
+    const d = gunluk.get(tarih);
+    if (!d) return { tarih, veri: false, km: null };
+    const hareket = d.sure_var ? Math.max(0, d.kontak_acik_sn - d.rolanti_sn) : null;
+    return { tarih, veri: true, km: yuvarla(d.ham_delta * dog.carpan), kontak_acik_sn: d.sure_var ? Math.round(d.kontak_acik_sn) : null,
+      rolanti_sn: d.sure_var ? Math.round(d.rolanti_sn) : null, hareket_sn: hareket === null ? null : Math.round(hareket),
+      kontak_kapali_sn: d.sure_var ? Math.round(d.kontak_kapali_sn) : null, max_hiz: d.max_hiz };
+  });
+  const veriliGun = satirGun.filter((x) => x.veri);
+  const toplam = yuvarla(veriliGun.reduce((t, x) => t + x.km, 0));
+  const enFazla = veriliGun.reduce((m, x) => (m === null || x.km > m.km ? x : m), null);
+  const veri = { ok: true, yapilandirildi: true, kaynak: "Triomobil sürüş özeti (cihaz kilometre sayacı; saatlik veri Türkiye gününe toplandı)",
+    bas, bit, gun_sayisi: gunler.length, veri_gun_sayisi: veriliGun.length, eksik_gun_sayisi: gunler.length - veriliGun.length,
+    toplam_km: toplam, ortalama_km: veriliGun.length ? yuvarla(toplam / veriliGun.length) : null,
+    en_fazla: enFazla && enFazla.km > 0 ? { tarih: enFazla.tarih, km: enFazla.km } : null,
+    ilk_veri_gunu: veriliGun[0]?.tarih || null, gunler: satirGun, sure_var: veriliGun.some((x) => x.kontak_acik_sn !== null), sure_birimi,
+    dogrulama: { durum: dog.durum, neden: dog.neden || null, sayac_bas: ilk?.sayac ?? null, sayac_bit: son?.sayac ?? null, sayac_fark: dog.sayac_fark ?? null,
+      sayac_bas_ts: ilk?.ts || null, sayac_bit_ts: son?.ts || null, km_carpan: dog.carpan },
+    zaman: new Date(simdi).toISOString() };
+  _gecmisOnbellek.set(anahtar, { zaman: simdi, veri });
+  if (_gecmisOnbellek.size > 200) _gecmisOnbellek.delete(_gecmisOnbellek.keys().next().value);
+  return veri;
+}
+
+const _sifirla = () => { _token = null; _onbellek = null; _bekleyen = null; _gecmisOnbellek.clear(); }; // yalnız test
+
+module.exports = { sonKonumlar, eslestir, plakaNorm, kayitDuzenle, yapilandirildi, ONBELLEK_MS, _sifirla,
+  aracGecmisi, saatlikToplaGunluk, birimDogrula, trGun, gunEkle, gunAraligi, GECMIS_AZAMI_GUN };

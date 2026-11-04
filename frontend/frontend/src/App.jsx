@@ -8739,6 +8739,189 @@ const rhKusUcusu = (a, b) => {
   const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 };
+/* ═══ SAHA HARİTASI · ARAÇ DETAY PANELİ (04.11.2026, Orhan) ═══
+   Haritadaki araca tıklayınca sağ panelde açılır: (1) Araç İstatistikleri — Triomobil sürüş özetinden günlük km (TR günü),
+   (2) Ekibin Haftalık İşleri — araç plakasıyla planlanmış iş atamaları (tarihli bağ). Yalnız okuma; plan / tahsis değişmez.
+   Modül düzeyinde: harita her saniye yeniden çizilse de panel durumu (dönem, hafta) korunur. */
+const AD_TR_GUN = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+const adTrBugun = () => new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10);
+const adGunEkle = (g, n) => new Date(Date.parse(`${g}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+const adGunTr = (g) => (g ? `${g.slice(8, 10)}.${g.slice(5, 7)}.${g.slice(0, 4)}` : "—");
+const adGunKisa = (g) => (g ? `${g.slice(8, 10)}.${g.slice(5, 7)}` : "—");
+const adHaftaGunu = (g) => AD_TR_GUN[(new Date(`${g}T12:00:00Z`).getUTCDay() + 6) % 7];
+const adSure = (sn) => { if (sn === null || sn === undefined) return "—"; const d = Math.round(sn / 60); return d < 60 ? `${d} dk` : `${Math.floor(d / 60)} sa ${d % 60} dk`; };
+const adKm = (v) => (v === null || v === undefined ? "—" : `${Number(v).toLocaleString("tr-TR", { maximumFractionDigits: 1 })} km`);
+const AD_DURUM = { ATANDI: "Atandı", BASLADI: "Başladı", DEVAM: "Devam ediyor", ARA_VERILDI: "Ara verildi", QC_BEKLE: "QC bekliyor", TAMAMLANDI: "Tamamlandı" };
+
+function AracKmGrafik({ gunler }) {
+  const max = Math.max(1, ...gunler.filter((g) => g.veri).map((g) => g.km || 0));
+  const n = gunler.length, W = 400, H = 120, sol = 4, alt = 18, bw = Math.max(2, (W - sol) / n - 2);
+  const etiketAdim = n <= 10 ? 1 : n <= 31 ? 5 : 10;
+  return (
+    <svg viewBox={`0 0 ${W} ${H + alt}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Günlük kilometre grafiği">
+      <line x1={sol} x2={W} y1={H} y2={H} stroke="#cbd5e1" />
+      {gunler.map((g, i) => {
+        const x = sol + i * ((W - sol) / n) + 1;
+        if (!g.veri) return <g key={g.tarih}><rect x={x} y={H - 10} width={bw} height={10} fill="none" stroke="#cbd5e1" strokeDasharray="2 2" /><title>{`${adGunTr(g.tarih)}: Veri yok`}</title></g>;
+        const h = g.km > 0 ? Math.max(2, (g.km / max) * (H - 8)) : 1.5;
+        return <g key={g.tarih}><rect x={x} y={H - h} width={bw} height={h} rx={1.5} fill={g.km > 0 ? "#1e3a5f" : "#94a3b8"} /><title>{`${adGunTr(g.tarih)}: ${adKm(g.km)}`}</title></g>;
+      })}
+      {gunler.map((g, i) => (i % etiketAdim === 0 || i === n - 1) && <text key={`e${g.tarih}`} x={sol + i * ((W - sol) / n) + bw / 2 + 1} y={H + 13}
+        textAnchor={n > 10 && i === 0 ? "start" : n > 10 && i === n - 1 ? "end" : "middle"} fontSize="10" fill="#64748b">{adGunKisa(g.tarih)}</text>)}
+    </svg>
+  );
+}
+
+function AracDetayPanel({ arac, veri, onKapat, onSahaAc, onHaritadaGoster }) {
+  const [donem, setDonem] = useState("7"); // "7" | "30" | "OZEL"
+  const bugun = adTrBugun();
+  const [ozel, setOzel] = useState({ bas: adGunEkle(bugun, -13), bit: bugun });
+  const [gecmis, setGecmis] = useState(null); // yanıt | { hata } | null (yükleniyor)
+  const [hafta, setHafta] = useState(bugun);
+  const [isler, setIsler] = useState(null);
+  const [tabloAcik, setTabloAcik] = useState(false);
+  const aralik = donem === "OZEL" ? ozel : { bas: adGunEkle(bugun, -(Number(donem) - 1)), bit: bugun };
+  useEffect(() => {
+    let iptal = false; setGecmis(null);
+    if (donem === "OZEL" && (!ozel.bas || !ozel.bit || ozel.bas > ozel.bit)) { setGecmis({ hata: "Başlangıç tarihi bitişten önce olmalı" }); return undefined; }
+    fetchJson(`${API_BASE}/hr/arac-takip/${arac.arac_id}/gecmis?bas=${aralik.bas}&bit=${aralik.bit}`, { withAuth: true })
+      .then((d) => { if (!iptal) setGecmis(d); }).catch((e) => { if (!iptal) setGecmis({ hata: e.message }); });
+    return () => { iptal = true; };
+  }, [arac.arac_id, aralik.bas, aralik.bit]); // eslint-disable-line
+  useEffect(() => {
+    let iptal = false; setIsler(null);
+    fetchJson(`${API_BASE}/hr/arac-takip/${arac.arac_id}/isler?hafta=${hafta}`, { withAuth: true })
+      .then((d) => { if (!iptal) setIsler(d); }).catch((e) => { if (!iptal) setIsler({ hata: e.message }); });
+    return () => { iptal = true; };
+  }, [arac.arac_id, hafta]);
+  const eski = !arac.son_sinyal || Date.now() - new Date(arac.son_sinyal).getTime() > 6 * 3600 * 1000;
+  const durum = eski ? ["Sinyal yok / eski veri", "#64748b", "#f1f5f9"] : arac.kontak === "ACIK" ? [arac.hiz > 0 ? `Hareket halinde · ${arac.hiz} km/s` : "Kontak açık", "#166534", "#dcfce7"] : ["Park halinde", "#1e3a5f", "#e0e7ff"];
+  const sahalar = veri?.sahalar || [];
+  const sahaBul = (fid) => sahalar.find((s) => s.fiziksel_id === fid) || null;
+  const isBul = (saha, kod) => (saha?.isler || []).find((i) => String(i.site_code || "").replace(/\s+/g, "").toUpperCase() === kod) || null;
+  const konumVar = (s) => !!s?.konum && ["KESIN", "CELISKILI"].includes(s.konum.dogruluk);
+  const ekipEtiketi = (isler?.ekipler || []).map((e) => e.ad).join(", ");
+  const kutu = { border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", background: "#fff" };
+  const kucuk = { fontSize: 12.5, color: "#64748b" };
+  const IsSatiri = ({ x }) => (
+    <div style={{ ...kutu, marginBottom: 8, padding: "8px 10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <b style={{ fontSize: 14 }}>{x.kategori_ad}{x.alt_tip ? ` · ${x.alt_tip}` : ""}</b>
+        <span style={{ ...kucuk, fontWeight: 700 }}>{x.plan_bas === x.plan_bit ? `${adHaftaGunu(x.plan_bas)} ${adGunTr(x.plan_bas)}` : `${adGunTr(x.plan_bas)} – ${adGunTr(x.plan_bit)}`}</span>
+      </div>
+      <div style={kucuk}>{x.ekip_ad || "Ekip yok"} · Atama: <b style={{ color: x.durum === "TAMAMLANDI" ? "#15803d" : "#0f172a" }}>{AD_DURUM[x.durum] || x.durum}</b>
+        {x.arac_baglantisi === "ARAC_BELIRTILMEMIS" ? " · araç belirtilmemiş (ekip bu hafta bu araçla planlı)" : ""}</div>
+      {x.isler.map((i) => {
+        const saha = i.fiziksel_id ? sahaBul(i.fiziksel_id) : null; const hi = isBul(saha, i.is_kodu); const f = hi?.fiili;
+        // QC kaynak sırası: Rollout QC alanı (fiili.qc = { durum, kapanis }) → iş atamasının QC işareti; ikisi de yoksa "—"
+        const qc = f?.qc?.durum ? `QC ${f.qc.durum}${f.qc.kapanis ? ` (${f.qc.kapanis})` : ""}` : x.qc_tamamlandi === true ? "QC tamam (atama)" : x.qc_tamamlandi === false ? "QC açık (atama)" : "QC —";
+        return (
+          <div key={i.is_kodu} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #e2e8f0" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" onClick={() => i.fiziksel_id && saha && onSahaAc(i.fiziksel_id)} disabled={!saha}
+                style={{ background: "none", border: "none", padding: 0, color: saha ? "#1d4ed8" : "#0f172a", fontWeight: 800, fontSize: 14, cursor: saha ? "pointer" : "default" }}
+                title={saha ? "Saha kartını aç" : "Bu saha haritanın mevcut görünümünde yok"}>{i.fiziksel_id || "—"}</button>
+              <span style={{ fontSize: 13, fontFamily: "ui-monospace, Menlo, monospace" }}>{i.is_kodu}</span>
+            </div>
+            <div style={kucuk}>Montaj: <b>{f?.ad || "—"}</b> · {qc}{f?.issue ? <b style={{ color: "#b91c1c" }}> · ⚠ {f.issue.tur || "Issue"}{f.issue.aciklama ? `: ${f.issue.aciklama}` : ""}</b> : null}</div>
+            <div style={{ marginTop: 3 }}>
+              {saha && konumVar(saha) ? <button type="button" className="rhmap-btn" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => onHaritadaGoster(saha)}>📍 Haritada Göster</button>
+                : <span style={{ ...kucuk, color: "#b45309" }}>{saha ? "Saha koordinatı yok" : "Saha bu harita görünümünde yok (kapsam / yıl filtresi)"}</span>}
+            </div>
+          </div>);
+      })}
+      {x.not && <div style={{ ...kucuk, marginTop: 6, fontStyle: "italic" }}>Not: {x.not}</div>}
+    </div>
+  );
+  const g = gecmis && !gecmis.hata ? gecmis : null;
+  return (
+    <div>
+      <button type="button" className="rhmap-btn" onClick={onKapat} style={{ marginBottom: 10 }}>← Saha listesine dön</button>
+      <div style={{ ...kutu, background: "#f8fafc" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 20, fontWeight: 900 }}>🚗 {arac.plaka}</div>
+          <span style={{ background: durum[2], color: durum[1], borderRadius: 999, padding: "3px 10px", fontSize: 12.5, fontWeight: 800 }}>{durum[0]}</span>
+        </div>
+        <div style={kucuk}>{[arac.marka, arac.model].filter(Boolean).join(" ")}{arac.surucu ? ` · Sürücü: ${arac.surucu}` : ""}</div>
+        <div style={{ fontSize: 13.5, marginTop: 4 }}>Ekip (bu hafta): <b>{isler && !isler.hata ? (ekipEtiketi || "eşleştirme yok") : "…"}</b></div>
+        <div style={kucuk}>Son konum: {arac.son_sinyal ? new Date(arac.son_sinyal).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}{arac.adres ? ` · ${arac.adres}` : ""}</div>
+        {eski && <div style={{ color: "#b45309", fontWeight: 700, fontSize: 13, marginTop: 4 }}>⚠ Son sinyal 6 saatten eski — konum güncel olmayabilir.</div>}
+      </div>
+
+      <h3 style={{ fontSize: 16, margin: "16px 0 8px" }}>Araç İstatistikleri</h3>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {[["7", "Son 7 gün"], ["30", "Son 30 gün"], ["OZEL", "Özel aralık"]].map(([k, ad]) => (
+          <button key={k} type="button" className="rhmap-btn" aria-pressed={donem === k} onClick={() => setDonem(k)}
+            style={donem === k ? { borderColor: "#1e3a5f", background: "#1e3a5f", color: "#fff" } : undefined}>{ad}</button>))}
+      </div>
+      {donem === "OZEL" && <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap", fontSize: 13 }}>
+        <input type="date" value={ozel.bas} max={bugun} onChange={(e) => setOzel((o) => ({ ...o, bas: e.target.value }))} aria-label="Başlangıç" className="rhmap-btn" />
+        –<input type="date" value={ozel.bit} max={bugun} onChange={(e) => setOzel((o) => ({ ...o, bit: e.target.value }))} aria-label="Bitiş" className="rhmap-btn" />
+        <span style={kucuk}>en çok 92 gün</span></div>}
+      <div style={{ ...kucuk, marginTop: 6 }}>{adGunTr(aralik.bas)} – {adGunTr(aralik.bit)} · Türkiye saati</div>
+      {!gecmis && <div style={{ ...kucuk, padding: "12px 0" }}>Kilometre geçmişi yükleniyor…</div>}
+      {gecmis?.hata && <div style={{ color: "#b91c1c", fontSize: 13.5, padding: "8px 0" }}>Kilometre geçmişi alınamadı: {gecmis.hata}</div>}
+      {g && g.yapilandirildi === false && <div style={{ ...kucuk, padding: "8px 0" }}>Triomobil bağlantısı kurulmamış; kilometre geçmişi yok.</div>}
+      {g && g.trio_yok && <div style={{ ...kucuk, padding: "8px 0" }}>{g.mesaj}</div>}
+      {g && g.gunler && <>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 8 }}>
+          <div style={kutu}><div style={kucuk}>Toplam</div><b style={{ fontSize: 18 }}>{adKm(g.toplam_km)}</b>{g.eksik_gun_sayisi > 0 && <div style={{ ...kucuk, color: "#b45309" }}>eksik: {g.eksik_gun_sayisi} gün veri yok</div>}</div>
+          <div style={kutu}><div style={kucuk}>Günlük ortalama</div><b style={{ fontSize: 18 }}>{adKm(g.ortalama_km)}</b><div style={kucuk}>{g.veri_gun_sayisi} veri olan gün üzerinden</div></div>
+          <div style={kutu}><div style={kucuk}>En fazla</div><b style={{ fontSize: 18 }}>{g.en_fazla ? adKm(g.en_fazla.km) : "—"}</b><div style={kucuk}>{g.en_fazla ? `${adHaftaGunu(g.en_fazla.tarih)} ${adGunTr(g.en_fazla.tarih)}` : "hareket yok"}</div></div>
+        </div>
+        <div style={{ ...kutu, marginTop: 8 }}><AracKmGrafik gunler={g.gunler} />
+          <div style={{ ...kucuk, marginTop: 4 }}>Lacivert: km · gri: ölçülmüş 0 km · kesikli kutu: veri yok</div></div>
+        {g.sure_var && (() => { const t = (k) => g.gunler.reduce((a, x) => a + (x[k] || 0), 0); return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 8 }}>
+            <div style={kutu}><div style={kucuk}>Hareket</div><b>{adSure(t("hareket_sn"))}</b><div style={kucuk}>kontak açık − rölanti</div></div>
+            <div style={kutu}><div style={kucuk}>Rölanti</div><b>{adSure(t("rolanti_sn"))}</b></div>
+            <div style={kutu}><div style={kucuk}>Kontak kapalı</div><b>{adSure(t("kontak_kapali_sn"))}</b><div style={kucuk}>duraklama</div></div>
+          </div>); })()}
+        <div style={{ ...kucuk, marginTop: 8, lineHeight: 1.5 }}>
+          Kaynak: {g.kaynak}.{" "}
+          {g.dogrulama?.durum === "DOGRULANDI" ? <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Cihaz sayacıyla doğrulandı ({Number(g.dogrulama.sayac_bas).toLocaleString("tr-TR")} → {Number(g.dogrulama.sayac_bit).toLocaleString("tr-TR")}){g.dogrulama.neden ? ` · ${g.dogrulama.neden}` : ""}.</span>
+            : g.dogrulama?.durum === "UYUMSUZ" ? <span style={{ color: "#b45309", fontWeight: 700 }}>⚠ {g.dogrulama.neden} (sayaç farkı {Number(g.dogrulama.sayac_fark).toLocaleString("tr-TR")}). Değerleri kontrol edin.</span>
+            : <span style={{ color: "#b45309" }}>Sayaç doğrulaması yapılamadı{g.dogrulama?.neden ? `: ${g.dogrulama.neden}` : ""}.</span>}
+          {g.ilk_veri_gunu && g.ilk_veri_gunu > g.bas ? ` İlk veri günü ${adGunTr(g.ilk_veri_gunu)}.` : ""}
+        </div>
+        <button type="button" className="rhmap-btn" style={{ marginTop: 8 }} aria-expanded={tabloAcik} onClick={() => setTabloAcik((x) => !x)}>{tabloAcik ? "▾" : "▸"} Gün gün tablo</button>
+        {tabloAcik && <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 6 }}>
+          <thead><tr style={{ color: "#64748b", textAlign: "left" }}><th style={{ padding: "4px 6px" }}>Tarih</th><th style={{ padding: "4px 6px", textAlign: "right" }}>Km</th>{g.sure_var && <th style={{ padding: "4px 6px", textAlign: "right" }}>Hareket</th>}</tr></thead>
+          <tbody>{g.gunler.slice().reverse().map((x) => <tr key={x.tarih} style={{ borderTop: "1px solid #eef2f7" }}>
+            <td style={{ padding: "4px 6px" }}>{adHaftaGunu(x.tarih)} {adGunTr(x.tarih)}</td>
+            <td style={{ padding: "4px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: x.veri ? "#0f172a" : "#94a3b8" }}>{x.veri ? adKm(x.km) : "Veri yok"}</td>
+            {g.sure_var && <td style={{ padding: "4px 6px", textAlign: "right" }}>{x.veri ? adSure(x.hareket_sn) : "—"}</td>}</tr>)}</tbody>
+          <tfoot><tr style={{ borderTop: "2px solid #cbd5e1", fontWeight: 800 }}><td style={{ padding: "4px 6px" }}>Toplam</td><td style={{ padding: "4px 6px", textAlign: "right" }}>{adKm(g.toplam_km)}</td>{g.sure_var && <td />}</tr></tfoot>
+        </table>}
+      </>}
+      {gecmis?.yakit && <div style={{ ...kutu, marginTop: 8, background: "#fffbeb", borderColor: "#fde68a" }}>
+        <div style={{ fontWeight: 800, fontSize: 13.5 }}>⛽ Yakıt kayıtları (masraf formu)</div>
+        <div style={{ fontSize: 13 }}>{gecmis.yakit.kayit ? `${gecmis.yakit.kayit} kayıt · ${gecmis.yakit.gunler.map(adGunKisa).join(", ")}${gecmis.yakit.toplam_tutar !== null ? ` · ₺${Number(gecmis.yakit.toplam_tutar).toLocaleString("tr-TR")}` : ""}` : "Bu dönemde bu plakayla yakıt kaydı yok."}</div>
+        <div style={kucuk}>{gecmis.yakit.not}</div></div>}
+
+      <h3 style={{ fontSize: 16, margin: "18px 0 8px" }}>Ekibin Haftalık İşleri</h3>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" className="rhmap-btn" onClick={() => setHafta((h) => adGunEkle(h, -7))} aria-label="Önceki hafta">‹ Önceki</button>
+        <input type="date" className="rhmap-btn" value={hafta} onChange={(e) => e.target.value && setHafta(e.target.value)} aria-label="Hafta seç" />
+        <button type="button" className="rhmap-btn" onClick={() => setHafta((h) => adGunEkle(h, 7))} aria-label="Sonraki hafta">Sonraki ›</button>
+        {hafta !== bugun && <button type="button" className="rhmap-btn" onClick={() => setHafta(bugun)}>Bu hafta</button>}
+      </div>
+      {!isler && <div style={{ ...kucuk, padding: "10px 0" }}>İşler yükleniyor…</div>}
+      {isler?.hata && <div style={{ color: "#b91c1c", fontSize: 13.5, padding: "8px 0" }}>İşler alınamadı: {isler.hata}</div>}
+      {isler && !isler.hata && <>
+        <div style={{ ...kucuk, margin: "6px 0" }}>{adGunTr(isler.hafta_bas)} Pzt – {adGunTr(isler.hafta_bit)} Paz{isler.ekipler.length > 1 ? ` · bu hafta ${isler.ekipler.length} ekip bu aracı kullandı` : ""}</div>
+        {isler.eslesme_yok && <div style={{ ...kutu, color: "#475569", fontSize: 13.5 }}>Bu araç için bu hafta ekip eşleştirmesi bulunamadı (bu plakayla planlanmış iş ataması yok).</div>}
+        {isler.ekipler.length > 1 ? isler.ekipler.map((e) => { const l = isler.isler.filter((x) => x.ekip_no === e.ekip_no); return l.length ? <div key={e.ekip_no}><div style={{ fontWeight: 800, margin: "8px 0 4px" }}>{e.ad}</div>{l.map((x) => <IsSatiri key={x.id} x={x} />)}</div> : null; })
+          : isler.isler.map((x) => <IsSatiri key={x.id} x={x} />)}
+        {!isler.eslesme_yok && !isler.isler.length && <div style={{ ...kucuk, padding: "6px 0" }}>Bu hafta için atanmış iş yok.</div>}
+        {isler.devreden.length > 0 && <><div style={{ fontWeight: 800, margin: "12px 0 6px", color: "#b45309" }}>Devreden işler (önceki haftalardan, hâlâ açık) · {isler.devreden.length}</div>
+          {isler.devreden.map((x) => <IsSatiri key={`d${x.id}`} x={x} />)}</>}
+        <div style={{ ...kucuk, marginTop: 8, lineHeight: 1.5 }}>{isler.kural} Plan, aracın sahaya gittiğinin kanıtı değildir; gerçekleşen hareket yukarıdaki kilometre bölümündedir.</div>
+      </>}
+    </div>
+  );
+}
+
 function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const feats = Array.isArray(TR_ILLER?.features) ? TR_ILLER.features : [];
   const proj = (lng, lat) => [(lng - 25.5) * 100 * Math.cos(39 * Math.PI / 180), (42.4 - lat) * 100];
@@ -8788,6 +8971,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
   const [araclar, setAraclar] = useState(null); // { zaman, araclar[] } | null
   const [aracGoster, setAracGoster] = useState(true);
   const [aracIpucu, setAracIpucu] = useState(null); // { a, x, y }
+  const [aracSecili, setAracSecili] = useState(null); // 04.11.2026: araç detay paneli (arac_id)
   useEffect(() => {
     let iptal = false;
     const yukle = async () => {
@@ -8925,7 +9109,8 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
     }
     return out;
   }, [kumeler, pinK, etiketGoster, secili, tekSaha]);
-  const sec = (id) => { setSecili(id); setGorunum("KART"); setRota(null); setKonumum(null); setSahaBilgi(null); setAramaAcik(false); };
+  const sec = (id) => { setSecili(id); setGorunum("KART"); setRota(null); setKonumum(null); setSahaBilgi(null); setAramaAcik(false); setAracSecili(null); };
+  const aracDetay = aracSecili ? (araclar?.araclar || []).find((a) => a.arac_id === aracSecili) || null : null;
   const aramaSonuclari = useMemo(() => {
     const q = arama.trim().toLocaleUpperCase("tr-TR"); if (!q) return [];
     return kapsamdaki.filter((s) => s.fiziksel_id.includes(q) || s.isler.some((i) => String(i.site_code).toUpperCase().includes(q)) || String(s.saha_adi || "").toLocaleUpperCase("tr-TR").includes(q)).slice(0, 12);
@@ -9108,9 +9293,10 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                   </g>))}
                 {/* Triomobil canlı araç konumu: yeşil kontak açık, lacivert park, gri 6 saatten eski sinyal */}
                 {aracGoster && aracPinler.map(({ a, x, y }) => { const eski = aracEski(a); const renk = eski ? "#94a3b8" : a.kontak === "ACIK" ? "#16a34a" : "#1e3a5f"; return (
-                  <g key={`arac-${a.arac_id}`} transform={`translate(${x},${y}) scale(${pinK})`} style={{ cursor: "default" }} role="img" aria-label={`Araç ${a.plaka}: ${eski ? "eski sinyal" : a.kontak === "ACIK" ? "kontak açık" : "park halinde"}`}
+                  <g key={`arac-${a.arac_id}`} transform={`translate(${x},${y}) scale(${pinK * (aracSecili === a.arac_id ? 1.3 : 1)})`} style={{ cursor: "pointer" }} role="button" aria-label={`Araç ${a.plaka}: ${eski ? "eski sinyal" : a.kontak === "ACIK" ? "kontak açık" : "park halinde"} — detay için tıklayın`}
+                    onClick={(e) => { e.stopPropagation(); setAracIpucu(null); setSecili(null); setAracSecili(a.arac_id); }}
                     onMouseEnter={(e) => { const r = haritaRef.current?.getBoundingClientRect(); setAracIpucu({ a, x: e.clientX - (r?.left || 0), y: e.clientY - (r?.top || 0) }); }} onMouseLeave={() => setAracIpucu(null)}>
-                    <rect x="-13" y="-13" width="26" height="26" rx="7" fill={renk} stroke="#fff" strokeWidth="2.5" />
+                    <rect x="-13" y="-13" width="26" height="26" rx="7" fill={renk} stroke={aracSecili === a.arac_id ? "#0f172a" : "#fff"} strokeWidth={aracSecili === a.arac_id ? 3.5 : 2.5} />
                     <text y="5" textAnchor="middle" fontSize="15" style={{ pointerEvents: "none" }}>🚗</text>
                     <text x="16" y="4" fontSize="11" fontWeight="800" fill="#0f172a" stroke="#fff" strokeWidth="3" paintOrder="stroke" style={{ pointerEvents: "none" }}>{a.plaka}</text>
                   </g>); })}
@@ -9135,19 +9321,21 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                 <span>{i.site_code}{renkModu === "FIILI" ? ` · ${i.fiili?.ad || "—"}` : i.anten?.kisa ? ` · ${i.anten.kisa}` : ""}{i.fiili?.issue ? " · ⚠ issue" : ""}{i.malzeme?.etiket ? ` · 📦 ${i.malzeme.etiket}` : ""}</span></div>)}
               {ipucu.s.isler.length > 6 && <div className="rhmap-k">+{ipucu.s.isler.length - 6} iş daha</div>}
             </div>}
-            {veri && <div className={`rhmap-aciklama${seciliSaha ? " rhmap-mobil-gizle" : ""}`} aria-label="Pin renk açıklaması" style={{ position: "absolute", left: 10, bottom: 26, background: "rgba(255,255,255,.95)", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 12.5, lineHeight: 1.7, maxWidth: 300 }}>
+            {veri && <div className={`rhmap-aciklama${seciliSaha || aracDetay ? " rhmap-mobil-gizle" : ""}`} aria-label="Pin renk açıklaması" style={{ position: "absolute", left: 10, bottom: 26, background: "rgba(255,255,255,.95)", border: "1px solid #e2e8f0", borderRadius: 10, padding: "6px 10px", fontSize: 12.5, lineHeight: 1.7, maxWidth: 300 }}>
               <div style={{ fontWeight: 800, fontSize: 12 }}>Pin rengi: {renkModu === "FIILI" ? "fiilî çalışma (QC'den bağımsız)" : "Teknocenter'ın kendi işi"}</div>
               {renkModu === "FIILI" && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, height: 18, borderRadius: 9, background: "#dc2626", color: "#fff", fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>!</span>Issue / eksik malzeme</div>}
               {Object.keys(yaklasikIl).length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, height: 18, borderRadius: 9, border: "2px dashed #64748b", fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>≈</span>Yaklaşık konum · yalnız il bilgisi</div>}
               {Object.entries(pinPalet).map(([k, v]) => <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 18, height: 18, borderRadius: 9, background: v.renk, color: v.yazi, fontWeight: 900, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{v.harf}</span>{v.ad}</div>)}
-              {araclar && aracGoster && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}><span style={{ width: 18, height: 18, borderRadius: 5, background: "#16a34a", fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>🚗</span>Araç (canlı): yeşil kontak açık · lacivert park · gri eski sinyal</div>}
+              {araclar && aracGoster && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}><span style={{ width: 18, height: 18, borderRadius: 5, background: "#16a34a", fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>🚗</span>Araç (canlı): yeşil kontak açık · lacivert park · gri eski sinyal · tıklayın: km ve haftalık işler</div>}
               <div className="rhmap-k rhmap-uzun" style={{ fontSize: 11 }}>Antenli / antensiz bilgisi renkte değil: pinin üzerine gelin ya da dokunun. Kesikli çerçeve: konum uyarılı.</div>
             </div>}
             <div style={{ position: "absolute", left: 10, bottom: 8, fontSize: 10, color: "#94a3b8" }}>İl sınırları: alpers/Turkey-Maps-GeoJSON (Apache-2.0){rotaYolu ? <> · Güzergâh: OSRM, harita verisi © OpenStreetMap katkıcıları (ODbL)</> : null}</div>
           </div>
-          <div className={`rhmap-panel${seciliSaha ? " secili" : ""}`}>
-            {veri && !seciliSaha && <>
+          <div className={`rhmap-panel${seciliSaha || aracDetay ? " secili" : ""}`}>
+            {aracDetay && <AracDetayPanel arac={aracDetay} veri={veri} onKapat={() => setAracSecili(null)} onSahaAc={(fid) => sec(fid)}
+              onHaritadaGoster={(saha) => { sec(saha.fiziksel_id); kutuyaSigdir([saha], 3); }} />}
+            {veri && !seciliSaha && !aracDetay && <>
               <div style={{ fontWeight: 800, color: "#0f766e", marginBottom: 6 }}>
                 Teknocenter kapsamı (zorunlu) · {tumu ? "tüm işler (bölge, durum ve yıl filtresi kapalı)" : yalniz2026 ? `${yil} işleri` : "tüm yıllar"}</div>
               {tumu && <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "6px 10px", fontSize: 13.5, marginBottom: 8 }}>
@@ -9213,7 +9401,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                   <div className="rhmap-k">{s.isler.map((i) => i.site_code).join(", ")}{konumVar(s) ? "" : " · konum yok"}</div></div>)}
               </details>
             </>}
-            {seciliSaha && gorunum === "KART" && <div>
+            {seciliSaha && !aracDetay && gorunum === "KART" && <div>
               <div className="rhmap-siteid">{seciliSaha.fiziksel_id}</div>
               <div style={{ margin: "4px 0 6px", display: "flex", gap: 6, flexWrap: "wrap" }}>{(() => { const p = rhFiiliBirlestir(seciliSaha.isler); const P = RH_FIILI_PIN[p.renk];
                 return <span style={{ background: P.renk, color: P.yazi, borderRadius: 999, padding: "5px 12px", fontSize: 15, fontWeight: 800 }}>{P.harf} {p.ad}</span>; })()}
@@ -9269,7 +9457,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                 <button type="button" className="rhmap-btn rhmap-btn-l" onClick={seciminiTemizle}>Seçimi kaldır</button>
               </div>
             </div>}
-            {seciliSaha && gorunum === "ROTA" && <div>
+            {seciliSaha && !aracDetay && gorunum === "ROTA" && <div>
               <button type="button" className="rhmap-geri" onClick={() => { setGorunum("KART"); setRota(null); setKonumum(null); }}>← Saha kartı</button>
               <div className="rhmap-siteid" style={{ fontSize: 26 }}>{seciliSaha.fiziksel_id}</div>
               <div style={{ fontSize: 16, fontWeight: 800, marginTop: 10 }}>Nereden başlayalım?</div>
@@ -9302,7 +9490,7 @@ function RolloutHaritaModal({ satirlar, bolgeVarsayilan = "ALL", onClose }) {
                 </>}
               </div>}
             </div>}
-            {seciliSaha && gorunum === "BILGI" && <div>
+            {seciliSaha && !aracDetay && gorunum === "BILGI" && <div>
               <button type="button" className="rhmap-geri" onClick={() => setGorunum("KART")}>← Saha kartı</button>
               <div className="rhmap-siteid">{seciliSaha.fiziksel_id}</div>
               {sahaBilgi?.yukleniyor && <div style={{ marginTop: 10 }}>Saha bilgileri yükleniyor…</div>}
