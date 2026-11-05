@@ -283,7 +283,129 @@ async function aracGecmisi({ trioId, bas, bit, env = process.env, fetchFn = fetc
   return veri;
 }
 
-const _sifirla = () => { _token = null; _onbellek = null; _bekleyen = null; _gecmisOnbellek.clear(); }; // yalnız test
+// ═══ GÜNLÜK GÜZERGÂH (05.11.2026, Orhan — Canlı İzle) ════════════════════════════════════════════════════════
+// Kaynak: Triomobil GET /reports/vehicle/locations/history (resmî Swagger): vehicleId (tek), ts.since / ts.until, _limit
+// (en çok 5000, varsayılan 1000), _sortOrder, X-TRIO-MIN-TS-DIFF başlığı (iki nokta arası en az saniye, en çok 120).
+// Belgede sayfa (_page) parametresi YOK: 5000 noktayla dolan yanıttan sonra son noktanın zamanından devam edilir (en çok
+// GUZ_AZAMI_PARCA kez); yine dolarsa yanıt "eksik" işaretlenir, sessizce kesilmez. Yanıt şeması belgede tanımlı değil:
+// alanlar canlı son konum raporuyla aynı kabul edilir (ts, location.lat/lon, speed, ignition) — canlıda ilk açılışta teyit edilir.
+// Çizgi yalnız ölçülmüş noktalardır: GPS boşluğu (GUZ_BOSLUK_DK) ya da gerçek dışı sıçrama (> GUZ_SICRAMA_KMH) varsa çizgi KESİLİR.
+// Km bu çizgiden hesaplanmaz (km = sürüş özeti). Bugün 60 sn, geçmiş gün 6 sa önbellekte; aynı anda gelen istekler birleşir.
+// TRIO_GUZ_LIMIT yalnız yerel testte parça sınırını küçültmek içindir (en çok 5000 — sağlayıcı sınırı)
+const GUZ_MIN_TS_DIFF = 30, GUZ_LIMIT = Math.min(5000, Number(process.env.TRIO_GUZ_LIMIT) || 5000), GUZ_AZAMI_PARCA = 6, GUZ_BOSLUK_DK = 10, GUZ_SICRAMA_KMH = 200, GUZ_HAREKET_KMH = 5, GUZ_DURAK_DK = 3;
+const _guzOnbellek = new Map(), _guzBekleyen = new Map();
+const haversineKm = (a, b) => { const R = 6371, r = (d) => d * Math.PI / 180; const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+
+// Saf: ham noktalar → { parcalar (kesik çizgiler), duraklar, zaman çizelgesi, ilk hareket, başlangıç / son nokta }
+function guzergahIsle(ham, { simdi = Date.now() } = {}) {
+  const n = [];
+  for (const x of ham) {
+    const lat = Number(x?.location?.lat), lng = Number(x?.location?.lon), t = Date.parse(x?.ts || "");
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0) || !Number.isFinite(t)) continue;
+    const hiz = sayiVeyaNull(x?.speed);
+    const kontak = x?.ignition === "ON" ? "ACIK" : x?.ignition === "OFF" ? "KAPALI" : null;
+    n.push({ ts: new Date(t).toISOString(), t, lat, lng, hiz, kontak });
+  }
+  n.sort((a, b) => a.t - b.t);
+  const durumOf = (p) => (p.hiz !== null && p.hiz >= GUZ_HAREKET_KMH ? "HAREKET" : p.kontak === "KAPALI" ? "PARK" : p.kontak === "ACIK" ? "ROLANTI" : "BILINMIYOR");
+  const parcalar = []; let p = [];
+  const kesikler = [];
+  for (let i = 0; i < n.length; i++) {
+    const a = n[i - 1], b = n[i];
+    if (a) {
+      const dk = (b.t - a.t) / 60000, km = haversineKm(a, b), hiz = dk > 0 ? km / (dk / 60) : Infinity;
+      if (dk > GUZ_BOSLUK_DK) kesikler.push({ tur: "BOSLUK", bas: a.ts, bit: b.ts, dk: Math.round(dk) });
+      else if (km > 0.5 && hiz > GUZ_SICRAMA_KMH) kesikler.push({ tur: "SICRAMA", bas: a.ts, bit: b.ts, km: Math.round(km * 10) / 10 });
+      if (dk > GUZ_BOSLUK_DK || (km > 0.5 && hiz > GUZ_SICRAMA_KMH)) { if (p.length) parcalar.push(p); p = []; }
+    }
+    p.push({ ts: b.ts, lat: b.lat, lng: b.lng, hiz: b.hiz, kontak: b.kontak, durum: durumOf(b) });
+  }
+  if (p.length) parcalar.push(p);
+  // Duraklar: ardışık hareketsiz noktalar (≥ GUZ_DURAK_DK); tür kontak durumundan
+  const duraklar = []; let d = null;
+  const kapat = (son) => { if (d && (d.t2 - d.t1) / 60000 >= GUZ_DURAK_DK) duraklar.push({ bas: new Date(d.t1).toISOString(), bit: new Date(d.t2).toISOString(),
+    sure_sn: Math.round((d.t2 - d.t1) / 1000), lat: d.lat, lng: d.lng, tur: d.park && d.rol ? "KARISIK" : d.park ? "PARK" : d.rol ? "KONTAK_ACIK_DURUS" : "BILINMIYOR",
+    devam: !!son }); d = null; };
+  for (let i = 0; i < n.length; i++) {
+    const x = n[i], s = durumOf(x);
+    if (s === "HAREKET") { kapat(false); continue; }
+    if (d && (x.t - d.t2) / 60000 > GUZ_BOSLUK_DK) kapat(false); // boşluk durağı da böler
+    if (!d) d = { t1: x.t, t2: x.t, lat: x.lat, lng: x.lng, park: false, rol: false };
+    d.t2 = x.t; if (s === "PARK") d.park = true; if (s === "ROLANTI") d.rol = true;
+  }
+  kapat(true);
+  const ilkHareket = n.find((x) => durumOf(x) === "HAREKET") || null;
+  // Zaman çizelgesi: duraklar arası hareket blokları (yolculuk) — yalnız ölçülmüş noktalardan
+  const cizelge = [];
+  let onceki = ilkHareket ? ilkHareket.t : null;
+  for (const du of duraklar) {
+    const b = Date.parse(du.bas);
+    if (onceki !== null && b > onceki) cizelge.push({ tur: "YOLCULUK", bas: new Date(onceki).toISOString(), bit: du.bas, sure_sn: Math.round((b - onceki) / 1000) });
+    cizelge.push({ tur: du.tur, bas: du.bas, bit: du.bit, sure_sn: du.sure_sn, devam: du.devam });
+    onceki = Date.parse(du.bit);
+  }
+  const son = n[n.length - 1] || null;
+  if (onceki !== null && son && son.t > onceki && durumOf(son) === "HAREKET") cizelge.push({ tur: "YOLCULUK", bas: new Date(onceki).toISOString(), bit: son.ts, sure_sn: Math.round((son.t - onceki) / 1000), devam: true });
+  return {
+    nokta_sayisi: n.length, parcalar, kesikler, duraklar, cizelge,
+    ilk_hareket: ilkHareket ? ilkHareket.ts : null,
+    baslangic: n[0] ? { ts: n[0].ts, lat: n[0].lat, lng: n[0].lng } : null,
+    son: son ? { ts: son.ts, lat: son.lat, lng: son.lng, hiz: son.hiz, kontak: son.kontak, yas_sn: Math.round((simdi - son.t) / 1000) } : null,
+  };
+}
+
+async function aracGuzergah({ trioId, gun, env = process.env, fetchFn = fetch, simdi = Date.now() } = {}) {
+  if (!yapilandirildi(env)) return { ok: true, yapilandirildi: false };
+  if (!/^[0-9a-fA-F]{24}$/.test(String(trioId || ""))) return { ok: false, error: "Triomobil araç kimliği bulunamadı" };
+  const bugun = trGun(simdi);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(gun || ""))) gun = bugun;
+  if (gun > bugun) return { ok: false, error: "Gelecek gün için güzergâh yok" };
+  const anahtar = `${trioId}|${gun}`;
+  const ob = _guzOnbellek.get(anahtar);
+  if (ob && simdi - ob.zaman < (gun === bugun ? ONBELLEK_MS : 6 * 3600 * 1000)) return ob.veri;
+  if (_guzBekleyen.has(anahtar)) return _guzBekleyen.get(anahtar);
+  const is = (async () => {
+    const a = ayar(env);
+    let tok = _token && _token.api === a.api && _token.kullanici === a.kullanici ? _token.deger : await _tokenAl(a, fetchFn);
+    const basl = () => ({ Authorization: tok, Accept: "application/json", "X-TRIO-MIN-TS-DIFF": String(GUZ_MIN_TS_DIFF) });
+    const al = async (yol) => {
+      let r = await _istek(`${a.api}${yol}`, { headers: basl() }, fetchFn);
+      if (r.durum === 401) { tok = await _tokenAl(a, fetchFn); r = await _istek(`${a.api}${yol}`, { headers: basl() }, fetchFn); }
+      return r;
+    };
+    const until = new Date(Math.min(trGunBasMs(gunEkle(gun, 1)), simdi)).toISOString();
+    let since = new Date(trGunBasMs(gun)).toISOString();
+    const ham = []; let eksik = false, parca = 0;
+    for (; parca < GUZ_AZAMI_PARCA; parca++) {
+      const r = await al(`/reports/vehicle/locations/history?vehicleId=${trioId}&ts.since=${encodeURIComponent(since)}&ts.until=${encodeURIComponent(until)}&_limit=${GUZ_LIMIT}&_sortOrder=ASC`);
+      if (r.durum >= 300 || !Array.isArray(r.govde)) {
+        const ay = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : "";
+        throw new Error(`Triomobil konum geçmişi alınamadı (HTTP ${r.durum}${ay ? `: ${ay}` : ""})`);
+      }
+      ham.push(...r.govde);
+      if (r.govde.length < GUZ_LIMIT) break;
+      const sonTs = Date.parse(r.govde[r.govde.length - 1]?.ts || "");
+      if (!Number.isFinite(sonTs)) { eksik = true; break; }
+      since = new Date(sonTs + 1000).toISOString();
+      if (parca === GUZ_AZAMI_PARCA - 1) eksik = true;
+    }
+    const g = guzergahIsle(ham, { simdi });
+    const veri = { ok: true, yapilandirildi: true, gun, bugun: gun === bugun, ...g, eksik,
+      eksik_not: eksik ? `Nokta sayısı sağlayıcı sınırına ulaştı (${GUZ_LIMIT} × ${GUZ_AZAMI_PARCA}); günün sonu eksik olabilir` : null,
+      istek_sayisi: Math.min(parca + 1, GUZ_AZAMI_PARCA), min_ts_diff_sn: GUZ_MIN_TS_DIFF,
+      yenileme: gun === bugun ? { sn: Math.round(ONBELLEK_MS / 1000), not: `Gerçek zamanlı akış yok; yaklaşık ${Math.round(ONBELLEK_MS / 1000)} saniyede bir yenilenir` } : null,
+      kaynak: "Triomobil konum geçmişi (ölçülmüş GPS noktaları; km bu çizgiden hesaplanmaz)", zaman: new Date(simdi).toISOString() };
+    _guzOnbellek.set(anahtar, { zaman: simdi, veri });
+    if (_guzOnbellek.size > 100) _guzOnbellek.delete(_guzOnbellek.keys().next().value);
+    return veri;
+  })();
+  _guzBekleyen.set(anahtar, is);
+  try { return await is; } finally { _guzBekleyen.delete(anahtar); }
+}
+
+const _sifirla = () => { _token = null; _onbellek = null; _bekleyen = null; _gecmisOnbellek.clear(); _guzOnbellek.clear(); _guzBekleyen.clear(); }; // yalnız test
 
 module.exports = { sonKonumlar, eslestir, plakaNorm, kayitDuzenle, yapilandirildi, ONBELLEK_MS, _sifirla,
-  aracGecmisi, saatlikToplaGunluk, birimDogrula, trGun, gunEkle, gunAraligi, GECMIS_AZAMI_GUN };
+  aracGecmisi, saatlikToplaGunluk, birimDogrula, trGun, gunEkle, gunAraligi, GECMIS_AZAMI_GUN,
+  aracGuzergah, guzergahIsle, GUZ_LIMIT, GUZ_MIN_TS_DIFF };

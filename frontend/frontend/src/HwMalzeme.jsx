@@ -150,7 +150,7 @@ function HareketFormu({ tur, is, secenekler, onKaydedildi, onIptal }) {
   const depoBakiye = (is?.bakiye || []).filter((b) => b.lok_tip === "DEPO"), ekipBakiye = (is?.bakiye || []).filter((b) => b.lok_tip === "EKIP");
   const ekipNolar = [...new Set(ekipBakiye.map((b) => b.lok_id))];
   const [f, setF] = useState({ depo_id: String(depoBakiye[0]?.lok_id || secenekler?.depolar?.[0]?.id || ""), ekip_no: "", kaynak_ekip_no: ekipNolar[0] || "", hedef_ekip_no: "",
-    kaynak: ekipNolar.length && tur !== "ekibe-teslim" ? `EKIP:${ekipNolar[0]}` : "DEPO", tarih: bugun(), gerekce: "", aciklama: "" });
+    kaynak: ekipNolar.length && tur !== "ekibe-teslim" ? `EKIP:${ekipNolar[0]}` : "DEPO", tarih: bugun(), gerekce: "", aciklama: "", arac_plaka: "" });
   const [secim, setSecim] = useState({}); // anahtar → miktar (boş = tümü)
   const [hata, setHata] = useState(""); const [gonderiliyor, setGonderiliyor] = useState(false);
   const anahtar = useRef(yeniAnahtar());
@@ -165,8 +165,9 @@ function HareketFormu({ tur, is, secenekler, onKaydedildi, onIptal }) {
       if (!kalemler.length) throw new Error("Taşınacak kalem yok");
       const [ktip, kid] = kaynakLok.split(":");
       const body = { site_code: is.site_code, tarih: f.tarih, gerekce: f.gerekce, aciklama: f.aciklama, kalemler };
-      if (tur === "ekibe-teslim") Object.assign(body, { depo_id: Number(f.depo_id), ekip_no: Number(f.ekip_no) });
-      else if (tur === "devir") Object.assign(body, { kaynak_ekip_no: Number(f.kaynak_ekip_no), hedef_ekip_no: Number(f.hedef_ekip_no) });
+      // 05.11.2026: araç (isteğe bağlı) — malzeme bu araca yüklendiyse seçilir; seçilmezse "ekipte, araç doğrulanmadı" kalır
+      if (tur === "ekibe-teslim") Object.assign(body, { depo_id: Number(f.depo_id), ekip_no: Number(f.ekip_no), arac_plaka: f.arac_plaka || undefined });
+      else if (tur === "devir") Object.assign(body, { kaynak_ekip_no: Number(f.kaynak_ekip_no), hedef_ekip_no: Number(f.hedef_ekip_no), arac_plaka: f.arac_plaka || undefined });
       else if (tur === "depoya-donus") Object.assign(body, { ekip_no: Number(f.kaynak_ekip_no), depo_id: Number(f.depo_id) });
       else Object.assign(body, ktip === "EKIP" ? { ekip_no: Number(kid) } : { depo_id: Number(kid) });
       const r = await hwApi(`/hw-malzeme/${tur}`, { method: "POST", anahtar: anahtar.current, body });
@@ -191,8 +192,13 @@ function HareketFormu({ tur, is, secenekler, onKaydedildi, onIptal }) {
       {(tur === "kullanim" || tur === "iade") && <label><span style={etiketS}>Kaynak</span><select style={girdiS} value={f.kaynak} onChange={(e) => F("kaynak", e.target.value)}>
         {[...new Set((is?.bakiye || []).filter((b) => ["DEPO", "EKIP"].includes(b.lok_tip)).map((b) => `${b.lok_tip}:${b.lok_id}`))].map((l) =>
           <option key={l} value={l}>{(is.bakiye.find((b) => `${b.lok_tip}:${b.lok_id}` === l) || {}).lok_ad}</option>)}</select></label>}
+      {(tur === "ekibe-teslim" || tur === "devir") && secenekler?.arac_baglantisi_hazir && <label><span style={etiketS}>Yüklendiği araç (isteğe bağlı)</span>
+        <select style={girdiS} value={f.arac_plaka} onChange={(e) => F("arac_plaka", e.target.value)}>
+          <option value="">Araç seçilmedi — yalnız ekibe</option>{(secenekler?.araclar || []).map((a) => <option key={a.id} value={a.plaka}>{a.plaka}{a.marka ? ` · ${[a.marka, a.model].filter(Boolean).join(" ")}` : ""}</option>)}</select></label>}
       <label><span style={etiketS}>İşlem tarihi</span><input type="date" max={bugun()} style={girdiS} value={f.tarih} onChange={(e) => F("tarih", e.target.value)} /></label>
     </div>
+    {(tur === "ekibe-teslim" || tur === "devir") && <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 6 }}>
+      {secenekler?.arac_baglantisi_hazir ? "Araç seçilirse malzeme araç panelinde “araçta (bağlantı doğrulandı)” görünür. Araç değişirse yeni devir / teslim kaydı gerekir." : "Araç bağlantısı için veritabanı kurulumu bekliyor; şimdilik yalnız ekibe teslim kaydedilir."}</div>}
     <div style={{ marginTop: 10 }}>
       <span style={etiketS}>Kalemler (boş bırakılan tamamı; 0 yazılan taşınmaz)</span>
       {!kaynakKalemler.length && <div style={{ color: "#b45309" }}>Seçilen kaynakta bu işe ait malzeme yok.</div>}
@@ -261,7 +267,7 @@ function IsDetay({ kod, secenekler, onGeri }) {
       {is.islemler.slice().reverse().map((x) => <div key={x.id} style={{ padding: "8px 0", borderTop: "1px solid #f1f5f9", opacity: x.ters_islem_id ? 0.6 : 1 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
           <b>#{x.id} {x.tur_ad}</b>{x.teslim_tipi && <span>· {x.teslim_tipi === "TAM" ? "tam" : "kısmi"}</span>}
-          <span style={{ color: "#475569" }}>{x.kaynak} → {x.hedef} · {tarihTR(x.islem_tarihi)}</span>
+          <span style={{ color: "#475569" }}>{x.kaynak} → {x.hedef}{x.arac_plaka ? ` · 🚗 ${x.arac_plaka}` : ""} · {tarihTR(x.islem_tarihi)}</span>
           {x.ters_islem_id && <span style={{ color: "#991b1b", fontWeight: 700 }}>iptal edildi (#{x.ters_islem_id})</span>}
           {x.duzeltilen_islem_id && <span style={{ color: "#1d4ed8" }}>#{x.duzeltilen_islem_id} düzeltmesi</span>}
         </div>

@@ -14878,7 +14878,13 @@ async function opMontajFiili(kodlar) {
 }
 hwMalzeme.kur(app, { pool, authMiddleware, upload: multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 } }), uploadToStorage,
   kapsamIsKodlari: opKapsamIsKodlari, ekipKapsamda: opEkipKapsamda, montajFiili: opMontajFiili, fizikselSaha: (k) => sahaKimlik.fizikselSaha(k),
-  yetki: { goruntule: (req) => opIzin(req, "hw_malzeme_goruntule") || opIzin(req, "hw_malzeme_hareket"), hareket: (req) => opIzin(req, "hw_malzeme_hareket") } });
+  yetki: { goruntule: (req) => opIzin(req, "hw_malzeme_goruntule") || opIzin(req, "hw_malzeme_hareket"), hareket: (req) => opIzin(req, "hw_malzeme_hareket") },
+  // 05.11.2026: teslim / devirde araç seçimi — plaka normalize eşleşmesi + firma kapsamı (alt marka yalnız kendi araçları)
+  aracDogrula: async (req, plaka) => { const p = String(plaka || "").toUpperCase().replace(/[^0-9A-Z]/g, ""); if (!p) return null;
+    const r = (await pool.query(`SELECT id, plaka, firma FROM araclar WHERE upper(regexp_replace(COALESCE(plaka,''),'[^0-9A-Za-z]','','g')) = $1 AND aktif IS DISTINCT FROM false LIMIT 1`, [p])).rows[0];
+    return r && aracKapsamda(altMarkaKapsam(req), r.firma) ? { id: r.id, plaka: String(r.plaka).toUpperCase().replace(/[^0-9A-Z]/g, "") } : null; },
+  aracListesi: async (req) => { const k = altMarkaKapsam(req);
+    return (await pool.query(`SELECT id, plaka, firma, marka, model FROM araclar WHERE aktif IS DISTINCT FROM false ORDER BY plaka`)).rows.filter((a) => aracKapsamda(k, a.firma)).map(({ firma, ...a }) => a); } });
 planSenkron.kur(app, { pool, authMiddleware, hwMalzeme, fiiliDurum, isAtamaDetay: (...a) => isAtamaDetay(...a), isAtamaYetkiliMi: (...a) => isAtamaYetkiliMi(...a),
   planEkipleri: (...a) => planEkipleri(...a), planTablolar: (...a) => planTablolar(...a), islemGecmisiYaz: (...a) => islemGecmisiYaz(...a), kapsamIsKodlari: async (req) => {
     const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0] });
@@ -27627,15 +27633,18 @@ app.get("/hr/arac-takip/:id/gecmis", aracTakipOkuma, async (req, res) => {
     const yk = await pool.query(`SELECT t.id, t.tarih::text AS tarih, t.odeme_tarihi::text AS odeme_tarihi, t.tutar, t.arac_km,
         NULLIF(t.aciklama,'') AS aciklama, COALESCE(p.ad_soyad, t.talep_eden_ad) AS kisi
         FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
-       WHERE ${ykSart.join(" AND ")} ORDER BY t.tarih, t.id`, [AKTR(arac.plaka), bas, bit]).catch(() => ({ rows: [] }));
+       WHERE ${ykSart.join(" AND ")} ORDER BY t.tarih, t.id`, [AKTR(arac.plaka), bas, bit]).catch((e) => ({ rows: [], hata: e.message }));
     const tutarGor = avansTamGorus(req);
     const yRows = yk.rows;
+
     const yakit = { kaynak: "IS_AVANSI", kayit: yRows.length, gunler: [...new Set(yRows.map((r) => String(r.tarih).slice(0, 10)))],
       toplam_tutar: tutarGor ? Math.round(yRows.reduce((t, r) => t + Number(r.tutar || 0), 0) * 100) / 100 : null, tutar_gizli: !tutarGor,
       kayitlar: yRows.map((r) => ({ id: r.id, tarih: String(r.tarih).slice(0, 10), odeme_tarihi: r.odeme_tarihi ? String(r.odeme_tarihi).slice(0, 10) : null,
         arac_km: r.arac_km === null || r.arac_km === undefined ? null : Number(r.arac_km),
         tutar: tutarGor ? Number(r.tutar || 0) : null, kisi: tutarGor ? r.kisi || null : null, aciklama: tutarGor ? r.aciklama : null })),
       not: "Bu plakaya yatırılan iş avansları (gider türü Yakıt, ödemesi tamamlanmış). Avans ödenen paradır, pompadaki dolum kaydı değildir; litre tutulmadığı için tüketim hesaplanmaz." };
+    // 05.11.2026: sorgu hatası sıfır gibi gösterilmez
+    if (yk.hata) Object.assign(yakit, { hata: "Yakıt avansı verisi alınamadı", kayit: null, toplam_tutar: null });
     const canli = await aracTakip.sonKonumlar();
     if (!canli.yapilandirildi) return res.json({ ok: true, yapilandirildi: false, arac, yakit });
     const t = (canli.araclar || []).find((x) => x.plaka_norm === aracTakip.plakaNorm(arac.plaka));
@@ -27656,59 +27665,422 @@ app.get("/hr/arac-takip/:id/gecmis", aracTakipOkuma, async (req, res) => {
 //     Başka araçla planlanmış iş listelenmez. Tamamlananlar kendi durumuyla kalır, iptaller listelenmez.
 //   • Devreden: haftadan önce planlanmış, hâlâ açık (TAMAMLANDI / IPTAL değil) ve bu araçla planlanmış işler.
 // Plan, aracın sahaya gittiğinin kanıtı değildir (yanıtta ayrı alan: gercek_hareket yok).
+// Ortak okuma: [bas, bit] TR günleri arasında bu araçla ilişkili işler (plan bilgisi; aracın gittiğinin kanıtı DEĞİL).
+// Dönen: { ekipSet (aralıkta bu aracı kullanan ekipler), liste (aralıkta), devreden (aralıktan önce, açık, bu araçla), ekipAd, buAracla }
+async function aracIsleriOku(req, arac, bas, bit) {
+  await isAtamaTablolar();
+  const plaka = AKTR(arac.plaka);
+  const segVar = (await pool.query(`SELECT to_regclass('public.is_atama_plan_segment') AS t`)).rows[0]?.t;
+  const r = await pool.query(`
+    WITH a AS (
+      SELECT a.*, k.ad AS kategori_ad,
+        COALESCE((a.plan_baslangic AT TIME ZONE 'Europe/Istanbul')::date, a.plan_tarihi) AS bas_gun,
+        COALESCE((a.plan_bitis AT TIME ZONE 'Europe/Istanbul')::date, a.plan_tarihi, (a.plan_baslangic AT TIME ZONE 'Europe/Istanbul')::date) AS bit_gun,
+        upper(regexp_replace(COALESCE(a.arac_plaka,''),'[^0-9A-Za-z]','','g')) AS plaka_n,
+        ${segVar ? `(SELECT array_agg(DISTINCT upper(regexp_replace(COALESCE(s.arac_plaka,''),'[^0-9A-Za-z]','','g'))) FILTER (WHERE COALESCE(s.arac_plaka,'') <> '')
+           FROM is_atama_plan_segment s WHERE s.is_atama_id = a.id)` : `NULL::text[]`} AS seg_plakalar,
+        ${segVar ? `(SELECT array_agg(DISTINCT s.ekip_no) FILTER (WHERE s.ekip_no IS NOT NULL) FROM is_atama_plan_segment s WHERE s.is_atama_id = a.id)` : `NULL::int[]`} AS seg_ekipler
+      FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
+      WHERE a.durum IS DISTINCT FROM 'IPTAL')
+    SELECT * FROM a WHERE bas_gun IS NOT NULL AND bas_gun <= $2::date
+      AND (bit_gun >= $1::date OR durum NOT IN ('TAMAMLANDI','IPTAL'))
+    ORDER BY bas_gun, id LIMIT 1000`, [bas, bit]);
+  const buAracla = (x) => x.plaka_n === plaka || (x.seg_plakalar || []).includes(plaka);
+  const baskaAracla = (x) => (x.plaka_n && x.plaka_n !== plaka) || (x.seg_plakalar || []).some((p) => p !== plaka);
+  const aralikta = (x) => String(x.bas_gun) <= bit && String(x.bit_gun || x.bas_gun) >= bas;
+  const gunStr = (d) => (d instanceof Date ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : String(d || "").slice(0, 10)) || null;
+  for (const x of r.rows) { x.bas_gun = gunStr(x.bas_gun); x.bit_gun = gunStr(x.bit_gun) || x.bas_gun; }
+  // Aralıkta bu aracı kullanan ekipler (araçla planlanmış işlerden; segment ekibi dahil)
+  const ekipSet = new Set();
+  for (const x of r.rows) if (aralikta(x) && buAracla(x)) { if (x.ekip_no) ekipSet.add(Number(x.ekip_no)); (x.seg_ekipler || []).forEach((e) => ekipSet.add(Number(e))); }
+  const liste = r.rows.filter((x) => aralikta(x) && (buAracla(x) || (!baskaAracla(x) && x.ekip_no && ekipSet.has(Number(x.ekip_no)))));
+  const devreden = r.rows.filter((x) => String(x.bit_gun || x.bas_gun) < bas && !["TAMAMLANDI", "IPTAL"].includes(String(x.durum || "")) && buAracla(x));
+  // Firma kapsamı (MARKA ROLLOUT KAPSAMI): Teknocenter başka firmanın işini görmez — liste ucuyla aynı süzgeç
+  const K = await rolloutKapsam(req);
+  const email = String(req.user?.email || "").toLowerCase().trim();
+  const suz = async (l) => (K ? markaIsAtamaSuz(K, l, email) : l);
+  const [listeS, devS] = await Promise.all([suz(liste), suz(devreden)]);
+  const ekipNolar = [...new Set([...listeS, ...devS].map((x) => Number(x.ekip_no)).filter(Boolean).concat([...ekipSet]))];
+  const ekipAd = new Map(ekipNolar.length ? (await pool.query(`SELECT ekip_no, ad FROM ekipler WHERE ekip_no = ANY($1::int[])`, [ekipNolar])).rows.map((e) => [Number(e.ekip_no), e.ad]) : []);
+  return { ekipSet, liste: listeS, devreden: devS, ekipAd, buAracla };
+}
+const aracIsGoster = (x, ekipAd, buAracla) => ({
+  id: x.id, kategori: x.kategori, kategori_ad: x.kategori_ad || x.kategori, alt_tip: x.alt_tip || null,
+  isler: (x.site_codes || []).map((kod) => ({ is_kodu: String(kod || "").replace(/\s+/g, "").toUpperCase(), fiziksel_id: sahaKimlik.fizikselSaha(kod)?.fiziksel_id || null })),
+  plan_bas: x.bas_gun, plan_bit: x.bit_gun, durum: x.durum, qc_tamamlandi: x.qc_tamamlandi === true ? true : x.qc_tamamlandi === false ? false : null,
+  plan_saat_bas: x.plan_baslangic ? new Date(x.plan_baslangic).toISOString() : null, plan_saat_bit: x.plan_bitis ? new Date(x.plan_bitis).toISOString() : null,
+  ekip_no: x.ekip_no ? Number(x.ekip_no) : null, ekip_ad: x.ekip_no ? (ekipAd.get(Number(x.ekip_no)) || `Ekip ${x.ekip_no}`) : null,
+  arac_baglantisi: buAracla(x) ? "BU_ARAC" : "ARAC_BELIRTILMEMIS",
+  not: [x.atayan_not, x.durdurma_sebebi ? `Durdurma: ${x.durdurma_sebebi}` : null, x.kapanis_not ? `Kapanış: ${x.kapanis_not}` : null].filter(Boolean).join(" · ") || null,
+});
+const haftaAraligi = (ref) => { const gunNo = (new Date(`${ref}T12:00:00Z`).getUTCDay() + 6) % 7; const b = aracTakip.gunEkle(ref, -gunNo); return [b, aracTakip.gunEkle(b, 6)]; };
 app.get("/hr/arac-takip/:id/isler", aracTakipOkuma, async (req, res) => {
   try {
     const arac = await aracDetayKapisi(req, res); if (!arac) return;
-    await isAtamaTablolar();
-    const ref = isoGunMu(req.query.hafta) ? String(req.query.hafta) : trBugun();
-    const gunNo = (new Date(`${ref}T12:00:00Z`).getUTCDay() + 6) % 7; // Pazartesi = 0
-    const haftaBas = aracTakip.gunEkle(ref, -gunNo), haftaBit = aracTakip.gunEkle(haftaBas, 6);
-    const plaka = AKTR(arac.plaka);
-    const segVar = (await pool.query(`SELECT to_regclass('public.is_atama_plan_segment') AS t`)).rows[0]?.t;
-    const r = await pool.query(`
-      WITH a AS (
-        SELECT a.*, k.ad AS kategori_ad,
-          COALESCE((a.plan_baslangic AT TIME ZONE 'Europe/Istanbul')::date, a.plan_tarihi) AS bas_gun,
-          COALESCE((a.plan_bitis AT TIME ZONE 'Europe/Istanbul')::date, a.plan_tarihi, (a.plan_baslangic AT TIME ZONE 'Europe/Istanbul')::date) AS bit_gun,
-          upper(regexp_replace(COALESCE(a.arac_plaka,''),'[^0-9A-Za-z]','','g')) AS plaka_n,
-          ${segVar ? `(SELECT array_agg(DISTINCT upper(regexp_replace(COALESCE(s.arac_plaka,''),'[^0-9A-Za-z]','','g'))) FILTER (WHERE COALESCE(s.arac_plaka,'') <> '')
-             FROM is_atama_plan_segment s WHERE s.is_atama_id = a.id)` : `NULL::text[]`} AS seg_plakalar,
-          ${segVar ? `(SELECT array_agg(DISTINCT s.ekip_no) FILTER (WHERE s.ekip_no IS NOT NULL) FROM is_atama_plan_segment s WHERE s.is_atama_id = a.id)` : `NULL::int[]`} AS seg_ekipler
-        FROM is_atama a LEFT JOIN is_kategori k ON k.kod = a.kategori
-        WHERE a.durum IS DISTINCT FROM 'IPTAL')
-      SELECT * FROM a WHERE bas_gun IS NOT NULL AND bas_gun <= $2::date
-        AND (bit_gun >= $1::date OR durum NOT IN ('TAMAMLANDI','IPTAL'))
-      ORDER BY bas_gun, id LIMIT 1000`, [haftaBas, haftaBit]);
-    const buAracla = (x) => x.plaka_n === plaka || (x.seg_plakalar || []).includes(plaka);
-    const baskaAracla = (x) => (x.plaka_n && x.plaka_n !== plaka) || (x.seg_plakalar || []).some((p) => p !== plaka);
-    const haftada = (x) => String(x.bas_gun) <= haftaBit && String(x.bit_gun || x.bas_gun) >= haftaBas;
-    const gunStr = (d) => (d instanceof Date ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : String(d || "").slice(0, 10)) || null;
-    for (const x of r.rows) { x.bas_gun = gunStr(x.bas_gun); x.bit_gun = gunStr(x.bit_gun) || x.bas_gun; }
-    // Bu hafta bu aracı kullanan ekipler (araçla planlanmış hafta işlerinden; segment ekibi dahil)
-    const ekipSet = new Set();
-    for (const x of r.rows) if (haftada(x) && buAracla(x)) { if (x.ekip_no) ekipSet.add(Number(x.ekip_no)); (x.seg_ekipler || []).forEach((e) => ekipSet.add(Number(e))); }
-    const hafta = r.rows.filter((x) => haftada(x) && (buAracla(x) || (!baskaAracla(x) && x.ekip_no && ekipSet.has(Number(x.ekip_no)))));
-    const devreden = r.rows.filter((x) => String(x.bit_gun || x.bas_gun) < haftaBas && !["TAMAMLANDI", "IPTAL"].includes(String(x.durum || "")) && buAracla(x));
-    // Firma kapsamı (MARKA ROLLOUT KAPSAMI): Teknocenter başka firmanın işini görmez — liste ucuyla aynı süzgeç
-    const K = await rolloutKapsam(req);
-    const email = String(req.user?.email || "").toLowerCase().trim();
-    const suz = async (l) => (K ? markaIsAtamaSuz(K, l, email) : l);
-    const [haftaS, devS] = await Promise.all([suz(hafta), suz(devreden)]);
-    const ekipNolar = [...new Set([...haftaS, ...devS].map((x) => Number(x.ekip_no)).filter(Boolean).concat([...ekipSet]))];
-    const ekipAd = new Map(ekipNolar.length ? (await pool.query(`SELECT ekip_no, ad FROM ekipler WHERE ekip_no = ANY($1::int[])`, [ekipNolar])).rows.map((e) => [Number(e.ekip_no), e.ad]) : []);
-    const isGoster = (x) => ({
-      id: x.id, kategori: x.kategori, kategori_ad: x.kategori_ad || x.kategori, alt_tip: x.alt_tip || null,
-      isler: (x.site_codes || []).map((kod) => ({ is_kodu: String(kod || "").replace(/\s+/g, "").toUpperCase(), fiziksel_id: sahaKimlik.fizikselSaha(kod)?.fiziksel_id || null })),
-      plan_bas: x.bas_gun, plan_bit: x.bit_gun, durum: x.durum, qc_tamamlandi: x.qc_tamamlandi === true ? true : x.qc_tamamlandi === false ? false : null,
-      ekip_no: x.ekip_no ? Number(x.ekip_no) : null, ekip_ad: x.ekip_no ? (ekipAd.get(Number(x.ekip_no)) || `Ekip ${x.ekip_no}`) : null,
-      arac_baglantisi: buAracla(x) ? "BU_ARAC" : "ARAC_BELIRTILMEMIS",
-      not: [x.atayan_not, x.durdurma_sebebi ? `Durdurma: ${x.durdurma_sebebi}` : null, x.kapanis_not ? `Kapanış: ${x.kapanis_not}` : null].filter(Boolean).join(" · ") || null,
-    });
+    const [haftaBas, haftaBit] = haftaAraligi(isoGunMu(req.query.hafta) ? String(req.query.hafta) : trBugun());
+    const o = await aracIsleriOku(req, arac, haftaBas, haftaBit);
     res.json({ ok: true, arac, hafta_bas: haftaBas, hafta_bit: haftaBit,
-      ekipler: [...ekipSet].map((e) => ({ ekip_no: e, ad: ekipAd.get(e) || `Ekip ${e}` })),
-      eslesme_yok: ekipSet.size === 0 && !haftaS.length,
+      ekipler: [...o.ekipSet].map((e) => ({ ekip_no: e, ad: o.ekipAd.get(e) || `Ekip ${e}` })),
+      eslesme_yok: o.ekipSet.size === 0 && !o.liste.length,
       kural: "Araç–ekip bağı iş atamasındaki araç plakasından (tarihli) alınır; ekip kartında kalıcı plaka tahsisi yoktur.",
-      isler: haftaS.map(isGoster), devreden: devS.map(isGoster) });
+      isler: o.liste.map((x) => aracIsGoster(x, o.ekipAd, o.buAracla)), devreden: o.devreden.map((x) => aracIsGoster(x, o.ekipAd, o.buAracla)) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+/* ═══ ARAÇ VE EKİP OPERASYON MERKEZİ (05.11.2026, Orhan) ════════════════════════════════════════════════════════════
+   Sade araç kartı (/ozet) + modüller: yakıt analizi, canlı izle (güzergâh), araçtaki malzemeler, bugünkü / haftalık plan,
+   ekip ve personel. Hepsi aracDetayKapisi (firma kapsamı) + aracTakipOkuma'dan geçer; ortak plaka normalizasyonu (AKTR) ve
+   tarihli araç–ekip bağı (aracIsleriOku). Saf hesaplar aracOperasyon.js'te. Para / stok sorgusu hata verirse SIFIR DÖNMEZ:
+   yanıtta "veri alınamadı" yazar. Yakıt tutarları yalnız avans tam görüşüyle (avansTamGorus) — toplam, grafik, oran, yorum dahil. */
+const aracOperasyon = require("./aracOperasyon");
+const aracReferansAi = require("./aracReferansAi");
+const tabloVar = async (ad) => !!(await pool.query(`SELECT to_regclass($1) AS t`, [`public.${ad}`]).catch(() => ({ rows: [] }))).rows[0]?.t;
+async function aracTrio(arac) {
+  const canli = await aracTakip.sonKonumlar();
+  if (!canli.ok) return { hata: canli.error || "Triomobil'e ulaşılamadı" };
+  if (!canli.yapilandirildi) return { yapilandirildi: false };
+  const t = (canli.araclar || []).find((x) => x.plaka_norm === aracTakip.plakaNorm(arac.plaka)) || null;
+  return { yapilandirildi: true, kayit: t, zaman: canli.zaman, eski: !!canli.eski };
+}
+// Canlı durum etiketi (renk tek başına anlam taşımaz: etiket metni her zaman var)
+function canliDurum(t, simdi = Date.now()) {
+  if (!t || !t.son_sinyal) return { kod: "BAGLANTI_YOK", ad: "Bağlantı yok" };
+  const yas = Math.round((simdi - Date.parse(t.son_sinyal)) / 1000);
+  if (yas > 30 * 60) return { kod: "SINYAL_ESKI", ad: "Sinyal eski", yas_sn: yas };
+  if (t.kontak === "ACIK" && Number(t.hiz) >= 5) return { kod: "HAREKET", ad: "Hareket halinde", yas_sn: yas };
+  if (t.kontak === "ACIK") return { kod: "ROLANTI", ad: "Rölanti (kontak açık, duruyor)", yas_sn: yas };
+  if (t.kontak === "KAPALI") return { kod: "DURUYOR", ad: "Duruyor (kontak kapalı)", yas_sn: yas };
+  return { kod: Number(t.hiz) >= 5 ? "HAREKET" : "DURUYOR", ad: Number(t.hiz) >= 5 ? "Hareket halinde" : "Duruyor", yas_sn: yas };
+}
+// Malzeme (defter) — bu aracın işleri + bu araç plakasıyla teslim / devredilen işler; kapsam dışı iş kodu yanıta girmez
+async function aracMalzemeOku(req, arac, gun) {
+  if (!(await tabloVar("hw_malzeme_islem"))) return { kurulum_yok: true };
+  const [hb, hbit] = haftaAraligi(gun);
+  const o = await aracIsleriOku(req, arac, hb, hbit);
+  const gunO = await aracIsleriOku(req, arac, gun, gun);
+  const kodlar = new Set();
+  for (const x of [...o.liste, ...o.devreden]) for (const k of x.site_codes || []) kodlar.add(String(k).replace(/\s+/g, "").toUpperCase());
+  const aracKol = await hwMalzeme.aracKolonuVar(pool);
+  if (aracKol) (await pool.query(`SELECT DISTINCT site_code FROM hw_malzeme_islem WHERE upper(regexp_replace(COALESCE(arac_plaka,''),'[^0-9A-Za-z]','','g')) = $1`, [AKTR(arac.plaka)])).rows.forEach((r) => kodlar.add(r.site_code));
+  // Bu gün aracı kullanan ekibe teslim / devredilmiş malzemenin işleri (araç bağlantısı ayrıca doğrulanır; "ekipte" ≠ "araçta")
+  const gunEkipleri = [...gunO.ekipSet].map(String);
+  if (gunEkipleri.length) (await pool.query(`SELECT DISTINCT site_code FROM hw_malzeme_islem WHERE hedef_tip = 'EKIP' AND hedef_id = ANY($1::text[])`, [gunEkipleri])).rows.forEach((r) => kodlar.add(r.site_code));
+  const kapsam = await opKapsamIsKodlari(req);
+  const liste = [...kodlar].filter((k) => kapsam.kodlar.has(k));
+  const isl = liste.length ? (await pool.query(`SELECT i.id, i.tur, i.site_code, i.fiziksel_id, i.kaynak_tip, i.kaynak_id, i.hedef_tip, i.hedef_id, i.islem_tarihi, i.ters_islem_id,
+      i.ters_edilen_id, ${aracKol ? "i.arac_plaka" : "NULL::text AS arac_plaka"}, i.created_at,
+      COALESCE(json_agg(json_build_object('anahtar', k.anahtar, 'ad', k.ad, 'kod', k.kod, 'birim', k.birim, 'miktar', k.miktar::float8) ORDER BY k.id) FILTER (WHERE k.id IS NOT NULL), '[]') AS kalemler
+    FROM hw_malzeme_islem i LEFT JOIN hw_malzeme_islem_kalem k ON k.islem_id = i.id WHERE i.site_code = ANY($1::text[]) GROUP BY i.id`, [liste])).rows : [];
+  const fiili = liste.length ? await opMontajFiili(liste) : new Map();
+  const ekipAdF = await hwMalzeme.ekipAdlari(pool);
+  const m = aracOperasyon.aracMalzemeleri({ islemler: isl, plaka: arac.plaka, ekipler: [...gunO.ekipSet], fiili, ekipAd: ekipAdF });
+  // Defterde kaydı olmayan işler: "depoda" varsayılmaz — Rollout'ta yalnız geliş tarihi varsa "konum teyidi bekliyor"
+  const kayitli = new Set(isl.map((x) => x.site_code));
+  const kayitsiz = liste.filter((k) => !kayitli.has(k)).map((k) => { const r = kapsam.rows.get(k); const gel = r?.malzeme_gelis_tarihi || r?.enh_malzeme_gelis_tarihi;
+    return { site_code: k, fiziksel_id: sahaKimlik.fizikselSaha(k)?.fiziksel_id || null, durum: gel ? "KONUM_TEYIDI" : "KAYIT_YOK",
+      durum_ad: gel ? `Konum teyidi bekliyor (eski kayıt: geliş ${aracOperasyon.gunStr(gel)})` : "Malzeme kaydı yok — depoda olduğu varsayılmaz" }; });
+  return { ...m, kayitsiz, arac_baglantisi_hazir: aracKol, ekipler: [...gunO.ekipSet].map((e) => ({ ekip_no: e, ad: gunO.ekipAd.get(e) || `Ekip ${e}` })) };
+}
+// Plan (gün / hafta) — her iş kodu için fiilî durum, QC (ayrı alan), malzeme durumu ve açık issue
+async function aracPlanOku(req, arac, bas, bit) {
+  const o = await aracIsleriOku(req, arac, bas, bit);
+  const kodlar = [...new Set([...o.liste, ...o.devreden].flatMap((x) => (x.site_codes || []).map((k) => String(k).replace(/\s+/g, "").toUpperCase())))];
+  const fiili = kodlar.length ? await opMontajFiili(kodlar) : new Map();
+  let malz = new Map(), malzHata = null;
+  try { if (kodlar.length) malz = await hwMalzeme.durumHaritasi(pool, kodlar, { montajMap: fiili }); } catch (e) { malzHata = "Malzeme verisi alınamadı"; }
+  const zengin = (x) => { const g = aracIsGoster(x, o.ekipAd, o.buAracla);
+    g.isler = g.isler.map((i) => { const f = fiili.get(i.is_kodu), md = malz.get(i.is_kodu);
+      return { ...i, fiili: f ? { kod: f.kod, ad: f.ad, baslama: f.baslama, bitis: f.bitis, kaynak: f.kaynak } : null,
+        qc: f?.qc || null, issue: f?.issue || null,
+        malzeme: malzHata ? { hata: malzHata } : md ? { konum: md.konum, etiket: md.etiket, teslim_ad: md.teslim_ad } : null }; });
+    return g; };
+  return { o, isler: o.liste.map(zengin), devreden: o.devreden.map(zengin), malzeme_hata: malzHata };
+}
+
+// ── Sade araç kartı ──
+app.get("/hr/arac-takip/:id/ozet", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    const a = (await pool.query(`SELECT id, plaka, marka, model, yil, surucu, firma FROM araclar WHERE id = $1`, [arac.id])).rows[0];
+    const bugun = trBugun();
+    const trio = await aracTrio(arac);
+    const canli = trio.hata ? { kod: "BAGLANTI_YOK", ad: "Bağlantı yok", hata: trio.hata } : !trio.yapilandirildi ? { kod: "BAGLANTI_YOK", ad: "Araç takip hizmeti yapılandırılmamış" } : canliDurum(trio.kayit);
+    let gunKm = null, kmHata = null;
+    if (trio.kayit?.trio_id) {
+      try { const g = await aracTakip.aracGecmisi({ trioId: trio.kayit.trio_id, bas: bugun, bit: bugun }); if (g.ok) gunKm = g.gunler?.[0] || null; else kmHata = g.error; }
+      catch (e) { kmHata = e.message; }
+    }
+    const o = await aracIsleriOku(req, arac, bugun, bugun);
+    let malz = null;
+    try { malz = await aracMalzemeOku(req, arac, bugun); } catch (e) { malz = { hata: "Malzeme verisi alınamadı" }; }
+    const ekipler = [...o.ekipSet].map((e) => ({ ekip_no: e, ad: o.ekipAd.get(e) || `Ekip ${e}` }));
+    res.json({ ok: true, arac: { id: a.id, plaka: a.plaka, marka: a.marka || null, model: a.model || null, yil: a.yil || null, firma: a.firma || null },
+      canli: { ...canli, hiz: trio.kayit?.hiz ?? null, kontak: trio.kayit?.kontak || null, son_sinyal: trio.kayit?.son_sinyal || null, lat: trio.kayit?.lat ?? null, lng: trio.kayit?.lng ?? null,
+        adres: trio.kayit?.adres || null, kaynak_zaman: trio.zaman || null },
+      ekip: ekipler.length ? { ekipler, kaynak: "Bugünkü iş atamasındaki araç plakası (tarihli)" } : { ekipler: [], mesaj: "Araç–ekip bağlantısı doğrulanamadı (bugün bu plakayla planlı iş yok)" },
+      surucu: { tarihli: null, kart: a.surucu || null, not: "Tarihli sürücü kaydı yok; araç kartındaki sürücü tarihsiz bilgidir" },
+      bugun: { tarih: bugun, km: gunKm ? (gunKm.veri ? gunKm.km : null) : null, km_veri: gunKm ? !!gunKm.veri : false, km_hata: kmHata,
+        hareket_sn: gunKm?.hareket_sn ?? null, rolanti_sn: gunKm?.rolanti_sn ?? null, kontak_kapali_sn: gunKm?.kontak_kapali_sn ?? null, devam_ediyor: true,
+        is_sayisi: o.liste.length, malzemeli_is: malz?.kurulum_yok ? null : malz?.hata ? null : malz?.ozet?.malzemeli_is ?? 0,
+        malzeme_not: malz?.kurulum_yok ? "Malzeme defteri kurulmamış" : malz?.hata || (malz && !malz.arac_baglantisi_hazir ? "Araç bağlantısı kurulumu bekliyor (migration)" : null) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Yakıt analizi (T0 = 1 Kasım 2026, sunucuda) ──
+app.get("/hr/arac-takip/:id/yakit-analizi", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    const bugun = trBugun(), esik = aracOperasyon.esikler();
+    const d = aracOperasyon.donemCoz({ donem: req.query.donem || "7", bas: req.query.bas, bit: req.query.bit, bugun });
+    if (!d.ok) return res.status(400).json({ ok: false, error: d.error });
+    const tutarGor = avansTamGorus(req);
+    // Km: kümülatif seri için T0'dan (en çok 92 gün geriye) bitişe kadar
+    const kmBas = [d.t0, aracTakip.gunEkle(d.bit, -(aracTakip.GECMIS_AZAMI_GUN - 1))].sort().pop();
+    let km = null, kmHata = null;
+    const trio = await aracTrio(arac);
+    if (trio.hata) kmHata = trio.hata;
+    else if (!trio.yapilandirildi) kmHata = "Araç takip hizmeti yapılandırılmamış";
+    else if (!trio.kayit?.trio_id) kmHata = "Bu plaka Triomobil hesabında bulunamadı";
+    else { try { const g = await aracTakip.aracGecmisi({ trioId: trio.kayit.trio_id, bas: kmBas, bit: d.bit }); if (g.ok) km = g; else kmHata = g.error; } catch (e) { kmHata = e.message; } }
+    // Yakıt avansı (plaka normalize eşleşmesi; kapsam iş avansı listesiyle aynı). Hata → "veri alınamadı" (sıfır değil)
+    const k = altMarkaKapsam(req);
+    const sart = [`upper(regexp_replace(COALESCE(t.plaka,''),'[^0-9A-Za-z]','','g')) = $1`, `COALESCE(t.gider_turu,'') ~* 'yak[ıi]t'`,
+      `(t.odeme_tarihi BETWEEN $2::date AND $3::date OR (t.odeme_tarihi IS NULL AND t.tarih BETWEEN $2::date AND $3::date))`];
+    if (k) {
+      sart.push(`t.tarih >= DATE '${k.devir}'`);
+      sart.push(`(UPPER(COALESCE(t.firma,'')) = '${k.kod}' OR (COALESCE(t.firma,'') = '' AND UPPER(COALESCE(p.marka,'ERC')) = ANY('{${k.bordro.join(",")}}'::text[])))`);
+    }
+    if (!pmKisiselGorur(req)) sart.push(`NOT ${pmAvansSahibiSql("t", "p")}`);
+    let avRows;
+    try {
+      avRows = (await pool.query(`SELECT t.id, t.tarih, t.odeme_tarihi, t.tutar, t.odenen_tutar, t.durum, t.gider_turu, t.arac_km, t.personel_id, t.talep_eden_email,
+          NULLIF(t.aciklama,'') AS aciklama, COALESCE(p.ad_soyad, t.talep_eden_ad) AS kisi
+        FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id WHERE ${sart.join(" AND ")} ORDER BY t.id`, [AKTR(arac.plaka), d.t0, d.bit])).rows;
+    } catch (e) { return res.status(500).json({ ok: false, error: "Yakıt avansı verisi alınamadı", ayrinti: e.message }); }
+    const avans = aracOperasyon.avansSec(avRows);
+    if (!tutarGor) { avans.sayilan = avans.sayilan.map((a) => ({ ...a, kisi: null, aciklama: null })); }
+    // Referans + fiyat (tablolar migration ile kurulur; yoksa "kurulum bekliyor")
+    const kurulum = { referans: await tabloVar("arac_tuketim_referans"), fiyat: await tabloVar("yakit_fiyat_referans") };
+    let referans = null, fiyatlar = [];
+    if (kurulum.referans) referans = (await pool.query(`SELECT * FROM arac_tuketim_referans WHERE arac_id = $1 AND durum = 'ONAYLI' LIMIT 1`, [arac.id])).rows[0] || null;
+    if (kurulum.fiyat) fiyatlar = (await pool.query(`SELECT * FROM yakit_fiyat_referans WHERE NOT iptal AND gecerlilik_tarihi <= $1::date AND gecerlilik_tarihi >= $2::date - ($3 || ' days')::interval`,
+      [d.bit, d.t0, String(esik.fiyat_azami_yas_gun)])).rows;
+    const an = aracOperasyon.yakitAnalizi({ donem: d, km, avans, referans, fiyatlar, tutarGor, esik, kmHata });
+    res.json({ ok: true, arac, donem: { ...d, gunler: undefined }, tutar_gor: tutarGor, kurulum,
+      km_kaynak: km ? { kaynak: km.kaynak, dogrulama: km.dogrulama, ilk_veri_gunu: km.ilk_veri_gunu } : null, km_hata: kmHata,
+      referans: referans ? { id: Number(referans.id), l100: Number(referans.l100), olcum_standardi: referans.olcum_standardi, eslesen_versiyon: referans.eslesen_versiyon,
+        model_yili: referans.model_yili, motor: referans.motor, yakit_turu: referans.yakit_turu, sanziman: referans.sanziman, govde_versiyon: referans.govde_versiyon,
+        kaynak_url: referans.kaynak_url, belge_tarihi: aracOperasyon.gunStr(referans.belge_tarihi), dogrulama_tarihi: referans.dogrulama_tarihi, dogrulayan: referans.dogrulayan_email,
+        guven: referans.guven } : null,
+      ...an });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Tüketim referansı: liste / öneri (elle ya da yapay zekâ) / onay / ret ──
+// Yazma: araç kayıtlarını değiştirme yetkisi (ikYazmaYetkili) + araç kapsamı. Yapay zekâ önerisi ONERI olarak kaydedilir;
+// kullanıcı görmeden ve onaylamadan analizde kullanılmaz. Onaylanan yeni kayıt eski onaylıyı IPTAL eder (silinmez).
+const refYazmaKapisi = (req, res) => { if (!ikYazmaYetkili(req.user)) { res.status(403).json({ ok: false, error: "Tüketim referansını değiştirme yetkiniz yok" }); return false; } return true; };
+const REF_ALANLAR = ["model_yili", "motor", "yakit_turu", "sanziman", "govde_versiyon", "l100", "olcum_standardi", "eslesen_versiyon", "kaynak_url", "belge_tarihi", "guven"];
+function refDogrula(b) {
+  const x = {}; for (const f of REF_ALANLAR) x[f] = b?.[f] === "" || b?.[f] === undefined ? null : b[f];
+  const eksik = [];
+  x.model_yili = x.model_yili ? Number(x.model_yili) : null; if (!x.model_yili || x.model_yili < 1990 || x.model_yili > 2100) eksik.push("model yılı");
+  for (const [f, ad] of [["motor", "motor / hacim / güç"], ["yakit_turu", "yakıt türü"], ["sanziman", "şanzıman"], ["govde_versiyon", "gövde / versiyon"], ["eslesen_versiyon", "belgede eşleşen versiyon"]])
+    if (!String(x[f] || "").trim()) eksik.push(ad); else x[f] = String(x[f]).trim().slice(0, 200);
+  x.l100 = x.l100 === null ? null : Number(String(x.l100).replace(",", ".")); if (!(x.l100 > 1 && x.l100 < 40)) eksik.push("resmî L/100 km (1–40)");
+  if (!["WLTP", "NEDC"].includes(String(x.olcum_standardi || "").toUpperCase())) eksik.push("ölçüm standardı (WLTP / NEDC)"); else x.olcum_standardi = String(x.olcum_standardi).toUpperCase();
+  if (!/^https:\/\/[^\s]+$/i.test(String(x.kaynak_url || ""))) eksik.push("kaynak bağlantısı (https)");
+  x.belge_tarihi = isoGunMu(x.belge_tarihi) ? x.belge_tarihi : null;
+  x.guven = ["YUKSEK", "ORTA", "DUSUK"].includes(String(x.guven || "").toUpperCase()) ? String(x.guven).toUpperCase() : null;
+  x.yakit_turu = x.yakit_turu ? String(x.yakit_turu).toUpperCase().replace("İ", "I").replace("DİZEL", "DIZEL") : null;
+  return { x, eksik };
+}
+app.get("/hr/arac-takip/:id/tuketim-referans", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    if (!(await tabloVar("arac_tuketim_referans"))) return res.json({ ok: true, kurulum_yok: true, kayitlar: [], yazma: ikYazmaYetkili(req.user) });
+    const a = (await pool.query(`SELECT id, plaka, marka, model, yil FROM araclar WHERE id = $1`, [arac.id])).rows[0];
+    const r = (await pool.query(`SELECT * FROM arac_tuketim_referans WHERE arac_id = $1 ORDER BY created_at DESC LIMIT 20`, [arac.id])).rows;
+    res.json({ ok: true, arac: a, kayitlar: r.map((x) => ({ ...x, id: Number(x.id), l100: x.l100 === null ? null : Number(x.l100), belge_tarihi: aracOperasyon.gunStr(x.belge_tarihi), oneri_ham: undefined })),
+      yazma: ikYazmaYetkili(req.user), yapay_zeka: aracReferansAi.yapilandirildi() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/arac-takip/:id/tuketim-referans", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    if (!refYazmaKapisi(req, res)) return;
+    if (!(await tabloVar("arac_tuketim_referans"))) return res.status(409).json({ ok: false, error: "Tüketim referansı tablosu kurulmamış (migration 2026-11-05 bekliyor)" });
+    const { x, eksik } = refDogrula(req.body);
+    if (eksik.length) return res.status(400).json({ ok: false, error: `Eksik / hatalı alan: ${eksik.join(", ")}`, eksik });
+    const a = (await pool.query(`SELECT marka, model FROM araclar WHERE id = $1`, [arac.id])).rows[0] || {};
+    const r = await pool.query(`INSERT INTO arac_tuketim_referans (arac_id, plaka, marka, model, ${REF_ALANLAR.join(", ")}, durum, oneri_kaynagi, oneren_email)
+      VALUES ($1,$2,$3,$4,${REF_ALANLAR.map((_, i) => `$${i + 5}`).join(",")}, 'ONERI', 'MANUEL', $${REF_ALANLAR.length + 5}) RETURNING id`,
+      [arac.id, arac.plaka, a.marka || null, a.model || null, ...REF_ALANLAR.map((f) => x[f]), String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true, id: Number(r.rows[0].id), durum: "ONERI", mesaj: "Öneri kaydedildi; onaylanınca yakıt analizinde kullanılır" });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/arac-takip/:id/tuketim-referans/yapay-zeka", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    if (!refYazmaKapisi(req, res)) return;
+    if (!(await tabloVar("arac_tuketim_referans"))) return res.status(409).json({ ok: false, error: "Tüketim referansı tablosu kurulmamış (migration 2026-11-05 bekliyor)" });
+    const a = (await pool.query(`SELECT id, plaka, marka, model, yil FROM araclar WHERE id = $1`, [arac.id])).rows[0];
+    // Araç bilgisi eksikse yapay zekâya gidilmez: eski / farklı versiyon tüketimi uygulanmasın
+    const b = req.body || {};
+    const bilgi = { marka: a.marka, model: a.model, model_yili: Number(b.model_yili || a.yil) || null, motor: String(b.motor || "").trim() || null,
+      yakit_turu: String(b.yakit_turu || "").trim() || null, sanziman: String(b.sanziman || "").trim() || null, govde_versiyon: String(b.govde_versiyon || "").trim() || null };
+    const eksik = Object.entries({ marka: "marka", model: "model", model_yili: "model yılı", motor: "motor / hacim / güç", yakit_turu: "yakıt türü", sanziman: "şanzıman", govde_versiyon: "gövde / versiyon" })
+      .filter(([f]) => !bilgi[f]).map(([, ad]) => ad);
+    if (eksik.length) return res.status(400).json({ ok: false, error: `Araştırma için araç bilgisi eksik: ${eksik.join(", ")}. Tüketim referansı doğrulanamadı.`, eksik });
+    let o;
+    try { o = await aracReferansAi.oner(bilgi); }
+    catch (e) { return res.status(e.http || 502).json({ ok: false, error: e.message }); }
+    if (!o.bulundu) return res.json({ ok: true, bulundu: false, mesaj: o.neden || "Resmî kaynakta uygun tüketim değeri bulunamadı. Tüketim referansı doğrulanamadı." });
+    const { x, eksik: e2 } = refDogrula({ ...bilgi, ...o.oneri });
+    if (e2.length) return res.json({ ok: true, bulundu: false, mesaj: `Yapay zekâ önerisi eksik / doğrulanamadı (${e2.join(", ")}); kaydedilmedi.`, ham: o.oneri });
+    const r = await pool.query(`INSERT INTO arac_tuketim_referans (arac_id, plaka, marka, model, ${REF_ALANLAR.join(", ")}, durum, oneri_kaynagi, oneri_ham, oneren_email)
+      VALUES ($1,$2,$3,$4,${REF_ALANLAR.map((_, i) => `$${i + 5}`).join(",")}, 'ONERI', 'YAPAY_ZEKA', $${REF_ALANLAR.length + 5}, $${REF_ALANLAR.length + 6}) RETURNING id`,
+      [a.id, a.plaka, a.marka, a.model, ...REF_ALANLAR.map((f) => x[f]), JSON.stringify(o.ham || o.oneri), String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true, bulundu: true, id: Number(r.rows[0].id), oneri: x, mesaj: "Yapay zekâ önerisi kaydedildi (ONAY BEKLİYOR). Kaynağı açıp kontrol ettikten sonra onaylayın." });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/arac-takip/:id/tuketim-referans/:rid/:islem", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    if (!refYazmaKapisi(req, res)) return;
+    if (!["onayla", "reddet"].includes(req.params.islem)) return res.status(404).json({ ok: false, error: "Geçersiz işlem" });
+    if (!(await tabloVar("arac_tuketim_referans"))) return res.status(409).json({ ok: false, error: "Tüketim referansı tablosu kurulmamış (migration 2026-11-05 bekliyor)" });
+    const kim = String(req.user?.email || "").toLowerCase();
+    const c = await pool.connect();
+    try {
+      await c.query("BEGIN");
+      const r = (await c.query(`SELECT * FROM arac_tuketim_referans WHERE id = $1 AND arac_id = $2 FOR UPDATE`, [Number(req.params.rid) || 0, arac.id])).rows[0];
+      if (!r) { await c.query("ROLLBACK"); return res.status(404).json({ ok: false, error: "Referans bulunamadı" }); }
+      if (r.durum !== "ONERI") { await c.query("ROLLBACK"); return res.status(409).json({ ok: false, error: `Bu kayıt ${r.durum} durumunda` }); }
+      if (req.params.islem === "reddet") await c.query(`UPDATE arac_tuketim_referans SET durum = 'REDDEDILDI', dogrulayan_email = $2, dogrulama_tarihi = now(), iptal_gerekce = $3 WHERE id = $1`,
+        [r.id, kim, String(req.body?.gerekce || "").slice(0, 500) || null]);
+      else {
+        await c.query(`UPDATE arac_tuketim_referans SET durum = 'IPTAL', iptal_gerekce = $2 WHERE arac_id = $1 AND durum = 'ONAYLI'`, [arac.id, `Yeni referans #${r.id} onaylandı`]);
+        await c.query(`UPDATE arac_tuketim_referans SET durum = 'ONAYLI', dogrulayan_email = $2, dogrulama_tarihi = now() WHERE id = $1`, [r.id, kim]);
+      }
+      await c.query("COMMIT");
+    } catch (e) { await c.query("ROLLBACK").catch(() => {}); throw e; } finally { c.release(); }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Yakıt birim fiyatı (tarihli, kaynaklı; ortak) — okuma araç takibi yetkisiyle, yazma ana firma araç yöneticisi ──
+app.get("/hr/yakit-fiyat", aracTakipOkuma, async (req, res) => {
+  try {
+    if (!(await tabloVar("yakit_fiyat_referans"))) return res.json({ ok: true, kurulum_yok: true, kayitlar: [] });
+    const r = (await pool.query(`SELECT * FROM yakit_fiyat_referans ORDER BY gecerlilik_tarihi DESC, id DESC LIMIT 200`)).rows;
+    res.json({ ok: true, kayitlar: r.map((x) => ({ ...x, id: Number(x.id), birim_fiyat: Number(x.birim_fiyat), gecerlilik_tarihi: aracOperasyon.gunStr(x.gecerlilik_tarihi) })),
+      yazma: ikYazmaYetkili(req.user) && !altMarkaKapsam(req) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/yakit-fiyat", aracTakipOkuma, async (req, res) => {
+  try {
+    if (!(ikYazmaYetkili(req.user) && !altMarkaKapsam(req))) return res.status(403).json({ ok: false, error: "Yakıt fiyatı girme yetkiniz yok" });
+    if (!(await tabloVar("yakit_fiyat_referans"))) return res.status(409).json({ ok: false, error: "Yakıt fiyatı tablosu kurulmamış (migration 2026-11-05 bekliyor)" });
+    const b = req.body || {};
+    const fiyat = Number(String(b.birim_fiyat ?? "").replace(",", "."));
+    const tur = String(b.yakit_turu || "").toUpperCase();
+    if (!isoGunMu(b.gecerlilik_tarihi) || b.gecerlilik_tarihi > trBugun()) return res.status(400).json({ ok: false, error: "Geçerlilik tarihi girin (bugünden ileri olamaz)" });
+    if (!["DIZEL", "BENZIN", "LPG"].includes(tur)) return res.status(400).json({ ok: false, error: "Yakıt türü: DIZEL, BENZIN ya da LPG" });
+    if (!(fiyat > 1 && fiyat < 1000)) return res.status(400).json({ ok: false, error: "Birim fiyat (TL/litre) geçersiz" });
+    if (String(b.kaynak_ad || "").trim().length < 3) return res.status(400).json({ ok: false, error: "Fiyatın kaynağını yazın (kaynağı olmayan fiyat girilmez)" });
+    if (b.kaynak_url && !/^https?:\/\//i.test(String(b.kaynak_url))) return res.status(400).json({ ok: false, error: "Kaynak bağlantısı http(s) olmalı" });
+    const r = await pool.query(`INSERT INTO yakit_fiyat_referans (gecerlilik_tarihi, yakit_turu, il, birim_fiyat, kaynak_ad, kaynak_url, giren_email) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [b.gecerlilik_tarihi, tur, String(b.il || "").trim() || null, fiyat, String(b.kaynak_ad).trim().slice(0, 200), b.kaynak_url ? String(b.kaynak_url).slice(0, 1000) : null, String(req.user?.email || "").toLowerCase()]);
+    res.json({ ok: true, id: Number(r.rows[0].id) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post("/hr/yakit-fiyat/:id/iptal", aracTakipOkuma, async (req, res) => {
+  try {
+    if (!(ikYazmaYetkili(req.user) && !altMarkaKapsam(req))) return res.status(403).json({ ok: false, error: "Yakıt fiyatı değiştirme yetkiniz yok" });
+    const g = String(req.body?.gerekce || "").trim();
+    if (g.length < 3) return res.status(400).json({ ok: false, error: "İptal gerekçesini yazın" });
+    const r = await pool.query(`UPDATE yakit_fiyat_referans SET iptal = true, iptal_gerekce = $2 WHERE id = $1 AND NOT iptal RETURNING id`, [Number(req.params.id) || 0, g.slice(0, 500)]);
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: "Kayıt bulunamadı ya da zaten iptal" });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Canlı İzle: bugünkü (ya da seçilen günün) güzergâhı — yalnız seçili araç; km sürüş özetinden ──
+app.get("/hr/arac-takip/:id/guzergah", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    const gun = isoGunMu(req.query.gun) ? String(req.query.gun) : trBugun();
+    const trio = await aracTrio(arac);
+    if (trio.hata) return res.status(502).json({ ok: false, error: trio.hata });
+    if (!trio.yapilandirildi) return res.json({ ok: true, yapilandirildi: false });
+    if (!trio.kayit?.trio_id) return res.json({ ok: true, yapilandirildi: true, trio_yok: true, mesaj: "Bu plaka Triomobil hesabında bulunamadı" });
+    let g;
+    try { g = await aracTakip.aracGuzergah({ trioId: trio.kayit.trio_id, gun }); } catch (e) { return res.status(502).json({ ok: false, error: e.message }); }
+    if (!g.ok) return res.status(400).json(g);
+    res.json({ ...g, arac, canli: { ...canliDurum(trio.kayit), hiz: trio.kayit.hiz, kontak: trio.kayit.kontak, son_sinyal: trio.kayit.son_sinyal, lat: trio.kayit.lat, lng: trio.kayit.lng, adres: trio.kayit.adres } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Araçtaki malzemeler ──
+app.get("/hr/arac-takip/:id/malzeme", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    const gun = isoGunMu(req.query.gun) ? String(req.query.gun) : trBugun();
+    let m;
+    try { m = await aracMalzemeOku(req, arac, gun); } catch (e) { return res.status(500).json({ ok: false, error: "Malzeme verisi alınamadı", ayrinti: e.message }); }
+    if (m.kurulum_yok) return res.json({ ok: true, kurulum_yok: true, mesaj: "HW malzeme defteri kurulmamış" });
+    res.json({ ok: true, arac, gun, ...m,
+      kural: "Tek kaynak HW malzeme hareket defteri. İş ataması fiziksel teslim değildir. Ekipteki malzeme, yalnız teslim / devir kaydında bu araç seçildiyse “araçta” sayılır." });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Plan: ?gun= (bugünkü plan) ya da ?hafta= (haftalık plan) ──
+app.get("/hr/arac-takip/:id/plan", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    let bas, bit, tur;
+    if (isoGunMu(req.query.hafta)) { [bas, bit] = haftaAraligi(String(req.query.hafta)); tur = "HAFTA"; }
+    else { bas = bit = isoGunMu(req.query.gun) ? String(req.query.gun) : trBugun(); tur = "GUN"; }
+    const p = await aracPlanOku(req, arac, bas, bit);
+    res.json({ ok: true, arac, tur, bas, bit, ekipler: [...p.o.ekipSet].map((e) => ({ ekip_no: e, ad: p.o.ekipAd.get(e) || `Ekip ${e}` })),
+      eslesme_yok: p.o.ekipSet.size === 0 && !p.isler.length, isler: p.isler, devreden: tur === "HAFTA" ? p.devreden : [], malzeme_hata: p.malzeme_hata,
+      kural: "Plan, aracın sahaya gittiğinin kanıtı değildir. GPS ile sahaya yaklaşmak montaj başladı / bitti sayılmaz; fiilî durum ekip bildirimi, iş ataması ve Rollout tarihlerinden gelir. QC ayrı alandır." });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── Ekip ve personel (seçilen güne göre) — yalnız ad, görev, şef ve şefin iletişimi; maaş / kimlik / özel bilgi YOK ──
+app.get("/hr/arac-takip/:id/ekip", aracTakipOkuma, async (req, res) => {
+  try {
+    const arac = await aracDetayKapisi(req, res); if (!arac) return;
+    const gun = isoGunMu(req.query.gun) ? String(req.query.gun) : trBugun();
+    const o = await aracIsleriOku(req, arac, gun, gun);
+    const k = altMarkaKapsam(req);
+    const uyelikVar = await tabloVar("ekip_uyelik");
+    const ekipler = [];
+    for (const no of o.ekipSet) {
+      const e = (await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma, sef_personel_id FROM ekipler WHERE ekip_no = $1`, [no])).rows[0];
+      if (!e) continue;
+      let uyeler = [], kaynak;
+      const tarihli = uyelikVar ? (await pool.query(`SELECT p.id, p.ad_soyad, p.unvan, p.marka, to_jsonb(p)->>'telefon' AS telefon FROM ekip_uyelik u JOIN personel p ON p.id = u.personel_id
+          WHERE u.ekip_no = $1 AND (u.baslangic IS NULL OR u.baslangic <= $2::date) AND (u.bitis IS NULL OR u.bitis >= $2::date)`, [no, gun])).rows : [];
+      const gecmisVar = uyelikVar && (await pool.query(`SELECT 1 FROM ekip_uyelik WHERE ekip_no = $1 LIMIT 1`, [no])).rows.length > 0;
+      if (gecmisVar) { uyeler = tarihli; kaynak = `Tarihli ekip üyeliği (${gun})`; }
+      else {
+        uyeler = (await pool.query(`SELECT id, ad_soyad, unvan, marka, to_jsonb(p)->>'telefon' AS telefon FROM personel p WHERE aktif = true AND TRIM(COALESCE(ekip_bilgisi,'')) = $1`, [String(no)])).rows;
+        kaynak = gun === trBugun() ? "Güncel personel kaydı (tarihli üyelik geçmişi yok)" : "Tarihli üyelik geçmişi yok — güncel üyeler gösteriliyor; seçilen gündeki üyelik doğrulanamadı";
+      }
+      if (k) uyeler = uyeler.filter((p) => k.bordro.map((x) => String(x).toUpperCase()).includes(String(p.marka || "ERC").toUpperCase()));
+      const sefId = e.sef_personel_id ? Number(e.sef_personel_id) : null;
+      const sefUnvan = (p) => /şef|sef/i.test(String(p.unvan || ""));
+      const sef = uyeler.find((p) => Number(p.id) === sefId) || (!sefId ? uyeler.find(sefUnvan) : null) || null;
+      ekipler.push({ ekip_no: Number(e.ekip_no), ad: e.ad || `Ekip ${e.ekip_no}`, bolge: e.bolge || null, firma: e.bagli_firma || null, kaynak,
+        sef: sef ? { ad: sef.ad_soyad, telefon: sef.telefon || null, kaynak: sefId ? "Ekip şefi kaydı" : "Ünvanında şef geçen üye" } : null,
+        uyeler: uyeler.sort((a, b) => (Number(b.id === sef?.id) - Number(a.id === sef?.id)) || String(a.ad_soyad).localeCompare(String(b.ad_soyad), "tr"))
+          .map((p) => ({ ad: p.ad_soyad, gorev: p.unvan || null, sef: sef ? p.id === sef.id : false })) });
+    }
+    res.json({ ok: true, arac, gun, ekipler, eslesme_yok: !ekipler.length,
+      not: "Liste ekip üyeleridir; kişilerin şu an araçta olduğu kanıtlanmadıkça “araçta” denmez. Maaş, kimlik ve özel bilgiler gösterilmez." });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

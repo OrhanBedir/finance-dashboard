@@ -104,12 +104,16 @@ async function semaKur(pool) {
     yazilan_gelis DATE, yazilan_status TEXT, celiski TEXT, updated_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (site_code, kapsam))`);
   // Kayıtlar silinmez / değiştirilmez: yalnız ters_islem_id bir kez doldurulabilir; başlık düzeltmesi (açıklama, belge,
   // teslim tipi, geliş tarihi, eksik açıklaması) hw_malzeme_gecmis'e yazılarak yapılır — miktar ve lokasyon değişmez.
+  // 05.11.2026: araç bağlantısı kolonları (arac_plaka / arac_id) yalnız migrations/2026-11-05_arac_operasyon.sql ile eklenir;
+  // varsa koruma onları da kilitler (açılışta fonksiyon yeniden yazıldığında migration'ın koruması kaybolmasın)
+  const aracKol = await aracKolonuVar(pool, true);
   await q(`CREATE OR REPLACE FUNCTION hw_malzeme_islem_koru() RETURNS trigger LANGUAGE plpgsql AS $f$
     BEGIN
       IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'hw_malzeme_islem kayıtları silinemez (ters kayıt kullanın)'; END IF;
       IF NEW.id <> OLD.id OR NEW.tur <> OLD.tur OR NEW.site_code <> OLD.site_code OR NEW.kaynak_tip <> OLD.kaynak_tip
          OR NEW.kaynak_id IS DISTINCT FROM OLD.kaynak_id OR NEW.hedef_tip <> OLD.hedef_tip OR NEW.hedef_id IS DISTINCT FROM OLD.hedef_id
          OR NEW.kapsam <> OLD.kapsam OR NEW.ters_edilen_id IS DISTINCT FROM OLD.ters_edilen_id OR NEW.created_at <> OLD.created_at
+         ${aracKol ? "OR NEW.arac_plaka IS DISTINCT FROM OLD.arac_plaka OR NEW.arac_id IS DISTINCT FROM OLD.arac_id" : ""}
          OR (OLD.ters_islem_id IS NOT NULL AND NEW.ters_islem_id IS DISTINCT FROM OLD.ters_islem_id) THEN
         RAISE EXCEPTION 'hw_malzeme_islem: miktar / lokasyon / tür değiştirilemez (ters kayıt kullanın)';
       END IF;
@@ -123,6 +127,15 @@ async function semaKur(pool) {
   await q(`CREATE TRIGGER hw_malzeme_kalem_koru_trg BEFORE UPDATE OR DELETE ON hw_malzeme_islem_kalem FOR EACH ROW EXECUTE FUNCTION hw_malzeme_kalem_koru()`);
   for (const t of ["hw_malzeme_islem", "hw_malzeme_islem_kalem", "hw_malzeme_gecmis", "hw_malzeme_istek", "hw_malzeme_rollout_yansima"])
     await q(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`);
+}
+
+// Araç bağlantısı kolonu (migration 2026-11-05) var mı — 5 dk önbellek; yoksa teslim / devirde plaka kabul edilmez
+let _aracKol = null;
+async function aracKolonuVar(db, tazele = false) {
+  if (!tazele && _aracKol && Date.now() - _aracKol.t < 300000) return _aracKol.v;
+  const r = await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'hw_malzeme_islem' AND column_name = 'arac_plaka'`).catch(() => ({ rows: [] }));
+  _aracKol = { t: Date.now(), v: r.rows.length > 0 };
+  return _aracKol.v;
 }
 
 // ── Bakiye: iş kodu → lokasyon → kalem (hareketlerden) ─────────────────────────────────────────────────────────
@@ -313,12 +326,16 @@ function kur(app, deps) {
   async function islemEkle(client, req, x) {
     const y = yapan(req);
     const fiz = deps.fizikselSaha(x.site_code)?.fiziksel_id || null;
+    // Araç bağlantısı (teslim / devir): kolon migration'la eklendiyse kayıtla BİRLİKTE yazılır (sonradan değiştirilemez)
+    const arac = x.arac && await aracKolonuVar(client) ? x.arac : null;
+    const ekKol = arac ? ", arac_plaka, arac_id" : "", ekDeg = arac ? ",$23,$24" : "";
     const r = await client.query(`INSERT INTO hw_malzeme_islem (tur, site_code, fiziksel_id, kapsam, kaynak_tip, kaynak_id, hedef_tip, hedef_id, islem_tarihi, teslim_tipi,
-        eksik_aciklama, aciklama, belgeler, eski_kayit_teyidi, ters_edilen_id, duzeltilen_islem_id, gerekce, kaydeden_user_id, kaydeden_email, kaydeden_ad, kanal, istek_anahtari)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+        eksik_aciklama, aciklama, belgeler, eski_kayit_teyidi, ters_edilen_id, duzeltilen_islem_id, gerekce, kaydeden_user_id, kaydeden_email, kaydeden_ad, kanal, istek_anahtari${ekKol})
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22${ekDeg}) RETURNING *`,
       [x.tur, x.site_code, fiz, x.kapsam || "RF", x.kaynak_tip, x.kaynak_id ?? null, x.hedef_tip, x.hedef_id ?? null, x.islem_tarihi || bugun(), x.teslim_tipi || null,
         x.eksik_aciklama || null, x.aciklama || null, JSON.stringify(x.belgeler || []), !!x.eski_kayit_teyidi, x.ters_edilen_id || null, x.duzeltilen_islem_id || null,
-        x.gerekce || null, y.id, y.email, y.ad, temiz(req.headers?.["x-istemci"] || req.body?.kanal || "web", 20), temiz(req.body?.istek_anahtari, 100) || null]);
+        x.gerekce || null, y.id, y.email, y.ad, temiz(req.headers?.["x-istemci"] || req.body?.kanal || "web", 20), temiz(req.body?.istek_anahtari, 100) || null,
+        ...(arac ? [arac.plaka, arac.id] : [])]);
     const isl = r.rows[0];
     for (const k of x.kalemler) await client.query(`INSERT INTO hw_malzeme_islem_kalem (islem_id, anahtar, ad, kod, birim, miktar) VALUES ($1,$2,$3,$4,$5,$6)`,
       [isl.id, k.anahtar, k.ad, k.kod, k.birim, k.miktar]);
@@ -387,7 +404,7 @@ function kur(app, deps) {
           eksik_aciklama: x.eksik_aciklama, aciklama: x.aciklama, belgeler: x.belgeler || [], gerekce: x.gerekce, eski_kayit_teyidi: x.eski_kayit_teyidi,
           ters_edilen_id: x.ters_edilen_id ? Number(x.ters_edilen_id) : null, ters_islem_id: x.ters_islem_id ? Number(x.ters_islem_id) : null,
           duzeltilen_islem_id: x.duzeltilen_islem_id ? Number(x.duzeltilen_islem_id) : null,
-          kaydeden: x.kaydeden_ad || x.kaydeden_email, kanal: x.kanal, zaman: x.created_at,
+          kaydeden: x.kaydeden_ad || x.kaydeden_email, kanal: x.kanal, zaman: x.created_at, arac_plaka: x.arac_plaka || null,
           gecmis: gec.filter((g) => String(g.islem_id) === String(x.id)).map((g) => ({ alan: g.alan, eski: g.eski, yeni: g.yeni, gerekce: g.gerekce, yapan: g.yapan_ad || g.yapan_email, zaman: g.zaman })) })),
         hareket_yetkisi: !!deps.yetki.hareket(req) });
     } catch (e) { hata(res, e); }
@@ -451,15 +468,23 @@ function kur(app, deps) {
         if (kaynak.tip === hedef.tip && kaynak.id === hedef.id) throw new HwHata("Kaynak ve hedef aynı olamaz");
         const tarih = tarihMi(b.tarih) ? b.tarih : bugun();
         if (tarih > bugun()) throw new HwHata("İşlem tarihi bugünden ileri olamaz");
+        // 05.11.2026: teslim / devirde malzemenin yüklendiği araç (isteğe bağlı) — depo sorumlusunun açık seçimi; kapsam sunucuda
+        let arac = null;
+        if (["EKIBE_TESLIM", "DEVIR"].includes(t.tur) && String(b.arac_plaka || "").trim()) {
+          if (!(await aracKolonuVar(pool))) throw new HwHata("Araç bağlantısı için veritabanı kurulumu bekliyor (migration 2026-11-05) — plakasız kaydedin", 409);
+          if (!deps.aracDogrula) throw new HwHata("Araç doğrulaması yapılandırılmamış", 500);
+          arac = await deps.aracDogrula(req, b.arac_plaka);
+          if (!arac) throw new HwHata("Araç bulunamadı ya da erişim kapsamınızda değil", 403);
+        }
         const gerekce = temiz(b.gerekce || b.aciklama, 1000);
         if (t.gerekceZorunlu && gerekce.length < 3) throw new HwHata(t.tur === "DEVIR" ? "Ekipler arası devrin gerekçesini yazın" : "İade gerekçesini yazın");
-        const govde = { kod, kaynak, hedef, tarih, kalemler: Array.isArray(b.kalemler) ? b.kalemler.map((k) => [kalemAnahtari(k), String(k.miktar)]) : "TUMU" };
+        const govde = { kod, kaynak, hedef, tarih, arac: arac?.plaka || null, kalemler: Array.isArray(b.kalemler) ? b.kalemler.map((k) => [kalemAnahtari(k), String(k.miktar)]) : "TUMU" };
         const sonuc = await yaz(req, yol, govde, kod, async (client) => {
           const kalemler = await kaynaktanKalemler(client, kod, lokStr(kaynak.tip, kaynak.id), b.kalemler);
           const isl = await islemEkle(client, req, { tur: t.tur, site_code: kod, kaynak_tip: kaynak.tip, kaynak_id: kaynak.id, hedef_tip: hedef.tip, hedef_id: hedef.id,
-            islem_tarihi: tarih, aciklama: temiz(b.aciklama, 1000) || null, gerekce: gerekce || null, kalemler,
+            islem_tarihi: tarih, aciklama: temiz(b.aciklama, 1000) || null, gerekce: gerekce || null, kalemler, arac,
             belgeler: (Array.isArray(b.belgeler) ? b.belgeler : []).slice(0, 20).filter((x) => /^https?:\/\//i.test(String(x?.url || ""))).map((x) => ({ url: temiz(x.url, 1000), ad: temiz(x.ad, 200) || null })) });
-          return { ok: true, islem: islemOzet(isl, kalemler) };
+          return { ok: true, islem: { ...islemOzet(isl, kalemler), arac_plaka: isl.arac_plaka || null } };
         });
         res.json(sonuc);
       } catch (e) { hata(res, e); }
@@ -626,7 +651,9 @@ function kur(app, deps) {
       const e = (await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma, COALESCE(aktif,true) AS aktif FROM ekipler WHERE COALESCE(aktif,true) ORDER BY ad`).catch(() => ({ rows: [] }))).rows;
       const ekipler = [];
       for (const x of e) if (await deps.ekipKapsamda(req, x)) ekipler.push({ ekip_no: x.ekip_no, ad: x.ad, bolge: x.bolge, ekip_tipi: ekipTipi(x) });
-      res.json({ ok: true, depolar, ekipler, hareket_yetkisi: !!deps.yetki.hareket(req) });
+      // 05.11.2026: teslim / devirde seçilebilecek araçlar (kapsamdaki aktif araçlar) + kurulum durumu
+      const araclar = deps.aracListesi ? await deps.aracListesi(req).catch(() => []) : [];
+      res.json({ ok: true, depolar, ekipler, araclar, arac_baglantisi_hazir: await aracKolonuVar(pool), hareket_yetkisi: !!deps.yetki.hareket(req) });
     } catch (e) { hata(res, e); }
   });
 }
@@ -637,4 +664,4 @@ function ekipTipi(e) {
   return t === "IC" ? { kod: "INHOUSE", ad: "Inhouse" } : t === "DIS" ? { kod: "TASERON", ad: "Taşeron" } : { kod: "TANIMSIZ", ad: "Ekip tipi tanımlanmadı" };
 }
 
-module.exports = { kur, semaKur, durumHesapla, durumHaritasi, bakiyeler, kalemlerAyristir, kalemAnahtari, miktar, rolloutYansit, ekipTipi, ekipAdlari, HwHata, TUR_TR, LOK_TR };
+module.exports = { kur, semaKur, aracKolonuVar, durumHesapla, durumHaritasi, bakiyeler, kalemlerAyristir, kalemAnahtari, miktar, rolloutYansit, ekipTipi, ekipAdlari, HwHata, TUR_TR, LOK_TR };
