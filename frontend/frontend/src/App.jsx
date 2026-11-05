@@ -8758,6 +8758,11 @@ const adSaat = (iso) => (iso ? new Date(iso).toLocaleTimeString("tr-TR", { hour:
 const adZaman = (iso) => (iso ? new Date(iso).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" }) : "—");
 const adYas = (sn) => (sn === null || sn === undefined ? "" : sn < 90 ? `${sn} sn önce` : sn < 5400 ? `${Math.round(sn / 60)} dk önce` : sn < 172800 ? `${Math.round(sn / 3600)} sa önce` : `${Math.round(sn / 86400)} gün önce`);
 const adProj = (lng, lat) => [(lng - 25.5) * 100 * Math.cos(39 * Math.PI / 180), (42.4 - lat) * 100];
+const AD_GUN_UZUN = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
+// Tarih seçici: tarayıcının yerel biçimi (ör. 11/05/2026) karışıklık yaratmasın diye yanında gg.aa.yyyy + gün adı yazılır
+const AdTarihSec = ({ deger, onDegis, aralik }) => <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+  <input type="date" lang="tr" className="rhmap-btn" value={deger} onChange={(e) => e.target.value && onDegis(e.target.value)} aria-label="Tarih seç" />
+  <b style={{ fontSize: 14 }}>{aralik ? `${adGunTr(aralik[0])} Pzt – ${adGunTr(aralik[1])} Paz` : `${adGunTr(deger)} ${AD_GUN_UZUN[(new Date(`${deger}T12:00:00Z`).getUTCDay() + 6) % 7]}`}</b></span>;
 const AD_DURUM = { ATANDI: "Atandı", BASLADI: "Başladı", DEVAM: "Devam ediyor", ARA_VERILDI: "Ara verildi", QC_BEKLE: "QC bekliyor", TAMAMLANDI: "Tamamlandı" };
 // Durum etiketi: renk tek başına anlam taşımaz — her etikette simge + metin var
 const AD_CANLI = { HAREKET: ["▶", "#166534", "#dcfce7"], ROLANTI: ["⏸", "#92400e", "#fef3c7"], DURUYOR: ["■", "#1e3a5f", "#e0e7ff"], SINYAL_ESKI: ["⚠", "#475569", "#f1f5f9"], BAGLANTI_YOK: ["✕", "#991b1b", "#fee2e2"] };
@@ -8770,8 +8775,25 @@ const AdEtiket = ({ d, metin }) => d ? <span style={{ background: d[2], color: d
 const AdHata = ({ metin }) => <div role="alert" style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 8, padding: "8px 10px", fontSize: 13.5, fontWeight: 700, margin: "8px 0" }}>{metin}</div>;
 
 // Ortak veri çekme: url değişince / yenile() ile; pencere kapanınca (unmount) bekleyen yanıt yok sayılır
+// 05.11.2026: İş Ata / Weekly Plan / tahsis / personel kaydı değişince ("erc:is-atama-degisti") açık panel yeniden yüklenir.
+// Hızlı araç / tarih değişiminde eski yanıt yenisini ezmez (iptal bayrağı + url bağımlılığı).
+if (typeof window !== "undefined" && !window.__ercAtamaFetchKancasi) {
+  window.__ercAtamaFetchKancasi = true;
+  const asil = window.fetch.bind(window);
+  const RX = /\/(is-atama|rollout\/plan|plan-senkron|weekly-plan|hr\/personel|org\/|hr\/arac-takip\/\d+\/tahsis|hr\/araclar)/;
+  window.fetch = async (girdi, secenek = {}) => {
+    const yanit = await asil(girdi, secenek);
+    try {
+      const yontem = String(secenek?.method || (girdi && girdi.method) || "GET").toUpperCase();
+      const url = typeof girdi === "string" ? girdi : girdi?.url || "";
+      if (yontem !== "GET" && yanit.ok && RX.test(url)) setTimeout(() => window.dispatchEvent(new Event("erc:is-atama-degisti")), 0);
+    } catch { /* yok say */ }
+    return yanit;
+  };
+}
 function useAdVeri(url) {
   const [s, setS] = useState({ veri: null, hata: "", yukleniyor: true, n: 0 });
+  useEffect(() => { const f = () => setS((x) => ({ ...x, n: x.n + 1 })); window.addEventListener("erc:is-atama-degisti", f); return () => window.removeEventListener("erc:is-atama-degisti", f); }, []);
   useEffect(() => {
     if (!url) return undefined;
     let iptal = false; setS((x) => ({ ...x, yukleniyor: true, hata: "" }));
@@ -9212,7 +9234,9 @@ function AracPlanIs({ x, veri, onSahaAc, onHaritadaGoster }) {
       <b style={{ fontSize: 14.5 }}>{x.kategori_ad}{x.alt_tip ? ` · ${x.alt_tip}` : ""}</b>
       <span style={{ ...adKucuk, fontWeight: 700 }}>Plan: {x.plan_bas === x.plan_bit ? `${adHaftaGunu(x.plan_bas)} ${adGunTr(x.plan_bas)}` : `${adGunTr(x.plan_bas)} – ${adGunTr(x.plan_bit)}`}{saat ? ` · ${saat}` : ""}</span>
     </div>
-    <div style={adKucuk}>{x.ekip_ad || "Ekip yok"} · {x.arac_baglantisi === "BU_ARAC" ? "araç: bu araç (plan kaydı)" : "araç belirtilmemiş (ekip bu tarihte bu araçla planlı)"} · Atama: <b>{AD_DURUM[x.durum] || x.durum}</b></div>
+    <div style={adKucuk}>Atanan: <b>{(x.personeller || []).map((p) => p.ad).join(", ") || "—"}</b> · Ekip: {x.ekip_ad || "yok"} · Atama: <b>{AD_DURUM[x.durum] || x.durum}</b></div>
+    {x.baglanti && <div style={{ fontSize: 12.5, color: x.baglanti.grup === "DOGRULANMIS" ? "#166534" : x.baglanti.grup === "BELIRSIZ" ? "#9a3412" : "#92400e" }}>
+      {x.baglanti.grup === "DOGRULANMIS" ? "✓ Araç bağlantısı: " : x.baglanti.grup === "BELIRSIZ" ? "⚠ Bağlantı belirsiz: " : "? Teyit bekliyor: "}{x.baglanti.kaynak_ad.join(" · ")}{x.baglanti.aciklama ? ` — ${x.baglanti.aciklama}` : ""}</div>}
     {x.isler.map((i) => { const saha = i.fiziksel_id ? sahaBul(i.fiziksel_id) : null;
       return <div key={i.is_kodu} style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed #e2e8f0" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><b style={{ fontSize: 15 }}>{i.fiziksel_id || "—"}</b><span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13 }}>{i.is_kodu}</span></div>
@@ -9228,30 +9252,67 @@ function AracPlanIs({ x, veri, onSahaAc, onHaritadaGoster }) {
     {x.not && <div style={{ ...adKucuk, marginTop: 6, fontStyle: "italic" }}>Not: {x.not}</div>}
   </div>;
 }
+function AracTahsisBolumu({ arac, adaylar, onDegisti }) {
+  const { veri, hata, yenile } = useAdVeri(`${API_BASE}/hr/arac-takip/${arac.id}/tahsis`);
+  const [f, setF] = useState(null); const [islemHata, setIslemHata] = useState(""); const [mesgul, setMesgul] = useState(false);
+  const kaydet = async () => { setMesgul(true); setIslemHata("");
+    try { await fetchJson(`${API_BASE}/hr/arac-takip/${arac.id}/tahsis`, { method: "POST", body: JSON.stringify(f) }); setF(null); yenile(); onDegisti && onDegisti(); }
+    catch (e) { setIslemHata(e.message); } finally { setMesgul(false); } };
+  const iptal = async (id) => { const g = window.prompt("İptal gerekçesi"); if (!g) return;
+    try { await fetchJson(`${API_BASE}/hr/arac-takip/${arac.id}/tahsis/${id}/iptal`, { method: "POST", body: JSON.stringify({ gerekce: g }) }); yenile(); onDegisti && onDegisti(); } catch (e) { setIslemHata(e.message); } };
+  const etkin = (veri?.kayitlar || []).filter((x) => !x.iptal);
+  return <div style={{ ...adKutu, marginTop: 8, borderColor: "#c7d2fe", background: "#f8faff" }}>
+    <div style={{ fontWeight: 800, color: "#1e3a5f" }}>Tarihli araç tahsisi</div>
+    {hata && <AdHata metin={hata} />}
+    {veri?.kurulum_yok && <div style={adKucuk}>Tarihli tahsis kaydı henüz kurulmadı (veritabanı kurulumu bekliyor). Teyit bekleyen işler bu yüzden doğrulanamıyor.</div>}
+    {etkin.map((t) => <div key={t.id} style={{ fontSize: 13.5 }}>✓ <b>{t.personel_ad || t.ekip_ad || `Ekip ${t.ekip_no}`}</b> · {adGunTr(t.bas)} – {t.bit ? adGunTr(t.bit) : "devam ediyor"}{t.aciklama ? ` · ${t.aciklama}` : ""}
+      {veri.yazma && <button type="button" className="rhmap-btn" style={{ marginLeft: 6, padding: "2px 8px", fontSize: 12 }} onClick={() => iptal(t.id)}>İptal</button>}</div>)}
+    {veri && !veri.kurulum_yok && !etkin.length && <div style={adKucuk}>Bu araç için tarihli tahsis yok.</div>}
+    {veri?.yazma && !f && adaylar.map((a) => <button key={a.id} type="button" className="rhmap-btn" style={{ marginTop: 6, marginRight: 6 }} onClick={() => setF({ personel_id: a.id, ad: a.ad, bas: adTrBugun(), bit: "" })}>
+      {a.ad} bu aracı hangi tarihler arasında kullanıyor?</button>)}
+    {f && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end", marginTop: 6 }}>
+      <b style={{ fontSize: 14 }}>{f.ad}</b>
+      <label><span style={adKucuk}>Başlangıç</span><br /><input type="date" className="rhmap-btn" value={f.bas} onChange={(e) => setF((x) => ({ ...x, bas: e.target.value }))} /> <span style={adKucuk}>{adGunTr(f.bas)}</span></label>
+      <label><span style={adKucuk}>Bitiş (boş = devam)</span><br /><input type="date" className="rhmap-btn" value={f.bit} onChange={(e) => setF((x) => ({ ...x, bit: e.target.value }))} /> <span style={adKucuk}>{f.bit ? adGunTr(f.bit) : ""}</span></label>
+      <button type="button" className="rhmap-btn" disabled={mesgul || !f.bas} onClick={kaydet}>Kaydet</button><button type="button" className="rhmap-btn" onClick={() => setF(null)}>Vazgeç</button>
+      <div style={{ ...adKucuk, width: "100%" }}>Kaydedince bu tarihlerdeki plakasız işleri “doğrulanmış” olur. Geçmiş atamalara plaka yazılmaz; başka araç yazılmış işler taşınmaz.</div></div>}
+    {islemHata && <AdHata metin={islemHata} />}
+  </div>;
+}
 function AracModulPlan({ arac, tur, veri, onSahaAc, onHaritadaGoster }) {
   const bugun = adTrBugun();
   const [ref, setRef] = useState(bugun);
-  const { veri: p, hata, yukleniyor } = useAdVeri(`${API_BASE}/hr/arac-takip/${arac.id}/plan?${tur === "HAFTA" ? "hafta" : "gun"}=${ref}`);
+  const { veri: p, hata, yukleniyor, yenile } = useAdVeri(`${API_BASE}/hr/arac-takip/${arac.id}/plan?${tur === "HAFTA" ? "hafta" : "gun"}=${ref}`);
   const adim = tur === "HAFTA" ? 7 : 1;
+  const isListe = (l, onek) => l.map((x) => <AracPlanIs key={`${onek}${x.id}`} x={x} veri={veri} onSahaAc={onSahaAc} onHaritadaGoster={onHaritadaGoster} />);
+  const grupBaslik = (metin, renk, n) => <div style={{ fontWeight: 900, fontSize: 15, color: renk, margin: "14px 0 6px" }}>{metin} · {n}</div>;
+  const dogruN = (p?.isler?.length || 0) + (p?.devreden?.length || 0), adayN = (p?.aday_isler?.length || 0) + (p?.aday_devreden?.length || 0);
   return <div>
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
       <button type="button" className="rhmap-btn" onClick={() => setRef((h) => adGunEkle(h, -adim))}>‹ Önceki</button>
-      <input type="date" className="rhmap-btn" value={ref} onChange={(e) => e.target.value && setRef(e.target.value)} aria-label="Tarih seç" />
+      <AdTarihSec deger={ref} onDegis={setRef} aralik={tur === "HAFTA" && p?.bas ? [p.bas, p.bit] : null} />
       <button type="button" className="rhmap-btn" onClick={() => setRef((h) => adGunEkle(h, adim))}>Sonraki ›</button>
       {ref !== bugun && <button type="button" className="rhmap-btn" onClick={() => setRef(bugun)}>{tur === "HAFTA" ? "Bu hafta" : "Bugün"}</button>}
+      <button type="button" className="rhmap-btn" onClick={yenile} aria-label="Yenile">↻</button>
     </div>
     {yukleniyor && <div style={{ ...adKucuk, padding: "10px 0" }}>Plan yükleniyor…</div>}
-    {hata && <AdHata metin={`Plan alınamadı: ${hata}`} />}
+    {hata && <AdHata metin={`Veri alınamadı: ${hata}`} />}
     {p && !yukleniyor && <>
-      <div style={{ ...adKucuk, margin: "6px 0" }}>{tur === "HAFTA" ? `${adGunTr(p.bas)} Pzt – ${adGunTr(p.bit)} Paz` : `${adHaftaGunu(p.bas)} ${adGunTr(p.bas)}`}{p.ekipler.length ? ` · ekip: ${p.ekipler.map((e) => e.ad).join(", ")}` : ""}</div>
       {p.malzeme_hata && <AdHata metin={p.malzeme_hata} />}
-      {p.eslesme_yok && <div style={adKutu}>Bu tarihte araç–ekip bağlantısı doğrulanamadı (bu plakayla planlanmış iş ataması yok).</div>}
-      {p.ekipler.length > 1 ? p.ekipler.map((e) => { const l = p.isler.filter((x) => x.ekip_no === e.ekip_no); return l.length ? <div key={e.ekip_no}><div style={{ fontWeight: 800, margin: "8px 0 4px" }}>{e.ad}</div>{l.map((x) => <AracPlanIs key={x.id} x={x} veri={veri} onSahaAc={onSahaAc} onHaritadaGoster={onHaritadaGoster} />)}</div> : null; })
-        : p.isler.map((x) => <AracPlanIs key={x.id} x={x} veri={veri} onSahaAc={onSahaAc} onHaritadaGoster={onHaritadaGoster} />)}
-      {!p.eslesme_yok && !p.isler.length && <div style={adKucuk}>Bu tarih için atanmış iş yok.</div>}
-      {p.devreden?.length > 0 && <><div style={{ fontWeight: 800, margin: "12px 0 6px", color: "#b45309" }}>Devreden işler (önceki haftalardan, hâlâ açık) · {p.devreden.length}</div>
-        {p.devreden.map((x) => <AracPlanIs key={`d${x.id}`} x={x} veri={veri} onSahaAc={onSahaAc} onHaritadaGoster={onHaritadaGoster} />)}</>}
-      <div style={{ ...adKucuk, marginTop: 8, lineHeight: 1.5 }}>{p.kural}</div>
+      {grupBaslik("Doğrulanmış araç planı", "#166534", dogruN)}
+      <div style={adKucuk}>Atamada / Weekly Plan segmentinde bu araç yazılı ya da tarihli tahsis var.{p.ekipler.length ? ` Ekip: ${p.ekipler.map((e) => e.ad).join(", ")}.` : ""}</div>
+      {!dogruN && <div style={{ ...adKutu, marginTop: 6 }}>Araç bağlantısı yok: bu {tur === "HAFTA" ? "hafta" : "gün"} bu araçla doğrulanmış iş bulunmuyor.</div>}
+      {!p.isler.length && p.devreden.length > 0 && <div style={{ ...adKucuk, marginTop: 4 }}>Bu {tur === "HAFTA" ? "hafta" : "gün"} için doğrulanmış yeni iş yok; yalnız önceden kalan açık işler var.</div>}
+      {isListe(p.isler, "g")}
+      {p.devreden.length > 0 && <><div style={{ fontWeight: 800, margin: "10px 0 6px", color: "#b45309" }}>Devreden açık işler (önceki {tur === "HAFTA" ? "haftalardan" : "günlerden"}) · {p.devreden.length}</div>{isListe(p.devreden, "d")}</>}
+      {grupBaslik("Personel üzerindeki işler — araç bağlantısı teyit bekliyor", "#92400e", adayN)}
+      <div style={adKucuk}>{p.aday_not}{p.adaylar?.length ? ` Aday: ${p.adaylar.map((a) => `${a.ad} (${a.kaynak_ad.join(", ")})`).join("; ")}.` : " Bu araç için aday sürücü / personel yok."}
+        {p.surucu_eslesme?.neden && p.surucu_eslesme.kart ? ` Araç kartı sürücüsü: ${p.surucu_eslesme.neden}.` : ""}</div>
+      {!adayN && <div style={{ ...adKutu, marginTop: 6 }}>Personelde bu {tur === "HAFTA" ? "hafta" : "gün"} iş yok.</div>}
+      {isListe(p.aday_isler, "a")}
+      {p.aday_devreden.length > 0 && <><div style={{ fontWeight: 800, margin: "10px 0 6px", color: "#b45309" }}>Devreden açık işler — teyit bekliyor · {p.aday_devreden.length}</div>{isListe(p.aday_devreden, "ad")}</>}
+      {(p.adaylar?.length > 0 || p.tahsis_kurulu === false) && <AracTahsisBolumu arac={arac} adaylar={p.adaylar || []} onDegisti={yenile} />}
+      <div style={{ ...adKucuk, marginTop: 8, lineHeight: 1.5 }}>{p.kural} Gelecek tarihli işler bu {tur === "HAFTA" ? "haftanın" : "günün"} sayısına girmez.</div>
     </>}
   </div>;
 }
@@ -9264,14 +9325,14 @@ function AracModulEkip({ arac }) {
   return <div>
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
       <button type="button" className="rhmap-btn" onClick={() => setGun((h) => adGunEkle(h, -1))}>‹ Önceki gün</button>
-      <input type="date" className="rhmap-btn" value={gun} onChange={(x) => x.target.value && setGun(x.target.value)} aria-label="Gün seç" />
+      <AdTarihSec deger={gun} onDegis={setGun} />
       <button type="button" className="rhmap-btn" onClick={() => setGun((h) => adGunEkle(h, 1))}>Sonraki gün ›</button>
       {gun !== bugun && <button type="button" className="rhmap-btn" onClick={() => setGun(bugun)}>Bugün</button>}
     </div>
     {yukleniyor && <div style={{ ...adKucuk, padding: "10px 0" }}>Ekip yükleniyor…</div>}
     {hata && <AdHata metin={`Ekip bilgisi alınamadı: ${hata}`} />}
     {e && !yukleniyor && <>
-      {e.eslesme_yok && <div style={{ ...adKutu, marginTop: 8 }}>Araç–ekip bağlantısı doğrulanamadı: {adGunTr(gun)} günü bu plakayla planlanmış iş yok. İsim benzerliğinden ekip tahmin edilmez.</div>}
+      {e.eslesme_yok && <div style={{ ...adKutu, marginTop: 8 }}>Araç–ekip bağlantısı doğrulanamadı: {adGunTr(gun)} günü bu araçla açık plakalı ya da tahsisli iş yok. İsim benzerliğinden ekip tahmin edilmez.</div>}
       {e.ekipler.map((k) => <div key={k.ekip_no} style={{ ...adKutu, marginTop: 8 }}>
         <div style={{ fontWeight: 900, fontSize: 16, color: "#1e3a5f" }}>{k.ad}</div>
         <div style={adKucuk}>{[k.firma, k.bolge].filter(Boolean).join(" · ")} · {k.kaynak}</div>
@@ -9280,6 +9341,11 @@ function AracModulEkip({ arac }) {
         <ul style={{ margin: "6px 0 0", padding: "0 0 0 18px", fontSize: 14 }}>{k.uyeler.map((u, i) => <li key={i}>{u.ad}{u.gorev ? <span style={adKucuk}> · {u.gorev}</span> : null}{u.sef ? " · şef" : ""}</li>)}</ul>
         {!k.uyeler.length && <div style={adKucuk}>Üye kaydı yok.</div>}
       </div>)}
+      {(e.adaylar || []).length > 0 && <div style={{ ...adKutu, marginTop: 8, borderColor: "#fde68a", background: "#fffbeb" }}>
+        <div style={{ fontWeight: 800, color: "#92400e" }}>Aday sürücü / personel — araç bağlantısı teyit bekliyor</div>
+        {e.adaylar.map((a, i) => <div key={i} style={{ fontSize: 14 }}>{a.ad}{a.ekip ? <span style={adKucuk}> · güncel ekip: {a.ekip}</span> : null}
+          <div style={adKucuk}>{a.kaynak.join(" · ")}{a.baska_araclar?.length ? ` · ⚠ başka araçla da ilişkili: ${a.baska_araclar.join(", ")}` : ""}</div></div>)}
+        <div style={adKucuk}>Tarihsiz bilgidir; seçilen günde bu aracı kullandığı kanıtlanmış değildir.</div></div>}
       <div style={{ ...adKucuk, marginTop: 8 }}>{e.not}</div>
     </>}
   </div>;
@@ -9308,14 +9374,18 @@ function AracDetayPanel({ arac, veri, onKapat, onSahaAc, onHaritadaGoster }) {
       {c && <div style={{ ...adKucuk, marginTop: 4 }}>Son sinyal: {c.son_sinyal ? `${adZaman(c.son_sinyal)} (${adYas(c.yas_sn)})` : "—"}{c.adres ? ` · ${c.adres}` : ""}</div>}
       {c?.hata && <div style={{ ...adKucuk, color: "#b91c1c" }}>{c.hata}</div>}
       <div style={{ fontSize: 14, marginTop: 6 }}>Ekip (bugün): {oz ? (oz.ekip.ekipler.length ? <b>{oz.ekip.ekipler.map((e) => e.ad).join(", ")}</b> : <b style={{ color: "#b45309" }}>{oz.ekip.mesaj}</b>) : "…"}</div>
-      {oz && <div style={adKucuk}>Sürücü: {oz.surucu.tarihli || "tarihli kayıt yok"}{oz.surucu.kart ? ` · araç kartında: ${oz.surucu.kart} (tarihsiz)` : ""}</div>}
+      {oz && !oz.ekip.ekipler.length && (oz.surucu.adaylar || []).length > 0 && <div style={{ fontSize: 13, color: "#92400e" }}>
+        Aday (teyit bekliyor): <b>{oz.surucu.adaylar.map((a) => a.ad).join(", ")}</b>{oz.ekip.aday_ekipler?.length ? ` · ${oz.ekip.aday_ekipler.map((e) => e.ad).join(", ")}` : ""}
+        <span style={adKucuk}> — {oz.surucu.adaylar[0].kaynak_ad.join(", ")}</span></div>}
+      {oz && <div style={adKucuk}>Sürücü: {oz.surucu.tarihli || "tarihli tahsis yok"}{oz.surucu.kart ? ` · araç kartında: ${oz.surucu.kart} (tarihsiz)` : ""}</div>}
     </div>
     {yukleniyor && !oz && <div style={{ ...adKucuk, padding: "10px 0" }}>Araç bilgisi yükleniyor…</div>}
     {hata && <AdHata metin={`Araç bilgisi alınamadı: ${hata}`} />}
     {b && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
       <div style={adKutu}><div style={adKucuk}>Bugünkü km</div><b style={{ fontSize: 18 }}>{b.km_hata ? "—" : b.km_veri ? adKm(b.km) : "Veri yok"}</b><div style={adKucuk}>{b.km_hata ? "alınamadı" : "gün devam ediyor"}</div></div>
       <div style={adKutu}><div style={adKucuk}>Hareket / duruş</div><b style={{ fontSize: 15 }}>{adSure(b.hareket_sn)}</b><div style={adKucuk}>rölanti {adSure(b.rolanti_sn)} · kontak kapalı {adSure(b.kontak_kapali_sn)}</div></div>
-      <div style={adKutu}><div style={adKucuk}>Bugünkü iş</div><b style={{ fontSize: 18 }}>{b.is_sayisi}</b><div style={adKucuk}>plan (gerçekleşme değil)</div></div>
+      <div style={adKutu}><div style={adKucuk}>Bugünkü iş (doğrulanmış)</div><b style={{ fontSize: 18 }}>{b.is_sayisi}</b>
+        <div style={adKucuk}>{b.devreden_sayisi ? `+${b.devreden_sayisi} devreden açık · ` : ""}{(b.aday_is_sayisi || b.aday_devreden_sayisi) ? `teyit bekleyen: ${b.aday_is_sayisi} bugün${b.aday_devreden_sayisi ? `, ${b.aday_devreden_sayisi} devreden` : ""}` : "plan (gerçekleşme değil)"}</div></div>
       <div style={adKutu}><div style={adKucuk}>Malzemesi araçta doğrulanmış iş</div><b style={{ fontSize: 18 }}>{b.malzemeli_is ?? "—"}</b>{b.malzeme_not && <div style={{ ...adKucuk, color: "#b45309" }}>{b.malzeme_not}</div>}</div>
     </div>}
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
