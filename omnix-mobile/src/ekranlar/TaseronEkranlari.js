@@ -19,6 +19,7 @@ import { taseronPanelApi } from "../api/uclar";
 import { durumBilgisi } from "../mantik/durumlar";
 import { basHarfler, para, tarih } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
+import { sahaAcik } from "../mantik/profil";
 
 const HAKEDIS_DURUM = {
   UYGUN: { ad: "QC uygun · hakedişe esas", ton: "basari" },
@@ -34,6 +35,9 @@ export function TaseronAnaSayfa({ navigation }) {
   const kenar = useSafeAreaInsets();
   const profil = useVeri("taseronProfil", () => taseronPanelApi.profil());
   const ozet = useVeri("taseronOzet", () => taseronPanelApi.ozet());
+  // 05.11.2026: hakediş ve cari özeti yönetimin cari motorundan (/taseron-panel/cari); eski atama-fiyatı hakedişi kullanılmaz
+  const cari = useVeri("taseronCari", () => taseronPanelApi.cari());
+  const co = cari.veri?.ozet?.find((x) => x.para_birimi === "TRY") || cari.veri?.ozet?.[0] || null;
   useFocusEffect(useCallback(() => { StatusBar.setBarStyle("light-content", true); }, []));
   const pr = profil.veri, o = ozet.veri;
   const firma = { ad: pr?.taseron?.ad || kullanici?.taseron?.ad || "Taşeron firma", kod: null, logo: null };
@@ -41,7 +45,7 @@ export function TaseronAnaSayfa({ navigation }) {
   return (
     <View style={{ flex: 1, backgroundColor: renk.zemin }}>
       <ScrollView contentContainerStyle={{ paddingBottom: aralik.xxl }}
-        refreshControl={<RefreshControl refreshing={ozet.yenileniyor} onRefresh={() => { ozet.yenile(); profil.yenile(); }} tintColor="#fff" />}>
+        refreshControl={<RefreshControl refreshing={ozet.yenileniyor} onRefresh={() => { ozet.yenile(); profil.yenile(); cari.yenile(); }} tintColor="#fff" />}>
         <View style={{ backgroundColor: renk.lacivert, paddingTop: kenar.top + aralik.xs, paddingHorizontal: aralik.m, paddingBottom: 64 }}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <FirmaBasligi firma={firma} alt={`Taşeron paneli · Omnix Platformu${pr?.ana_firma?.ad ? ` · ${pr.ana_firma.ad}` : ""}`} />
@@ -70,17 +74,20 @@ export function TaseronAnaSayfa({ navigation }) {
           ) : null}
           {o ? (
             <>
-              <BolumBasligi baslik="Hakediş" eylem="Ayrıntı" onEylem={() => navigation.navigate("TaseronHakedis")} />
-              {!(o.hakedis || []).length ? <Kart><BosDurum ikon="cash-outline" baslik="Tamamlanmış ve fiyatlı iş yok" aciklama="İşler tamamlanıp QC'den geçtikçe burada görünür." /></Kart>
-                : o.hakedis.map((h) => (
-                  <Kart key={h.para_birimi} style={{ marginBottom: aralik.xs, paddingVertical: aralik.xs }}>
-                    <BilgiSatiri etiket="QC uygun hakediş" deger={para(h.uygun, h.para_birimi)} />
-                    <BilgiSatiri etiket="QC bekleyen" deger={para(h.qc_bekleyen, h.para_birimi)} />
-                    <BilgiSatiri etiket="Uygun, henüz faturalanmamış" deger={para(h.uygun_faturalanmayan, h.para_birimi)} son />
+              <BolumBasligi baslik="Hakediş ve cari" eylem="Ayrıntı" onEylem={() => navigation.navigate("TaseronCari")} />
+              {cari.hata && !cari.veri ? <Kart><HataDurum hata={cari.hata} baslik="Cari bilgisi alınamadı" onTekrar={cari.yenile} /></Kart>
+                : !cari.veri ? <IskeletKart yukseklik={120} />
+                : !co ? <Kart><BosDurum ikon="cash-outline" baslik="Cari kartı tanımlı değil" aciklama={cari.veri.mesaj} /></Kart> : (
+                  <Kart style={{ paddingVertical: aralik.xs }} onPress={() => navigation.navigate("TaseronCari")} erisimEtiketi="Hakediş ve cari ayrıntısı">
+                    <BilgiSatiri etiket="Yapılan iş bedeli (KDV hariç)" deger={para(co.is_bedeli, co.para_birimi)} />
+                    <BilgiSatiri etiket="Toplam gerçekleşen ödeme" deger={para(co.odenen, co.para_birimi)} />
+                    {co.hakedis_kalan ? <BilgiSatiri etiket="Kalan hakediş alacağı" deger={para(co.hakedis_kalan, co.para_birimi)} /> : null}
+                    {co.acik_avans ? <BilgiSatiri etiket="Açık avans" deger={para(co.acik_avans, co.para_birimi)} /> : null}
+                    <BilgiSatiri etiket={co.yon.metin} deger={para(Math.abs(co.net), co.para_birimi)} son />
                   </Kart>
-                ))}
-              <BolumBasligi baslik="Faturalar ve ödemeler" eylem="Ayrıntı" onEylem={() => navigation.navigate("TaseronFaturalar")} />
-              {!(o.faturalar || []).length ? <Kart><BosDurum ikon="document-text-outline" baslik="Kayıtlı fatura yok" /></Kart>
+                )}
+              <BolumBasligi baslik="Faturalar" eylem="Ayrıntı" onEylem={() => navigation.navigate("TaseronCari", { sekme: "fatura" })} />
+              {!(o.faturalar || []).length ? <Kart><BosDurum ikon="document-text-outline" baslik="Henüz fatura kaydı yok" aciklama="Hakediş ve ödemeleriniz yukarıda ve Hakediş sekmesinde." /></Kart>
                 : o.faturalar.map((f) => (
                   <Kart key={f.para_birimi} style={{ marginBottom: aralik.xs, paddingVertical: aralik.xs }}>
                     <BilgiSatiri etiket={`Faturalanan (${f.adet} fatura)`} deger={para(f.faturalanan, f.para_birimi)} />
@@ -92,7 +99,8 @@ export function TaseronAnaSayfa({ navigation }) {
           ) : null}
           <BolumBasligi baslik="Hızlı erişim" />
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
-            {[["map-outline", "Sahalar", "TaseronSaha"], ["briefcase-outline", "Atanan işler", "TaseronIsler"], ["cash-outline", "Hakedişlerim", "TaseronHakedis"],
+            {[...(sahaAcik(kullanici) ? [["map-outline", "Sahalar", "TaseronSaha"]] : []), ["ribbon-outline", "Yaptığımız Sahalar", "TaseronYaptiklarimiz"],
+              ["briefcase-outline", "Atanan işler", "TaseronIsler"], ["cash-outline", "Hakediş ve Cari", "TaseronCari"],
               ["receipt-outline", "Faturalar", "TaseronFaturalar"], ["folder-open-outline", "Belgeler", "TaseronBelgeler"]].map(([ikon, ad, ekran]) => (
               <Kart key={ekran} onPress={() => navigation.navigate(ekran)} style={{ width: "48.5%", flexGrow: 1, flexBasis: "45%" }} erisimEtiketi={ad}>
                 <IkonKutu ad={ikon} />
@@ -297,11 +305,11 @@ export function TaseronFaturalarEkrani({ navigation }) {
   const v = useVeri("taseronFaturalar", async () => (await taseronPanelApi.faturalar()).rows || []);
   const rows = Array.isArray(v.veri) ? v.veri : [];
   return (
-    <Ekran baslik="Faturalar ve ödemeler" geri={false} yenileniyor={v.yenileniyor} onYenile={v.yenile}>
+    <Ekran baslik="Faturalar" geri yenileniyor={v.yenileniyor} onYenile={v.yenile}>
       {v.yukleniyor && !v.veri ? <><IskeletKart /><IskeletKart /></> : null}
       {v.hata && !v.veri ? <Kart><HataDurum hata={v.hata} baslik="Faturalar alınamadı" onTekrar={v.yenile} /></Kart> : null}
       <EskiVeriBandi v={v} style={{ marginBottom: aralik.s }} />
-      {v.veri && !rows.length ? <Kart><BosDurum ikon="receipt-outline" baslik="Kayıtlı fatura yok" aciklama="Faturalarınız merkeze işlendiğinde burada görünür." /></Kart> : null}
+      {v.veri && !rows.length ? <Kart><BosDurum ikon="receipt-outline" baslik="Henüz fatura kaydı yok" aciklama="Hakediş ve ödemelerinizi Hakediş ve Cari ekranından görebilirsiniz." eylem="Hakediş ve Cari" onEylem={() => navigation.navigate("TaseronCari")} /></Kart> : null}
       {rows.map((f) => {
         const d = FATURA_DURUM[f.durum] || { ad: f.durum, ton: "notr" };
         return (

@@ -25,7 +25,7 @@ import { kuyrukBosalt, kuyrukDinle, kuyrukDurumu, kuyrukluGonder } from "../tasl
 import { taslak, taslakKaydet, taslakSil, yeniKimlik } from "../taslak/taslakDepo";
 import { fisSec } from "../taslak/fis";
 import { katmanlar } from "../harita/haritaMantik";
-import { FILTRELER, HARITA_LEJANT, MONTAJ_TON, BOS_TAMAMLA, haritaSahalari, qcTon, sayac as sayacHesapla, suz, tamamlaGovdesi, tamamlaHatalari } from "../mantik/taseronSaha";
+import { FILTRELER, HARITA_LEJANT, KAPSAMLAR, MONTAJ_TON, BOS_TAMAMLA, haritaSahalari, kapsamUyar, qcTon, sayac as sayacHesapla, suz, tamamlaGovdesi, tamamlaHatalari } from "../mantik/taseronSaha";
 import { saat, tarih } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
 
@@ -56,6 +56,7 @@ export function TaseronSahaEkrani({ navigation }) {
   const [gorunum, setGorunum] = useState("liste");
   const [filtre, setFiltre] = useState("tumu");
   const [arama, setArama] = useState("");
+  const [kapsamSec, setKapsamSec] = useState("firma");
   const [secili, setSecili] = useState(null);
   const bekleyen = useBekleyenler(kapsam);
   useFocusEffect(useCallback(() => {
@@ -66,8 +67,9 @@ export function TaseronSahaEkrani({ navigation }) {
 
   const veri = v.veri;
   const isler = veri?.isler || [];
-  const say = useMemo(() => sayacHesapla(isler), [isler]);
-  const liste = useMemo(() => suz(isler, { filtre, arama }), [isler, filtre, arama]);
+  const kapsamli = useMemo(() => isler.filter((x) => kapsamUyar(x, kapsamSec)), [isler, kapsamSec]);
+  const say = useMemo(() => sayacHesapla(kapsamli), [kapsamli]);
+  const liste = useMemo(() => suz(isler, { filtre, arama, kapsam: kapsamSec }), [isler, filtre, arama, kapsamSec]);
   const sahalar = useMemo(() => haritaSahalari(liste), [liste]);
   const k = useMemo(() => katmanlar(sahalar), [sahalar]);
   const baslik = veri?.ekip ? `${veri.firma?.ad} · ${veri.ekip.ad}` : veri?.firma?.ad || "Sahalarım";
@@ -81,6 +83,11 @@ export function TaseronSahaEkrani({ navigation }) {
             <Metin tur="baslikL" renk="#FFFFFF" accessibilityRole="header">Sahalar</Metin>
             <Metin tur="minik" renk="#B8C7DA" numberOfLines={1}>{baslik}{veri?.rol === "CALISAN" ? " · ekip görünümü" : veri ? " · firma görünümü" : ""}</Metin>
           </View>
+          <Pressable onPress={() => navigation.navigate("TaseronYaptiklarimiz")} accessibilityRole="button" accessibilityLabel="Yaptığımız Sahalar" hitSlop={8}
+            style={({ pressed }) => [{ height: 36, paddingHorizontal: 10, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.14)", flexDirection: "row", alignItems: "center" }, pressed && { opacity: 0.6 }]}>
+            <Ionicons name="ribbon-outline" size={16} color="#FFFFFF" />
+            <Metin tur="etiket" renk="#FFFFFF" style={{ marginLeft: 5 }}>Yaptıklarımız</Metin>
+          </Pressable>
           <Pressable onPress={v.yenile} accessibilityRole="button" accessibilityLabel="Yenile" hitSlop={8}
             style={({ pressed }) => [{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }, pressed && { opacity: 0.6 }]}>
             <Ionicons name="refresh" size={22} color="#FFFFFF" />
@@ -105,6 +112,20 @@ export function TaseronSahaEkrani({ navigation }) {
             autoCorrect={false} returnKeyType="search" clearButtonMode="while-editing" accessibilityLabel="Site ID ya da iş kodu ara"
             style={{ flex: 1, color: "#FFFFFF", fontSize: 16, paddingVertical: 10, paddingHorizontal: aralik.xs }} />
         </View>
+        {veri && veri.rol !== "CALISAN" ? (
+          <View style={{ flexDirection: "row", marginHorizontal: aralik.m, marginTop: aralik.s, gap: aralik.xs }}>
+            {KAPSAMLAR.map((kp) => {
+              const sec = kapsamSec === kp.kod;
+              const n = isler.filter((x) => kapsamUyar(x, kp.kod)).length;
+              return (
+                <Pressable key={kp.kod} onPress={() => setKapsamSec(kp.kod)} accessibilityRole="tab" accessibilityState={{ selected: sec }}
+                  style={{ flex: 1, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: sec ? "#FFFFFF" : "rgba(255,255,255,0.25)", backgroundColor: sec ? "rgba(255,255,255,0.18)" : "transparent" }}>
+                  <Metin tur="etiket" renk="#FFFFFF" numberOfLines={1}>{kp.ad} {n}</Metin>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: aralik.m, paddingTop: aralik.s, gap: aralik.xs }}>
           {FILTRELER.map((f) => {
             const sec = filtre === f.kod;
@@ -259,7 +280,9 @@ export function TaseronSahaDetayEkrani({ route, navigation }) {
             </View>
             {x.montaj.uyarilar?.length ? <Bant tonAdi="notr" baslik="Kontrol gerekli" metin={`${x.montaj.uyarilar.join(" · ")}. Teknocenter kontrol edecek.`} style={{ marginTop: aralik.s }} /> : null}
           </Kart>
-          {!x.islem.montaj ? <Bant tonAdi="notr" ikon="eye-outline" baslik="Salt okunur" metin={x.islem.neden} style={{ marginTop: aralik.s }} /> : null}
+          {!x.islem.montaj ? <Bant tonAdi="notr" ikon="eye-outline" baslik="Salt okunur" metin={x.islem.neden} style={{ marginTop: aralik.s }} />
+            : !x.islem.basla && !x.islem.tamamla && x.islem.engel ? <Bant tonAdi="notr" ikon="information-circle-outline" metin={x.islem.engel} style={{ marginTop: aralik.s }} /> : null}
+          {x.montaj_kaynagi ? <Bant tonAdi="bilgi" ikon="git-branch-outline" metin={x.montaj_kaynagi} style={{ marginTop: aralik.s }} /> : null}
 
           <BolumBasligi baslik="Açık sorunlar" />
           {!x.sorun.var ? <Kart><Metin tur="kucuk" renk={renk.metinIkincil}>Açık sorun kaydı yok.</Metin></Kart>

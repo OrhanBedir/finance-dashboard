@@ -575,6 +575,7 @@ const app = express();
 const omnixProfil = require("./omnixProfil"); // şirket yönetimi + taşeron profilleri (25.10.2026)
 const orgEkip = require("./orgEkip"); // organizasyon: firma / ekip / üyelik yönetimi (28.10.2026)
 const tedarikciCari = require("./tedarikciCari"); // tedarikçi cari: fatura borcu / ödeme / avans / mahsup (29.10.2026)
+const taseronCari = require("./taseronCari"); // taşeron mobil Hakediş ve Cari — yönetim cari motoruyla aynı hesap (05.11.2026)
 omnixProfil.semaKur(pool).catch((e) => console.error("[omnix-profil]", e.message));
 const teknoOnay = require("./teknoOnay");
 const avansOdemeOzet = require("./avansOdemeOzet"); // iş avansı ödeme sınıfı + personel ödeme özeti (03.11.2026) // Teknocenter avans / masraf onay zinciri + firma kapsam kapıları (31.10.2026)
@@ -15596,6 +15597,8 @@ const omnixPanel = omnixProfil.kur(app, {
     return (x) => String(x.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(x.subcon_name);
   },
 });
+// 05.11.2026: taşeron firma sorumlusunun mobil Hakediş ve Cari ekranı (/taseron-panel/cari) — yönetim carisiyle tek motor
+taseronCari.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPanel.taseronKapsami(...a), cariMotor: cariPanel, altMarkaMi });
 // 04.11.2026: taşeron saha operasyonu (/taseron-saha/*) — firma kapsamı omnixProfil.taseronKapsami, montaj yazımı ortak Rollout yolu
 taseronSaha.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPanel.taseronKapsami(...a), planSenkron, fiiliDurum, sahaKimlik,
   islemGecmisiYaz: (...a) => islemGecmisiYaz(...a), isAtamaRolloutTarihYaz: (...a) => isAtamaRolloutTarihYaz(...a), ROLLOUT_IS_KOLU_ALANLARI, rolloutFirmaAdi, firmaKatla,
@@ -15605,6 +15608,26 @@ taseronSaha.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPane
     const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0], mesaj: fs.hata[1] });
     const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM); return { kodlar: new Set([...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) }; },
   firmaYonetebilir: async (req, t) => { const K = await rolloutKapsam(req); return !K || String(t.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(t.subcon_name); },
+  // 05.11.2026: Rollout RF sütunundaki yalın grup adı (TEKNO / AHY / ŞİMŞEK) → grup kodu (taseronCozum GRUP_ADI kuralı)
+  grupKodu: async (ad) => { const es = await rolloutFirmaEsleyicileri(); return taseronCozum.grupAdiMi(es, taseronCozum.adNorm(ad)) ? taseronCozum.grupOf(es, taseronCozum.adNorm(ad)) : null; },
+  // 05.11.2026: Yaptığımız Sahalar → iş kodu başına bedel DURUMU (tutar yok) — yönetim carisiyle aynı hakediş motoru
+  hakedisDurumu: async (K, kodlar) => {
+    const M = K.anaFirma && altMarkaMi(K.anaFirma) ? K.anaFirma : null;
+    if (!M) return null;
+    const R = await cariPanel.rehberOku(pool); const s = R.byId.get(Number(K.firmaId));
+    if (!s || String(s.cari_modeli || "").toUpperCase() !== "HAKEDIS") return null;
+    const isler = await cariPanel.hakedisIsleri(pool, M, s, new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10));
+    const out = new Map(); const kumesi = new Set(kodlar);
+    for (const kod of kumesi) {
+      const ks = isler.filter((x) => x.site_code === kod && x.fiziki_qty > 0);
+      if (!ks.length) { if (isler.some((x) => x.site_code === kod)) out.set(kod, { kod: "BEDEL_YOK", ad: "Fiziki miktar girilmemiş — bedel oluşmadı" }); continue; }
+      const eksik = ks.some((x) => ["TANIMSIZ", "BELIRSIZ"].includes(x.fiyat_durum));
+      const ana = ks.find((x) => x.fiyat);
+      out.set(kod, eksik ? { kod: "FIYAT_DOGRULANAMADI", ad: "Fiyat doğrulanamadı", tarife: ana?.fiyat?.bas || null }
+        : ana ? { kod: "HESAPLANDI", ad: "Bedel hesaplandı — Cari'de", tarife: ana.fiyat.bas } : { kod: "PAKET", ad: "Paket bedeline dahil" });
+    }
+    return out;
+  },
   // 04.11.2026: taşeron hesabı açma — kullanıcı yöneticisi (admin / users_admin) ya da alt marka (Teknocenter) İş Ata yetkilisi
   hesapAcabilir: async (req) => {
     if (["admin", "platform_admin"].includes(req.user?.role) || req.user?.users_admin === true) return true;

@@ -122,6 +122,9 @@ export const taseronPanelApi = {
   belgeAdresi: (isId, b) => api.get(`/taseron-panel/isler/${isId}/belge?site=${kodla(b.site_code)}&alan=${kodla(b.alan)}&sira=${b.sira}&json=1`),
   belgeler: () => api.get("/taseron-panel/belgeler"),
   hakedis: () => api.get("/taseron-panel/hakedis"),
+  // 05.11.2026: Hakediş ve Cari — yönetim cari motoruyla aynı hesap (firma oturumdan)
+  cari: () => api.get("/taseron-panel/cari", { zamanAsimiMs: 60000 }),
+  cariBelge: (id) => api.get(`/taseron-panel/cari/odeme/${kodla(id)}/belge`),
   faturalar: () => api.get("/taseron-panel/faturalar"),
   fatura: (id) => api.get(`/taseron-panel/faturalar/${id}`),
   basla: (id) => api.post(`/is-atama/${id}/basla`, {}),
@@ -131,6 +134,7 @@ export const taseronPanelApi = {
 // Kapsam (firma + ekip) sunucuda; her yazma isteği istek_anahtari taşır (çift dokunuş / yeniden gönderim tek kayıt).
 export const taseronSahaApi = {
   isler: () => api.get("/taseron-saha/isler", { zamanAsimiMs: 60000 }),
+  gecmis: () => api.get("/taseron-saha/gecmis", { zamanAsimiMs: 60000 }),
   is: (kod) => api.get(`/taseron-saha/is/${kodla(kod)}`),
   basla: (kod, istekAnahtari) => api.post(`/taseron-saha/is/${kodla(kod)}/basla`, { onay_kod: kod, istek_anahtari: istekAnahtari }),
   tamamla: (kod, govde) => api.post(`/taseron-saha/is/${kodla(kod)}/tamamla`, govde),

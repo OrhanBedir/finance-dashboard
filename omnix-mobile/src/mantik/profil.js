@@ -18,4 +18,7 @@ export function sahaRolu(k) {
   return r === "CALISAN" || r === "KAPALI" ? r : "SORUMLU";
 }
 
+// 05.11.2026: firma sorumlusunda "Saha ekranı" kapalıysa Sahalar sekmesi gizlenir; finans / iş görünümü kalır
+export const sahaAcik = (k) => k?.taseron_saha?.saha_acik !== false && sahaRolu(k) !== "KAPALI";
+
 export const profilAdi = (k) => ({ SAHIP: "Şirket sahibi", YONETICI: "Yönetici" }[k?.yonetim_profili] || null);

@@ -1095,7 +1095,8 @@ function kur(app, c) {
       fiyatsiz: fizikiler.filter((x) => !["VAR", "PAKET"].includes(x.fiyat_durum)).length, paket_dahil: fizikiler.filter((x) => x.fiyat_durum === "PAKET").length };
   }
 
-  return { cariHesapla, rehberOku, katla, fifoDagit, taseronBedeli };
+  // 05.11.2026: taşeron mobil "Hakediş ve Cari" (taseronCari.js) aynı motoru kullanır — ayrı hesap kurulmaz
+  return { cariHesapla, rehberOku, katla, fifoDagit, taseronBedeli, hakedisIsleri, kalemDeger };
 }
 
 module.exports = { semaKur, kur, katla };

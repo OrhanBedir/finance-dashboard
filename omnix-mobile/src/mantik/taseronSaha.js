@@ -21,10 +21,47 @@ export function filtreUyar(is, kod) {
   }
 }
 const kodT = (s) => String(s || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/\s+/g, "");
-export function suz(isler, { filtre = "tumu", arama = "" } = {}) {
+// 05.11.2026: görünüm kapsamı (firma sorumlusu): Firma işleri / Ekibimin işleri / Bana atananlar — sunucunun iş.kapsam alanından
+export const KAPSAMLAR = [{ kod: "firma", ad: "Firma işleri" }, { kod: "ekibim", ad: "Ekibimin işleri" }, { kod: "bana", ad: "Bana atananlar" }];
+export const kapsamUyar = (is, kapsam) => !kapsam || kapsam === "firma" || !!is.kapsam?.[kapsam];
+export function suz(isler, { filtre = "tumu", arama = "", kapsam = "firma" } = {}) {
   const q = kodT(arama);
-  return (isler || []).filter((x) => filtreUyar(x, filtre) && (!q || kodT(x.kod).includes(q) || kodT(x.fiziksel_id).includes(q)));
+  return (isler || []).filter((x) => filtreUyar(x, filtre) && kapsamUyar(x, kapsam) && (!q || kodT(x.kod).includes(q) || kodT(x.fiziksel_id).includes(q)));
 }
+
+// ── YAPTIĞIMIZ SAHALAR (/taseron-saha/gecmis) ── sınıf ve QC sunucudan; burada yalnız daraltılır
+export const GECMIS_FILTRELER = [
+  { kod: "tumu", ad: "Tümü" }, { kod: "tamamlandi", ad: "Montaj tamamlandı" }, { kod: "qc_basladi", ad: "QC başladı" },
+  { kod: "qc_kapandi", ad: "QC kapandı" }, { kod: "devam", ad: "Devam ediyor" }, { kod: "teyit", ad: "Teyit bekliyor" },
+];
+export const GECMIS_SINIF = { TAMAMLANDI: { ad: "Montaj tamamlandı", ton: "basari" }, DEVAM: { ad: "Devam ediyor", ton: "uyari" }, KISMI: { ad: "Kısmi · devam edecek", ton: "uyari" },
+  TEYIT: { ad: "Teyit bekliyor", ton: "notr" }, KATILIM: { ad: "Kendi iş kolunuz", ton: "bilgi" } };
+export const QC_TON = { KAPANDI: "basari", BASLADI: "bilgi", RED: "hata", BILINMIYOR: "notr", YOK: "notr" };
+export function gecmisUyar(x, kod) {
+  switch (kod) {
+    case "tamamlandi": return x.sinif === "TAMAMLANDI";
+    case "qc_basladi": return x.qc?.kod === "BASLADI";
+    case "qc_kapandi": return x.qc?.kod === "KAPANDI";
+    case "devam": return ["DEVAM", "KISMI"].includes(x.sinif);
+    case "teyit": return x.sinif === "TEYIT";
+    default: return true;
+  }
+}
+// Tarih süzgeci: montaj bitişi (yoksa başlangıcı) verilen günden sonra / önce
+export function gecmisSuz(satirlar, { filtre = "tumu", arama = "", bolge = null, bas = null, bit = null } = {}) {
+  const q = kodT(arama);
+  return (satirlar || []).filter((x) => {
+    const t = x.montaj?.bitis || x.montaj?.baslama || null;
+    return gecmisUyar(x, filtre) && (!bolge || x.bolge === bolge || x.il === bolge) && (!q || kodT(x.kod).includes(q) || kodT(x.fiziksel_id).includes(q))
+      && (!bas || (t && t >= bas)) && (!bit || (t && t <= bit));
+  });
+}
+export function gecmisSayac(satirlar) {
+  const o = {};
+  for (const f of GECMIS_FILTRELER) o[f.kod] = (satirlar || []).filter((x) => gecmisUyar(x, f.kod)).length;
+  return o;
+}
+export const bolgeler = (satirlar) => [...new Set((satirlar || []).map((x) => x.bolge || x.il).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr"));
 export function sayac(isler) {
   const o = {};
   for (const f of FILTRELER) o[f.kod] = (isler || []).filter((x) => filtreUyar(x, f.kod)).length;

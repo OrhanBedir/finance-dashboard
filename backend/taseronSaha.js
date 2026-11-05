@@ -21,6 +21,7 @@
 const crypto = require("crypto");
 const multer = require("multer");
 const bcrypt = require("bcrypt");
+const { kalemKolu } = require("./taseronCozum");
 
 const kodT = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
 const temiz = (s, n = 2000) => String(s ?? "").trim().replace(/[ \t]+/g, " ").slice(0, n);
@@ -104,6 +105,41 @@ function tamamlaDogrula(b) {
   if (tur === "KISMI" && aciklama.length < 3) return { hata: "Bugün yapılan işi kısaca yazın" };
   return { tur, standart, aciklama: aciklama || null, kalan_is: kalan || null, sorun: sorun || null };
 }
+// 05.11.2026 QC ham durumu → etiket. Kaynaklar: Rollout qc_durum / qc_closed_date (OK = kapandı) ve Huawei Smart QC görev
+// durumu (rollout_is_kolu.hw_status: To Be Executed / Executing / Rejected / Closed). qc_durum = NOK "QC başladı" DEĞİLDİR —
+// NOK, başlamamış / reddedilmiş / bilinmeyen durumları birleştirir; başlangıç yalnız Smart QC görev durumundan okunur.
+// RF montaj kalemi: taseronCozum RF kolu + paket kalemleri (Co-Located kurulum, band ilavesi, modernizasyon) — paket açıklamasında
+// "installation" geçmediği için taseronCozum bunları kola bağlamıyor; burada yalnız montaj sahipliği kanıtı olarak kullanılır
+const RF_MONTAJ_KALEMI = (d) => kalemKolu(d) === "rf" || /co-located site|band addition|band moderni[sz]ation/i.test(String(d || ""));
+const QC_HW = { "TO BE EXECUTED": "BASLADI", EXECUTING: "BASLADI", REJECTED: "RED", CLOSED: "KAPANDI" };
+const QC_AD = { KAPANDI: "QC kapandı (OK)", BASLADI: "QC başladı / kontrolde", RED: "QC reddedildi — düzeltme bekleniyor", BILINMIYOR: "QC kapanmadı · başlangıç bilgisi kaynakta yok", YOK: "QC kaydı yok" };
+function qcEtiket({ qc_durum, qc_kapanis, hw = [] }) {
+  const h = hw.map((x) => QC_HW[String(x || "").trim().toUpperCase()]).filter(Boolean);
+  const qc = String(qc_durum || "").trim().toUpperCase();
+  const kod = qc === "OK" || h.includes("KAPANDI") ? "KAPANDI" : h.includes("RED") ? "RED" : h.includes("BASLADI") ? "BASLADI" : qc ? "BILINMIYOR" : "YOK";
+  return { kod, ad: QC_AD[kod], ham: [qc ? `Rollout QC: ${qc}` : null, ...hw.filter(Boolean).map((x) => `Smart QC: ${x}`)].filter(Boolean), tarih: kod === "KAPANDI" ? qc_kapanis || null : null };
+}
+// 05.11.2026 "Yaptığımız Sahalar": işin bu firma tarafından yapıldığının kanıtı ve sınıfı. Plan / atama tek başına kanıt DEĞİLDİR.
+//   montaj: kart montaj durumu (fiiliDurum: Rollout tarihleri + bildirim olayları), fiziki: firmanın Günlük İş kalemlerinde
+//   tamamlanan miktar, rapor: firmanın saha bildirimi, qc: qcEtiket kodu, montajBizde: ana montaj bu firmada mı
+function gecmisSinif({ montaj, fiziki = 0, pr = 0, rapor = false, qc, montajBizde = true }) {
+  const kanit = [];
+  if (montaj === "TAMAMLANDI") kanit.push("Montaj bitişi kayıtlı");
+  else if (["DEVAM", "KISMI", "KONTROL"].includes(montaj)) kanit.push("Montaj başlangıcı kayıtlı");
+  if (fiziki > 0) kanit.push("Günlük İş'te fiziki miktar");
+  if (rapor) kanit.push("Ekip saha raporu");
+  const qcVar = ["BASLADI", "KAPANDI", "RED"].includes(qc);
+  if (!kanit.length && !qcVar) return { sinif: "PLAN", kanit, teyit: null };
+  if (!montajBizde) return { sinif: "KATILIM", kanit, teyit: "Ana montaj başka firmada — yalnız kendi iş kolunuz" };
+  if (montaj === "TAMAMLANDI") return { sinif: "TAMAMLANDI", kanit, teyit: fiziki > 0 ? null : "Montaj bitişi var, Günlük İş fiziki miktarı girilmemiş" };
+  if (["DEVAM", "KISMI", "KONTROL"].includes(montaj)) {
+    if (fiziki > 0 && fiziki < pr) return { sinif: "KISMI", kanit, teyit: null }; // fiziki miktar PR'ın altında: kısmi iş
+    if (fiziki > 0) return { sinif: "TEYIT", kanit, teyit: "Fiziki miktar girilmiş ama montaj bitişi yok — teyit bekliyor" };
+    return { sinif: montaj === "KISMI" ? "KISMI" : "DEVAM", kanit, teyit: montaj === "KONTROL" ? "Montaj kaydı doğrulanmadı" : null };
+  }
+  if (fiziki > 0) return { sinif: "TEYIT", kanit, teyit: "Günlük İş'te fiziki miktar var, montaj tarihleri kayıtlı değil — teyit bekliyor" };
+  return { sinif: "TEYIT", kanit: [...kanit, "QC kaydı"], teyit: "QC başladı — montaj tamamlanma kaydı teyit bekliyor" };
+}
 function konumDogrula(k) {
   if (!k || typeof k !== "object") return null;
   const lat = Number(k.lat), lng = Number(k.lng);
@@ -128,12 +164,13 @@ async function uyeOku(pool, userId, { taze = false } = {}) {
 // /auth/me → taseron_saha: mobil sekme seçimi için (yetki SUNUCUDA her uçta ayrıca doğrulanır)
 async function sahaRolu(pool, userId, taseronId) {
   const u = await uyeOku(pool, userId).catch(() => null);
-  if (!u) return { rol: "SORUMLU", varsayilan: true, ekip_no: null, ekip_ad: null };
-  if (Number(u.taseron_id) !== Number(taseronId) || !u.aktif) return { rol: "KAPALI", varsayilan: false, ekip_no: null, ekip_ad: null };
-  return { rol: u.rol, varsayilan: false, ekip_no: u.ekip_no ?? null, ekip_ad: u.ekip_ad || null };
+  if (!u) return { rol: "SORUMLU", varsayilan: true, saha_acik: true, ekip_no: null, ekip_ad: null };
+  // 05.11.2026: "Saha ekranı" kapalı firma sorumlusu finans / iş görünümünü korur, yalnız Sahalar kapanır; kapalı çalışanın hiçbir sekmesi yok
+  if (Number(u.taseron_id) !== Number(taseronId) || (!u.aktif && u.rol !== "SORUMLU")) return { rol: "KAPALI", varsayilan: false, saha_acik: false, ekip_no: null, ekip_ad: null };
+  return { rol: u.rol, varsayilan: false, saha_acik: !!u.aktif, ekip_no: u.ekip_no ?? null, ekip_ad: u.ekip_ad || null };
 }
 // Çalışan hesabı firma özetine / hakedişe / faturaya / iş fiyatlarına giremez (firma sorumlusunun hakları sızmaz)
-const CALISAN_KAPALI = /^\/taseron-panel\/(ozet|isler|belgeler|hakedis|faturalar)(\/|$)/;
+const CALISAN_KAPALI = /^\/taseron-panel\/(ozet|isler|belgeler|hakedis|faturalar|cari)(\/|$)/;
 function calisanKapisi(pool) {
   return async (req, res, next) => {
     try {
@@ -141,7 +178,8 @@ function calisanKapisi(pool) {
       if (!u || req.method === "OPTIONS" || !CALISAN_KAPALI.test(req.path)) return next();
       if (!(u.kullanici_tipi === "TASERON" || String(u.role || "").toLowerCase() === "subcon")) return next();
       const uye = await uyeOku(pool, u.user_id);
-      if (uye && (uye.rol === "CALISAN" || !uye.aktif)) return res.status(403).json({ ok: false, error: "Bu bölüm firma sorumlusuna açık" });
+      // Saha ekranı kapalı (aktif=false) firma sorumlusu finans uçlarına girmeye devam eder; çalışan hiçbir durumda giremez
+      if (uye && uye.rol !== "SORUMLU") return res.status(403).json({ ok: false, error: "Bu bölüm firma sorumlusuna açık" });
       next();
     } catch (e) { next(e); }
   };
@@ -149,7 +187,7 @@ function calisanKapisi(pool) {
 
 function kur(app, deps) {
   const { pool, authMiddleware, taseronKapsami, planSenkron, fiiliDurum, sahaKimlik, islemGecmisiYaz, isAtamaRolloutTarihYaz, ROLLOUT_IS_KOLU_ALANLARI,
-    rolloutFirmaAdi, firmaKatla, isAtamaYetkiliMi, taseronMu, mobilKonum, ozelYukle, ozelIndir, ozelSil, altMarkaKullanicisi, kapsamIsKodlari, firmaYonetebilir, hesapAcabilir } = deps;
+    rolloutFirmaAdi, firmaKatla, isAtamaYetkiliMi, taseronMu, mobilKonum, ozelYukle, ozelIndir, ozelSil, altMarkaKullanicisi, kapsamIsKodlari, firmaYonetebilir, hesapAcabilir, grupKodu, hakedisDurumu } = deps;
   const ALANLAR = ROLLOUT_IS_KOLU_ALANLARI;
   const H = (durum, mesaj, ek) => Object.assign(new Error(mesaj), { durum, mesaj, ek });
   const hata = (res, e) => {
@@ -175,7 +213,7 @@ function kur(app, deps) {
     if (rol === "CALISAN" && ekip_no != null && !ekipler.some((e) => Number(e.ekip_no) === Number(ekip_no)))
       throw H(403, "Ekibiniz firmanıza bağlı görünmüyor. Lütfen Teknocenter ile görüşün.");
     const adlar = [...new Set(k.adlar)];
-    return { taseron: k.taseron, firmaId, firmaAd: k.taseron.unvan || k.taseron.subcon_name, adlar, adKatli: new Set(adlar.map(firmaKatla)),
+    return { taseron: k.taseron, firmaId, firmaAd: k.taseron.unvan || k.taseron.subcon_name, adlar, anaFirma: String(k.taseron.ana_firma || "").trim().toUpperCase() || null, adKatli: new Set(adlar.map(firmaKatla)),
       rol, varsayilan: !uye, ekip_no, ekipler, ekipNolar: ekipler.map((e) => Number(e.ekip_no)), email: ben(req), ad: req.user?.name || ben(req), userId: Number(req.user.user_id) };
   }
   const kapi = (fn) => [authMiddleware, async (req, res) => { try { const K = await kimlik(req); await fn(req, res, K); } catch (e) { hata(res, e); } }];
@@ -187,14 +225,26 @@ function kur(app, deps) {
   async function isSeti(K, db = pool) {
     const katli = [...K.adKatli];
     const isler = new Map();
-    const al = (kod) => { let x = isler.get(kod); if (!x) isler.set(kod, (x = { kod, row: null, rfBizim: false, rfBaska: null, kollar: new Set(), kalem: false, atamalar: [], bana: false })); return x; };
-    const satirIsle = (x, r) => {
+    const al = (kod) => { let x = isler.get(kod); if (!x) isler.set(kod, (x = { kod, row: null, rfBizim: false, rfBaska: null, rfGrup: false, kollar: new Set(), kalem: false, rfKalem: false, atamalar: [], bana: false })); return x; };
+    // 05.11.2026: Rollout RF sütununda yalnız üst firma grup adı (ör. "TEKNO") yazılıysa ve Günlük İş'te bu iş kodunun RF montaj
+    // kalemi bu firmanın tam adıyla kayıtlıysa montaj bu firmanındır (taseronCozum GRUP_ADI kuralı). Grup adı başka firma sayılmaz.
+    const grupOnbellek = new Map();
+    const grupBizim = async (ad) => {
+      if (!grupKodu || !K.anaFirma || !ad) return false;
+      if (!grupOnbellek.has(ad)) grupOnbellek.set(ad, await grupKodu(ad).catch(() => null));
+      return String(grupOnbellek.get(ad) || "").toUpperCase() === K.anaFirma;
+    };
+    const satirIsle = async (x, r) => {
       const { kollar, etkin } = firmaKollari(r, ALANLAR, rolloutFirmaAdi, firmaKatla, K.adKatli);
+      if (!kollar.has("rf") && etkin.rf && x.rfKalem && await grupBizim(etkin.rf)) { kollar.add("rf"); x.rfGrup = true; }
       kollar.forEach((k) => x.kollar.add(k));
       if (kollar.has("rf")) { x.row = r; x.rfBizim = true; x.rfBaska = null; }
       else if (!x.rfBizim) { if (!x.row) x.row = r; if (etkin.rf && !x.rfBaska) x.rfBaska = true; }
       return kollar.size;
     };
+    // 0) Günlük İş kalemleri (fiyat okunmaz): RF montaj kalemi bu firmada mı (grup adı kuralı için önce okunur)
+    const mw = (await db.query(`SELECT UPPER(TRIM(site_code)) AS kod, item_description FROM master_works WHERE ${KATLA_SQL("subcon_name")} = ANY($1::text[])`, [katli]).catch(() => ({ rows: [] }))).rows;
+    for (const m of mw) if (kodT(m.kod)) { const x = al(kodT(m.kod)); x.kalem = true; if (RF_MONTAJ_KALEMI(m.item_description)) x.rfKalem = true; }
     // 1) Rollout: herhangi bir iş kolunda firma adı (tam eşitlik — ön süzgeç SQL'de, kesin karar JS'te üst kol mirasıyla)
     const kosul = ALANLAR.map((L) => `${KATLA_SQL(`to_jsonb(rp)->>'${L.subcon}'`)} = ANY($1::text[])`).join(" OR ");
     const rp = (await db.query(`SELECT ${satirSecimi} FROM rollout_progress rp WHERE ${kosul} ORDER BY rp.updated_at DESC NULLS LAST`, [katli])).rows;
@@ -202,11 +252,8 @@ function kur(app, deps) {
       const kod = kodT(r.site_code);
       if (!kod) continue;
       const { kollar } = firmaKollari(r, ALANLAR, rolloutFirmaAdi, firmaKatla, K.adKatli);
-      if (kollar.size) satirIsle(al(kod), r);
+      if (kollar.size) await satirIsle(al(kod), r);
     }
-    // 2) Günlük İş kalemleri (fiyat okunmaz)
-    const mw = (await db.query(`SELECT DISTINCT UPPER(TRIM(site_code)) AS kod FROM master_works WHERE ${KATLA_SQL("subcon_name")} = ANY($1::text[])`, [katli]).catch(() => ({ rows: [] }))).rows;
-    for (const m of mw) if (kodT(m.kod)) al(kodT(m.kod)).kalem = true;
     // 3) İş atamaları: firmaya ya da firmanın ekiplerine; ayrıca bu kullanıcıya doğrudan (başka firmaya bağlı atama hariç)
     const at = (await db.query(`SELECT a.id, a.kategori, kt.ad AS kategori_ad, COALESCE(kt.qc_yazar, false) AS qc_yazar, a.site_codes, a.durum, (to_jsonb(a)->>'ekip_no')::int AS ekip_no,
         a.taseron_id, a.personeller, a.plan_tarihi, a.baslama_ts, a.bitis_ts, a.created_at, a.updated_at
@@ -229,7 +276,7 @@ function kur(app, deps) {
     const eksik = [...isler.values()].filter((x) => !x.row).map((x) => x.kod);
     if (eksik.length) {
       const r2 = (await db.query(`SELECT ${satirSecimi} FROM rollout_progress rp WHERE UPPER(TRIM(rp.site_code)) = ANY($1::text[]) ORDER BY rp.updated_at DESC NULLS LAST`, [eksik])).rows;
-      for (const r of r2) { const x = isler.get(kodT(r.site_code)); if (x) satirIsle(x, r); }
+      for (const r of r2) { const x = isler.get(kodT(r.site_code)); if (x) await satirIsle(x, r); }
     }
     for (const x of isler.values()) {
       const firmaAtamalari = x.atamalar.filter((a) => a.firmanin);
@@ -288,7 +335,11 @@ function kur(app, deps) {
         qc: x.qcGoster ? { durum: qc, ad: qc === "OK" ? "QC OK" : qc === "NOK" ? "QC NOK" : "QC bekleniyor", kapanis: gun(r.qc_closed_date) } : { durum: null, ad: "QC bilgisi bu firmada değil", gizli: true },
         sorun: { var: sorunlar.length > 0, kayitlar: sorunlar },
         konum, konum_yok: !konum,
-        islem: { montaj: x.montaj, neden: x.montajNeden, basla: x.montaj && durum === "BEKLIYOR", tamamla: x.montaj && ["DEVAM", "KISMI", "KONTROL"].includes(durum) },
+        // Görünüm kapsamı (Bana atananlar / Ekibimin işleri / Firma işleri) ve sunucunun hesapladığı işlem yetkisi + engel nedeni
+        kapsam: { bana: !!x.bana, ekibim: K.ekip_no != null && Number(x.ekip_no) === Number(K.ekip_no), firma: true },
+        montaj_kaynagi: x.rfGrup ? "Rollout'ta grup adı (TEKNO) yazılı; Günlük İş montaj kalemi firmanızda" : null,
+        islem: { montaj: x.montaj, neden: x.montajNeden, basla: x.montaj && durum === "BEKLIYOR", tamamla: x.montaj && ["DEVAM", "KISMI", "KONTROL"].includes(durum),
+          engel: !x.montaj ? x.montajNeden : durum === "TAMAMLANDI" ? "Montaj tamamlanmış — yeni bildirim açılmaz" : durum === "BEKLIYOR" ? "Tamamlamak için önce montaja başlayın" : null },
         son_rapor: sb ? { id: Number(sb.id), tur: sb.tur, ad: TUR_AD[sb.tur], zaman: iso(sb.created_at), pr_durum: PR_AD[sb.pr_durum] || sb.pr_durum, teknocenter_notu: sb.inceleme_notu || null } : null,
       };
     });
@@ -317,6 +368,55 @@ function kur(app, deps) {
     res.set("Cache-Control", "private, no-store");
     res.json({ ok: true, ...kimlikOzet(K), isler: k, sayac: sayac(k), guncel: new Date().toISOString(),
       not: "Konumu kayıtlı olmayan iş yalnız listede görünür; haritada tahmini konum gösterilmez." });
+  }));
+
+  // ── YAPTIĞIMIZ SAHALAR (05.11.2026, Orhan) ───────────────────────────────────────────────────────────────────────
+  // Firmanın bugüne kadar montaj yaptığı / katıldığı işler: kanıt (montaj tarihi, fiziki miktar, saha raporu) ve QC durumu.
+  // Plan / atama tek başına listelenmez (yalnız sayısı verilir). Geçmiş kayıtlara hiçbir şey yazılmaz. Çalışan kendi ekibini görür;
+  // bedel durumu (tutarsız) yalnız firma sorumlusuna. 1 Kasım öncesi işler de listelenir — tarife başlangıcı gizleme nedeni değildir.
+  app.get("/taseron-saha/gecmis", ...kapi(async (req, res, K) => {
+    const liste = [...(await isSeti(K)).values()].filter((x) => gorunurMu(x, K));
+    const k = await kartlar(K, liste);
+    const kodlar = k.map((x) => x.kod);
+    const [mw, rap, hw] = kodlar.length ? await Promise.all([
+      pool.query(`SELECT UPPER(TRIM(site_code)) AS kod, SUM(COALESCE(tamamlanan_qty,0))::numeric AS fiziki, SUM(COALESCE(done_qty,0))::numeric AS pr,
+          COUNT(*)::int AS kalem, MIN(to_char(created_at,'YYYY-MM-DD')) AS giris FROM master_works
+        WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) AND ${KATLA_SQL("subcon_name")} = ANY($2::text[]) GROUP BY 1`, [kodlar, [...K.adKatli]]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT site_code AS kod, COUNT(*)::int AS n FROM taseron_saha_bildirim WHERE site_code = ANY($1::text[]) AND taseron_id = $2 AND tur IN ('TAMAMLANDI','KISMI') GROUP BY 1`, [kodlar, K.firmaId]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT UPPER(TRIM(site_code)) AS kod, array_agg(hw_status) FILTER (WHERE hw_status IS NOT NULL) AS hw FROM rollout_is_kolu
+        WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) AND is_kolu IN ('NS_AI','ONE_BAND') AND COALESCE(aktif, true) GROUP BY 1`, [kodlar]).catch(() => ({ rows: [] })),
+    ]).then((x) => x.map((r) => new Map(r.rows.map((y) => [kodT(y.kod), y])))) : [new Map(), new Map(), new Map()];
+    const ham = new Map(liste.map((x) => [x.kod, x]));
+    const bedel = K.rol !== "CALISAN" && hakedisDurumu ? await hakedisDurumu(K, kodlar).catch(() => null) : null;
+    const satirlar = [];
+    let plan = 0;
+    for (const x of k) {
+      const r = ham.get(x.kod)?.row || {};
+      const m = mw.get(x.kod);
+      const qc = qcEtiket({ qc_durum: r.qc_durum, qc_kapanis: gun(r.qc_closed_date), hw: hw.get(x.kod)?.hw || [] });
+      const g = gecmisSinif({ montaj: x.montaj.durum, fiziki: Number(m?.fiziki || 0), pr: Number(m?.pr || 0), rapor: !!rap.get(x.kod), qc: qc.kod, montajBizde: x.islem.montaj });
+      if (g.sinif === "PLAN") { plan++; continue; }
+      const b = bedel?.get(x.kod) || null;
+      satirlar.push({ kod: x.kod, fiziksel_id: x.fiziksel_id, il: x.il, bolge: x.bolge, is_turu: x.is_turu, kollar: x.kollar,
+        montaj: { durum: x.montaj.durum, ad: x.montaj.ad, baslama: gun(r.installation_actual_start_date) || x.montaj.baslama, bitis: gun(r.installation_actual_end_date) || x.montaj.bitis },
+        qc, sinif: g.sinif, kanit: g.kanit, teyit: g.teyit, montaj_kaynagi: x.montaj_kaynagi,
+        miktar: m ? { fiziki: Number(m.fiziki), pr: Number(m.pr), kalem: m.kalem } : null,
+        bedel_durumu: b ? { kod: b.kod, ad: b.ad, tarife: b.tarife || null } : null });
+    }
+    const SIRA = { TEYIT: 0, DEVAM: 1, KISMI: 1, TAMAMLANDI: 2, KATILIM: 3 };
+    satirlar.sort((a, b) => SIRA[a.sinif] - SIRA[b.sinif] || String(b.montaj.bitis || b.montaj.baslama || "").localeCompare(String(a.montaj.bitis || a.montaj.baslama || "")) || a.kod.localeCompare(b.kod));
+    const saha = (f) => new Set(satirlar.filter(f).map((x) => x.fiziksel_id)).size;
+    const montajli = (x) => x.sinif !== "KATILIM";
+    res.set("Cache-Control", "private, no-store");
+    res.json({ ok: true, ...kimlikOzet(K), guncel: new Date().toISOString(), satirlar,
+      sayac: {
+        montaj_tamamlanan_saha: saha((x) => x.sinif === "TAMAMLANDI"), montaj_tamamlanan_is: satirlar.filter((x) => x.sinif === "TAMAMLANDI").length,
+        qc_baslayan_saha: saha((x) => montajli(x) && x.qc.kod === "BASLADI"), qc_kapanan_saha: saha((x) => montajli(x) && x.qc.kod === "KAPANDI"),
+        devam_kismi_is: satirlar.filter((x) => ["DEVAM", "KISMI"].includes(x.sinif)).length, teyit_bekleyen_is: satirlar.filter((x) => x.sinif === "TEYIT").length,
+        toplam_is: satirlar.length, toplam_saha: saha(() => true), katilim_is: satirlar.filter((x) => x.sinif === "KATILIM").length, kanitsiz_plan_is: plan,
+      },
+      not: "Fiziksel saha ile iş kaydı ayrı sayılır (aynı sahadaki NR700 ve NR3500 iki iştir). QC grupları montaj sayısıyla çakışabilir; kartlar toplanmaz. Yalnız plan / atama olan işler kanıt sayılmaz, listede gösterilmez.",
+      qc_not: "QC başlangıcı yalnız Huawei Smart QC görev durumundan (To Be Executed / Executing) okunur; Rollout'taki QC NOK 'başladı' sayılmaz." });
   }));
 
   // ── İŞ DETAYI ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -717,4 +817,4 @@ function kur(app, deps) {
   return { kimlik, isSeti, kartlar };
 }
 
-module.exports = { semaKur, kur, sahaRolu, calisanKapisi, uyeOku, firmaKollari, gorunurMu, montajDurumu, acikIssue, tamamlaDogrula, konumDogrula, KATLA_SQL, MONTAJ_AD, PR_AD };
+module.exports = { semaKur, kur, sahaRolu, calisanKapisi, uyeOku, firmaKollari, gorunurMu, montajDurumu, acikIssue, tamamlaDogrula, konumDogrula, qcEtiket, gecmisSinif, KATLA_SQL, MONTAJ_AD, PR_AD, QC_AD };
