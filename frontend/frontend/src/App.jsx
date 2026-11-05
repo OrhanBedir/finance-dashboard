@@ -8895,9 +8895,22 @@ function AracDetayPanel({ arac, veri, onKapat, onSahaAc, onHaritadaGoster }) {
           <tfoot><tr style={{ borderTop: "2px solid #cbd5e1", fontWeight: 800 }}><td style={{ padding: "4px 6px" }}>Toplam</td><td style={{ padding: "4px 6px", textAlign: "right" }}>{adKm(g.toplam_km)}</td>{g.sure_var && <td />}</tr></tfoot>
         </table>}
       </>}
+      {/* 05.11.2026 (Orhan): yakıt kaynağı bu plakaya yatırılan iş avansı (masraf formu değil); tutar/kişi yalnız avans tam görüşüyle gelir */}
       {gecmis?.yakit && <div style={{ ...kutu, marginTop: 8, background: "#fffbeb", borderColor: "#fde68a" }}>
-        <div style={{ fontWeight: 800, fontSize: 13.5 }}>⛽ Yakıt kayıtları (masraf formu)</div>
-        <div style={{ fontSize: 13 }}>{gecmis.yakit.kayit ? `${gecmis.yakit.kayit} kayıt · ${gecmis.yakit.gunler.map(adGunKisa).join(", ")}${gecmis.yakit.toplam_tutar !== null ? ` · ₺${Number(gecmis.yakit.toplam_tutar).toLocaleString("tr-TR")}` : ""}` : "Bu dönemde bu plakayla yakıt kaydı yok."}</div>
+        <div style={{ fontWeight: 800, fontSize: 13.5 }}>⛽ Yakıt avansları (iş avansı)</div>
+        <div style={{ fontSize: 13 }}>{gecmis.yakit.kayit ? `${gecmis.yakit.kayit} avans${gecmis.yakit.toplam_tutar !== null ? ` · toplam ₺${Number(gecmis.yakit.toplam_tutar).toLocaleString("tr-TR")}` : ""}` : "Bu dönemde bu plakaya yatırılmış yakıt avansı yok."}</div>
+        {gecmis.yakit.kayit > 0 && Array.isArray(gecmis.yakit.kayitlar) && <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 6 }}>
+          <thead><tr style={{ color: "#64748b", textAlign: "left" }}><th style={{ padding: "3px 4px" }}>Tarih</th>
+            {!gecmis.yakit.tutar_gizli && <th style={{ padding: "3px 4px" }}>Alan</th>}
+            {!gecmis.yakit.tutar_gizli && <th style={{ padding: "3px 4px", textAlign: "right" }}>Tutar</th>}
+            <th style={{ padding: "3px 4px", textAlign: "right" }} title="Avans talebinde yazılan araç kilometresi">Araç km</th></tr></thead>
+          <tbody>{gecmis.yakit.kayitlar.slice().reverse().map((y) => <tr key={y.id} style={{ borderTop: "1px solid #fde68a" }} title={y.aciklama || undefined}>
+            <td style={{ padding: "3px 4px", whiteSpace: "nowrap" }}>{adHaftaGunu(y.tarih)} {adGunTr(y.tarih)}</td>
+            {!gecmis.yakit.tutar_gizli && <td style={{ padding: "3px 4px" }}>{y.kisi || "—"}</td>}
+            {!gecmis.yakit.tutar_gizli && <td style={{ padding: "3px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>₺{Number(y.tutar || 0).toLocaleString("tr-TR")}</td>}
+            <td style={{ padding: "3px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: y.arac_km === null ? "#94a3b8" : "#0f172a" }}>{y.arac_km === null ? "yazılmamış" : Number(y.arac_km).toLocaleString("tr-TR")}</td></tr>)}</tbody>
+        </table>}
+        {gecmis.yakit.tutar_gizli && gecmis.yakit.kayit > 0 && <div style={kucuk}>Tutar ve avansı alan kişi yetkinize kapalı.</div>}
         <div style={kucuk}>{gecmis.yakit.not}</div></div>}
 
       <h3 style={{ fontSize: 16, margin: "18px 0 8px" }}>Ekibin Haftalık İşleri</h3>

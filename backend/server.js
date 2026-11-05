@@ -27612,18 +27612,30 @@ app.get("/hr/arac-takip/:id/gecmis", aracTakipOkuma, async (req, res) => {
     if (bas > bit) return res.status(400).json({ ok: false, error: "Başlangıç tarihi bitişten sonra olamaz" });
     if (aracTakip.gunAraligi(bas, bit > bugun ? bugun : bit).length > aracTakip.GECMIS_AZAMI_GUN)
       return res.status(400).json({ ok: false, error: `En çok ${aracTakip.GECMIS_AZAMI_GUN} günlük dönem seçilebilir` });
-    // Yakıt: masraf kalemlerinde aynı plakalı YAKIT kayıtları (litre alanı yok → yalnız kayıt sayısı / tutar; tüketim hesaplanmaz).
-    // Tutar yalnız masraf tam görüşü olana; alt marka kullanıcısı yalnız kendi firmasının personeline ait kalemleri görür.
+    // Yakıt (05.11.2026, Orhan): bu plakaya YATIRILAN iş avansı — gider türü Yakıt, ödemesi tamamlanmış (TAMAMLANDI);
+    // masraf formu kaynak değil. Litre tutulmaz → tüketim hesaplanmaz. Tarih: avansın t.tarih'i (alt marka kapsamıyla aynı alan).
+    // Kapsam iş avansı listesiyle aynı: alt marka yalnız kendi firması + devir tarihi sonrası; Orhan'ın kişisel avansları yalnız
+    // yetkililere. Tutar, avansı alan kişi ve açıklama yalnız avans tam görüşü olana; plakaya yazılan araç km'si herkese.
     const k = altMarkaKapsam(req);
-    const yk = await pool.query(`SELECT mk.tarih::text AS tarih, mk.tutar, COALESCE(p.marka,'ERC') AS marka
-        FROM masraf_kalem mk LEFT JOIN masraf_form mf ON mf.id = mk.form_id LEFT JOIN personel p ON p.id = mf.personel_id
-       WHERE UPPER(COALESCE(mk.kategori,'')) = 'YAKIT' AND upper(regexp_replace(COALESCE(mk.plaka,''),'[^0-9A-Za-z]','','g')) = $1
-         AND mk.tarih BETWEEN $2::date AND $3::date ORDER BY mk.tarih`, [AKTR(arac.plaka), bas, bit]).catch(() => ({ rows: [] }));
-    const yRows = yk.rows.filter((r) => !k || k.bordro.map((x) => String(x).toUpperCase()).includes(String(r.marka || "ERC").toUpperCase()));
-    const tutarGor = masrafTamGorus(req);
-    const yakit = { kayit: yRows.length, gunler: [...new Set(yRows.map((r) => String(r.tarih).slice(0, 10)))],
+    const ykSart = [`COALESCE(t.gider_turu,'') ~* 'yak[ıi]t'`, `t.durum = 'TAMAMLANDI'`,
+      `upper(regexp_replace(COALESCE(t.plaka,''),'[^0-9A-Za-z]','','g')) = $1`, `t.tarih BETWEEN $2::date AND $3::date`];
+    if (k) {
+      ykSart.push(`t.tarih >= DATE '${k.devir}'`);
+      ykSart.push(`(UPPER(COALESCE(t.firma,'')) = '${k.kod}' OR (COALESCE(t.firma,'') = '' AND UPPER(COALESCE(p.marka,'ERC')) = ANY('{${k.bordro.join(",")}}'::text[])))`);
+    }
+    if (!pmKisiselGorur(req)) ykSart.push(`NOT ${pmAvansSahibiSql("t", "p")}`);
+    const yk = await pool.query(`SELECT t.id, t.tarih::text AS tarih, t.odeme_tarihi::text AS odeme_tarihi, t.tutar, t.arac_km,
+        NULLIF(t.aciklama,'') AS aciklama, COALESCE(p.ad_soyad, t.talep_eden_ad) AS kisi
+        FROM is_avans_talep t LEFT JOIN personel p ON p.id = t.personel_id
+       WHERE ${ykSart.join(" AND ")} ORDER BY t.tarih, t.id`, [AKTR(arac.plaka), bas, bit]).catch(() => ({ rows: [] }));
+    const tutarGor = avansTamGorus(req);
+    const yRows = yk.rows;
+    const yakit = { kaynak: "IS_AVANSI", kayit: yRows.length, gunler: [...new Set(yRows.map((r) => String(r.tarih).slice(0, 10)))],
       toplam_tutar: tutarGor ? Math.round(yRows.reduce((t, r) => t + Number(r.tutar || 0), 0) * 100) / 100 : null, tutar_gizli: !tutarGor,
-      not: "Masraf formundaki YAKIT kalemleri (plaka eşleşmesiyle). Litre bilgisi tutulmadığı için tüketim hesaplanmaz." };
+      kayitlar: yRows.map((r) => ({ id: r.id, tarih: String(r.tarih).slice(0, 10), odeme_tarihi: r.odeme_tarihi ? String(r.odeme_tarihi).slice(0, 10) : null,
+        arac_km: r.arac_km === null || r.arac_km === undefined ? null : Number(r.arac_km),
+        tutar: tutarGor ? Number(r.tutar || 0) : null, kisi: tutarGor ? r.kisi || null : null, aciklama: tutarGor ? r.aciklama : null })),
+      not: "Bu plakaya yatırılan iş avansları (gider türü Yakıt, ödemesi tamamlanmış). Avans ödenen paradır, pompadaki dolum kaydı değildir; litre tutulmadığı için tüketim hesaplanmaz." };
     const canli = await aracTakip.sonKonumlar();
     if (!canli.yapilandirildi) return res.json({ ok: true, yapilandirildi: false, arac, yakit });
     const t = (canli.araclar || []).find((x) => x.plaka_norm === aracTakip.plakaNorm(arac.plaka));
