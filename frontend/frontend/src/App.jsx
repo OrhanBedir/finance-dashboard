@@ -8879,9 +8879,10 @@ function AracDetayPanel({ arac, veri, onKapat, onSahaAc, onHaritadaGoster }) {
           </div>); })()}
         <div style={{ ...kucuk, marginTop: 8, lineHeight: 1.5 }}>
           Kaynak: {g.kaynak}.{" "}
-          {g.dogrulama?.durum === "DOGRULANDI" ? <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Cihaz sayacıyla doğrulandı ({Number(g.dogrulama.sayac_bas).toLocaleString("tr-TR")} → {Number(g.dogrulama.sayac_bit).toLocaleString("tr-TR")}){g.dogrulama.neden ? ` · ${g.dogrulama.neden}` : ""}.</span>
-            : g.dogrulama?.durum === "UYUMSUZ" ? <span style={{ color: "#b45309", fontWeight: 700 }}>⚠ {g.dogrulama.neden} (sayaç farkı {Number(g.dogrulama.sayac_fark).toLocaleString("tr-TR")}). Değerleri kontrol edin.</span>
-            : <span style={{ color: "#b45309" }}>Sayaç doğrulaması yapılamadı{g.dogrulama?.neden ? `: ${g.dogrulama.neden}` : ""}.</span>}
+          {/* 04.11.2026: Triomobil konum geçmişinde sayaç 0 geliyor → birim, mesafe / hareket süresi tutarlılığıyla doğrulanır */}
+          {g.dogrulama?.durum === "DOGRULANDI" ? <span style={{ color: "#15803d", fontWeight: 700 }}>✓ Birim tutarlı{g.dogrulama.ortalama_hiz ? `: hareket süresine göre ortalama ${g.dogrulama.ortalama_hiz} km/s` : ""}{g.dogrulama.max_hiz ? ` (cihazın ölçtüğü en yüksek hız ${g.dogrulama.max_hiz} km/s)` : ""}{g.dogrulama.neden ? ` · ${g.dogrulama.neden}` : ""}.</span>
+            : g.dogrulama?.durum === "UYUMSUZ" ? <span style={{ color: "#b45309", fontWeight: 700 }}>⚠ {g.dogrulama.neden} (ortalama {g.dogrulama.ortalama_hiz} km/s çıkıyor). Değerleri Triomobil ekranıyla karşılaştırın.</span>
+            : <span style={{ color: "#b45309" }}>Birim doğrulanamadı{g.dogrulama?.neden ? `: ${g.dogrulama.neden}` : ""}.</span>}
           {g.ilk_veri_gunu && g.ilk_veri_gunu > g.bas ? ` İlk veri günü ${adGunTr(g.ilk_veri_gunu)}.` : ""}
         </div>
         <button type="button" className="rhmap-btn" style={{ marginTop: 8 }} aria-expanded={tabloAcik} onClick={() => setTabloAcik((x) => !x)}>{tabloAcik ? "▾" : "▸"} Gün gün tablo</button>

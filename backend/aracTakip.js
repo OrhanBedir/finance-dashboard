@@ -146,11 +146,14 @@ function eslestir(erc, trio) {
 // Gün sınırı Türkiye saati (UTC+3, yaz saati yok): rapor SAATLİK (_groupBy=hour) istenir, saatler TR gününe toplanır —
 // Triomobil'in "gün" gruplamasının hangi saat dilimini kullandığı belgede yazmadığı için ona güvenilmez.
 // Rapor satırı olmayan gün "Veri yok" (null), satırı olup farkı 0 olan gün ölçülmüş "0 km".
-// Birim doğrulaması: dönem başı / sonu sayaç değeri (locations/history ilk–son nokta, aynı cihaz sayacı) ile toplam fark
-// karşılaştırılır. Belgede mesafe ve süre birimi yazmadığı için birim, sayaçla tutarlılıktan belirlenir; tutmazsa açıkça yazılır.
+// Canlıda doğrulanan sınırlar (04.11.2026): rapor TEK İSTEKTE EN ÇOK 7 GÜN ("Maximum allowed interval is 7 day(s)") → dönem
+// 7 TR günlük pencerelere bölünür. Konum geçmişinde (locations/history) sayaç alanı 0 geldiği için sayaç karşılaştırması
+// yapılamaz; birim, cihazın kendi süreleriyle tutarlılıktan doğrulanır: toplam mesafe / hareket süresi = makul ortalama hız mı.
+// Geçmiş başlangıcı (canlı, salt okunur): 63AKR853 16.09.2026, 63AKR082 21.09.2026 (öncesinde satır yok → "Veri yok").
 const TR_OFSET_MS = 3 * 3600 * 1000;
 const GECMIS_AZAMI_GUN = 92;
 const GECMIS_ONBELLEK_MS = 10 * 60 * 1000;
+const PENCERE_GUN = 7; // Triomobil sürüş özeti tek istek sınırı
 const _gecmisOnbellek = new Map(); // anahtar → { zaman, veri }
 const trGun = (ms) => new Date(ms + TR_OFSET_MS).toISOString().slice(0, 10);
 const trGunBasMs = (gun) => Date.parse(`${gun}T00:00:00+03:00`);
@@ -188,16 +191,17 @@ function saatlikToplaGunluk(satirlar, gunler) {
   return { gunluk: g, sure_birimi: msMi ? "ms" : "sn" };
 }
 
-// Toplam rapor farkını cihaz sayacıyla karşılaştırır → { durum, carpan, ... }. carpan: rapor farkını km'ye çevirir.
-function birimDogrula(toplamHam, sayacBas, sayacBit) {
-  if (sayacBas === null || sayacBit === null) return { durum: "DOGRULANAMADI", carpan: 1, neden: "Dönem başı / sonu sayaç değeri alınamadı" };
-  const fark = sayacBit - sayacBas;
-  if (fark < 0) return { durum: "DOGRULANAMADI", carpan: 1, sayac_fark: fark, neden: "Sayaç dönem içinde geri gitti (cihaz değişimi / sıfırlama olabilir)" };
-  if (fark === 0 && toplamHam === 0) return { durum: "DOGRULANDI", carpan: 1, sayac_fark: 0 };
-  const yakin = (a, b) => Math.abs(a - b) <= Math.max(1, b * 0.03);
-  if (yakin(toplamHam, fark)) return { durum: "DOGRULANDI", carpan: 1, sayac_fark: fark };
-  if (yakin(toplamHam / 1000, fark)) return { durum: "DOGRULANDI", carpan: 1 / 1000, sayac_fark: fark, neden: "Rapor farkı metre, sayaç km — km'ye çevrildi" };
-  return { durum: "UYUMSUZ", carpan: 1, sayac_fark: fark, neden: "Günlük farkların toplamı cihaz sayacındaki değişimle tutmuyor" };
+// Birim doğrulaması (hız tutarlılığı): toplam ham fark / hareket saati = ortalama hız. Kara aracı için 2–160 km/s makuldür.
+// Ham fark km ise doğrudan, metre ise /1000 ile bu aralığa düşer; ikisi de tutmazsa UYUMSUZ (değer gösterilir, uyarı verilir).
+// → { durum, carpan, ortalama_hiz, neden }. carpan: ham farkı km'ye çevirir. Sayaç karşılaştırması YAPILMAZ (kaynakta sayaç yok).
+function birimDogrula(toplamHam, hareketSn) {
+  if (!toplamHam) return { durum: "DOGRULANDI", carpan: 1, ortalama_hiz: null, neden: "Dönemde hareket yok" };
+  if (!hareketSn || hareketSn < 60) return { durum: "DOGRULANAMADI", carpan: 1, ortalama_hiz: null, neden: "Hareket süresi yok; birim süreyle karşılaştırılamadı" };
+  const saat = hareketSn / 3600, makul = (v) => v >= 2 && v <= 160;
+  const km = toplamHam / saat, m = toplamHam / 1000 / saat;
+  if (makul(km)) return { durum: "DOGRULANDI", carpan: 1, ortalama_hiz: Math.round(km) };
+  if (makul(m)) return { durum: "DOGRULANDI", carpan: 1 / 1000, ortalama_hiz: Math.round(m), neden: "Rapor farkı metre — km'ye çevrildi" };
+  return { durum: "UYUMSUZ", carpan: 1, ortalama_hiz: Math.round(km), neden: "Mesafe ile hareket süresi birbiriyle tutarsız" };
 }
 
 // Tek aracın dönem istatistiği. trioId: Triomobil araç kimliği (son konum raporundan). bas/bit: TR günleri (YYYY-MM-DD).
@@ -221,35 +225,39 @@ async function aracGecmisi({ trioId, bas, bit, env = process.env, fetchFn = fetc
     return r;
   };
   const hata = (ad, r) => { const ay = typeof r.govde === "string" ? r.govde.slice(0, 160) : r.govde && typeof r.govde === "object" ? JSON.stringify(r.govde).slice(0, 160) : ""; return new Error(`Triomobil ${ad} alınamadı (HTTP ${r.durum}${ay ? `: ${ay}` : ""})`); };
-  const since = new Date(trGunBasMs(bas)).toISOString();
-  const until = new Date(Math.min(trGunBasMs(gunEkle(bit, 1)), simdi)).toISOString();
-  const zaman = `ts.since=${encodeURIComponent(since)}&ts.until=${encodeURIComponent(until)}`;
-  // Dizi parametresi (_pull) biçimi belgede yazmıyor: önce tekrarlı, reddedilirse virgüllü, o da olmazsa _pull'suz istenir
+  // Dizi parametresi (_pull) biçimi belgede yazmıyor: önce tekrarlı, reddedilirse virgüllü, o da olmazsa _pull'suz istenir.
+  // İlk pencerede kabul edilen biçim sonraki pencerelerde de kullanılır.
   const PULL = ["ignition", "mileage", "idle", "speed"];
-  const pullBicim = [PULL.map((p) => `_pull=${p}`).join("&"), `_pull=${PULL.join(",")}`, ""];
-  let satirlar = null, sonHata = null;
-  for (const pb of pullBicim) {
-    const tum = []; let red = false;
-    for (let sayfa = 1; sayfa <= 10; sayfa++) {
-      const r = await al(`/reports/vehicle/driving/summary?vehicleId=${trioId}&${zaman}&_groupBy=hour&_perPage=500&_page=${sayfa}${pb ? `&${pb}` : ""}`);
-      if (r.durum === 400) { red = true; sonHata = hata("sürüş özeti", r); break; }
-      if (r.durum >= 300 || !Array.isArray(r.govde)) throw hata("sürüş özeti", r);
-      tum.push(...r.govde);
-      if (r.govde.length < 500) break;
+  let pullBicim = [PULL.map((p) => `_pull=${p}`).join("&"), `_pull=${PULL.join(",")}`, ""];
+  const pencereOku = async (pBas, pBit) => {
+    const since = new Date(trGunBasMs(pBas)).toISOString();
+    const until = new Date(Math.min(trGunBasMs(gunEkle(pBit, 1)), simdi)).toISOString();
+    const zaman = `ts.since=${encodeURIComponent(since)}&ts.until=${encodeURIComponent(until)}`;
+    let sonHata = null;
+    for (const pb of pullBicim) {
+      const tum = []; let red = false;
+      for (let sayfa = 1; sayfa <= 10; sayfa++) {
+        const r = await al(`/reports/vehicle/driving/summary?vehicleId=${trioId}&${zaman}&_groupBy=hour&_perPage=500&_page=${sayfa}${pb ? `&${pb}` : ""}`);
+        if (r.durum === 400) { red = true; sonHata = hata("sürüş özeti", r); break; }
+        if (r.durum >= 300 || !Array.isArray(r.govde)) throw hata("sürüş özeti", r);
+        tum.push(...r.govde);
+        if (r.govde.length < 500) break;
+      }
+      if (!red) { pullBicim = [pb]; return tum; }
+      if (/interval|range/i.test(sonHata.message)) break; // aralık reddi _pull biçiminden değil — diğer biçimleri denemeye gerek yok
     }
-    if (!red) { satirlar = tum; break; }
-  }
-  if (!satirlar) throw sonHata || new Error("Triomobil sürüş özeti alınamadı");
-  const { gunluk, sure_birimi } = saatlikToplaGunluk(satirlar, gunler);
-  // Sayaç doğrulaması: dönemin ilk ve son konum noktası (cihaz sayacı)
-  const nokta = async (sira) => {
-    const r = await al(`/reports/vehicle/locations/history?vehicleId=${trioId}&${zaman}&_limit=1&_sortOrder=${sira}`).catch(() => null);
-    const x = r && r.durum < 300 && Array.isArray(r.govde) ? r.govde[0] : null;
-    return x ? { ts: x.ts || null, sayac: sayiVeyaNull(x.mileage) } : null;
+    throw sonHata || new Error("Triomobil sürüş özeti alınamadı");
   };
-  const [ilk, son] = await Promise.all([nokta("ASC"), nokta("DESC")]);
+  const satirlar = [];
+  for (let i = 0; i < gunler.length; i += PENCERE_GUN) {
+    const p = gunler.slice(i, i + PENCERE_GUN);
+    satirlar.push(...(await pencereOku(p[0], p[p.length - 1])));
+  }
+  const { gunluk, sure_birimi } = saatlikToplaGunluk(satirlar, gunler);
   const toplamHam = [...gunluk.values()].reduce((t, d) => t + (d ? d.ham_delta : 0), 0);
-  const dog = birimDogrula(toplamHam, ilk?.sayac ?? null, son?.sayac ?? null);
+  const hareketToplam = [...gunluk.values()].reduce((t, d) => t + (d && d.sure_var ? Math.max(0, d.kontak_acik_sn - d.rolanti_sn) : 0), 0);
+  const maxHiz = [...gunluk.values()].reduce((m, d) => (d && d.max_hiz !== null ? Math.max(m ?? 0, d.max_hiz) : m), null);
+  const dog = birimDogrula(toplamHam, hareketToplam);
   const yuvarla = (v) => Math.round(v * 10) / 10;
   const satirGun = gunler.map((tarih) => {
     const d = gunluk.get(tarih);
@@ -267,8 +275,8 @@ async function aracGecmisi({ trioId, bas, bit, env = process.env, fetchFn = fetc
     toplam_km: toplam, ortalama_km: veriliGun.length ? yuvarla(toplam / veriliGun.length) : null,
     en_fazla: enFazla && enFazla.km > 0 ? { tarih: enFazla.tarih, km: enFazla.km } : null,
     ilk_veri_gunu: veriliGun[0]?.tarih || null, gunler: satirGun, sure_var: veriliGun.some((x) => x.kontak_acik_sn !== null), sure_birimi,
-    dogrulama: { durum: dog.durum, neden: dog.neden || null, sayac_bas: ilk?.sayac ?? null, sayac_bit: son?.sayac ?? null, sayac_fark: dog.sayac_fark ?? null,
-      sayac_bas_ts: ilk?.ts || null, sayac_bit_ts: son?.ts || null, km_carpan: dog.carpan },
+    dogrulama: { durum: dog.durum, yontem: "HIZ_TUTARLILIGI", neden: dog.neden || null, ortalama_hiz: dog.ortalama_hiz, max_hiz: maxHiz, km_carpan: dog.carpan },
+    pencere_sayisi: Math.ceil(gunler.length / PENCERE_GUN),
     zaman: new Date(simdi).toISOString() };
   _gecmisOnbellek.set(anahtar, { zaman: simdi, veri });
   if (_gecmisOnbellek.size > 200) _gecmisOnbellek.delete(_gecmisOnbellek.keys().next().value);
