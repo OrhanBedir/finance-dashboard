@@ -292,7 +292,7 @@ async function aracGecmisi({ trioId, bas, bit, env = process.env, fetchFn = fetc
 // Çizgi yalnız ölçülmüş noktalardır: GPS boşluğu (GUZ_BOSLUK_DK) ya da gerçek dışı sıçrama (> GUZ_SICRAMA_KMH) varsa çizgi KESİLİR.
 // Km bu çizgiden hesaplanmaz (km = sürüş özeti). Bugün 60 sn, geçmiş gün 6 sa önbellekte; aynı anda gelen istekler birleşir.
 // TRIO_GUZ_LIMIT yalnız yerel testte parça sınırını küçültmek içindir (en çok 5000 — sağlayıcı sınırı)
-const GUZ_MIN_TS_DIFF = 30, GUZ_LIMIT = Math.min(5000, Number(process.env.TRIO_GUZ_LIMIT) || 5000), GUZ_AZAMI_PARCA = 6, GUZ_BOSLUK_DK = 10, GUZ_SICRAMA_KMH = 200, GUZ_HAREKET_KMH = 5, GUZ_DURAK_DK = 3;
+const GUZ_MIN_TS_DIFF = 30, GUZ_LIMIT = Math.min(5000, Number(process.env.TRIO_GUZ_LIMIT) || 5000), GUZ_AZAMI_PARCA = 6, GUZ_BOSLUK_DK = 10, GUZ_SICRAMA_KMH = 200, GUZ_HAREKET_KMH = 5, GUZ_DURAK_DK = 3, GUZ_PARK_KAYMA_KM = 0.5;
 const _guzOnbellek = new Map(), _guzBekleyen = new Map();
 const haversineKm = (a, b) => { const R = 6371, r = (d) => d * Math.PI / 180; const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
@@ -309,30 +309,39 @@ function guzergahIsle(ham, { simdi = Date.now() } = {}) {
   }
   n.sort((a, b) => a.t - b.t);
   const durumOf = (p) => (p.hiz !== null && p.hiz >= GUZ_HAREKET_KMH ? "HAREKET" : p.kontak === "KAPALI" ? "PARK" : p.kontak === "ACIK" ? "ROLANTI" : "BILINMIYOR");
+  // 05.11.2026 canlı gözlem: kontak kapalı parkta cihaz ~60 dk'da bir "uyanma" noktası gönderiyor (hareket halinde ~30 sn).
+  // Önceki nokta park ve araç yerinden oynamadıysa (≤ GUZ_PARK_KAYMA_KM) aradaki uzun süre GPS boşluğu SAYILMAZ: park sürer.
+  // Kontak kapalıyken araç uzağa gitmişse (çekici vb.) yine boşluktur.
+  const uyku = (a, b) => durumOf(a) === "PARK" && haversineKm(a, b) <= GUZ_PARK_KAYMA_KM;
   const parcalar = []; let p = [];
   const kesikler = [];
   for (let i = 0; i < n.length; i++) {
     const a = n[i - 1], b = n[i];
     if (a) {
       const dk = (b.t - a.t) / 60000, km = haversineKm(a, b), hiz = dk > 0 ? km / (dk / 60) : Infinity;
-      if (dk > GUZ_BOSLUK_DK) kesikler.push({ tur: "BOSLUK", bas: a.ts, bit: b.ts, dk: Math.round(dk) });
+      const bosluk = dk > GUZ_BOSLUK_DK && !uyku(a, b);
+      if (bosluk) kesikler.push({ tur: "BOSLUK", bas: a.ts, bit: b.ts, dk: Math.round(dk) });
       else if (km > 0.5 && hiz > GUZ_SICRAMA_KMH) kesikler.push({ tur: "SICRAMA", bas: a.ts, bit: b.ts, km: Math.round(km * 10) / 10 });
-      if (dk > GUZ_BOSLUK_DK || (km > 0.5 && hiz > GUZ_SICRAMA_KMH)) { if (p.length) parcalar.push(p); p = []; }
+      if (bosluk || (km > 0.5 && hiz > GUZ_SICRAMA_KMH)) { if (p.length) parcalar.push(p); p = []; }
     }
     p.push({ ts: b.ts, lat: b.lat, lng: b.lng, hiz: b.hiz, kontak: b.kontak, durum: durumOf(b) });
   }
   if (p.length) parcalar.push(p);
   // Duraklar: ardışık hareketsiz noktalar (≥ GUZ_DURAK_DK); tür kontak durumundan
   const duraklar = []; let d = null;
-  const kapat = (son) => { if (d && (d.t2 - d.t1) / 60000 >= GUZ_DURAK_DK) duraklar.push({ bas: new Date(d.t1).toISOString(), bit: new Date(d.t2).toISOString(),
-    sure_sn: Math.round((d.t2 - d.t1) / 1000), lat: d.lat, lng: d.lng, tur: d.park && d.rol ? "KARISIK" : d.park ? "PARK" : d.rol ? "KONTAK_ACIK_DURUS" : "BILINMIYOR",
-    devam: !!son }); d = null; };
+  // Tür, süreye göre: iki nokta arasındaki süre önceki noktanın durumuna yazılır; ikisi de ≥ %25 ise KARISIK
+  const kapat = (son) => { if (d && (d.t2 - d.t1) / 60000 >= GUZ_DURAK_DK) { const top = d.parkSn + d.rolSn || 1;
+    const tur = d.parkSn / top >= 0.25 && d.rolSn / top >= 0.25 ? "KARISIK" : d.parkSn >= d.rolSn ? (d.parkSn ? "PARK" : "BILINMIYOR") : "KONTAK_ACIK_DURUS";
+    duraklar.push({ bas: new Date(d.t1).toISOString(), bit: new Date(d.t2).toISOString(), sure_sn: Math.round((d.t2 - d.t1) / 1000), lat: d.lat, lng: d.lng, tur,
+      park_sn: Math.round(d.parkSn), rolanti_sn: Math.round(d.rolSn), devam: !!son }); } d = null; };
   for (let i = 0; i < n.length; i++) {
-    const x = n[i], s = durumOf(x);
+    const x = n[i], s = durumOf(x), o = n[i - 1];
     if (s === "HAREKET") { kapat(false); continue; }
-    if (d && (x.t - d.t2) / 60000 > GUZ_BOSLUK_DK) kapat(false); // boşluk durağı da böler
-    if (!d) d = { t1: x.t, t2: x.t, lat: x.lat, lng: x.lng, park: false, rol: false };
-    d.t2 = x.t; if (s === "PARK") d.park = true; if (s === "ROLANTI") d.rol = true;
+    if (d && (x.t - d.t2) / 60000 > GUZ_BOSLUK_DK && !(o && uyku(o, x))) kapat(false); // gerçek boşluk durağı böler
+    if (!d) d = { t1: x.t, t2: x.t, lat: x.lat, lng: x.lng, parkSn: 0, rolSn: 0, son: s };
+    const ara = (x.t - d.t2) / 1000;
+    if (d.son === "PARK") d.parkSn += ara; else if (d.son === "ROLANTI") d.rolSn += ara;
+    d.t2 = x.t; d.son = s;
   }
   kapat(true);
   const ilkHareket = n.find((x) => durumOf(x) === "HAREKET") || null;

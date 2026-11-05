@@ -27778,7 +27778,7 @@ async function aracMalzemeOku(req, arac, gun) {
   const kayitli = new Set(isl.map((x) => x.site_code));
   const kayitsiz = liste.filter((k) => !kayitli.has(k)).map((k) => { const r = kapsam.rows.get(k); const gel = r?.malzeme_gelis_tarihi || r?.enh_malzeme_gelis_tarihi;
     return { site_code: k, fiziksel_id: sahaKimlik.fizikselSaha(k)?.fiziksel_id || null, durum: gel ? "KONUM_TEYIDI" : "KAYIT_YOK",
-      durum_ad: gel ? `Konum teyidi bekliyor (eski kayıt: geliş ${aracOperasyon.gunStr(gel)})` : "Malzeme kaydı yok — depoda olduğu varsayılmaz" }; });
+      durum_ad: gel ? `Konum teyidi bekliyor (eski kayıt: geliş ${aracOperasyon.gunStr(gel).split("-").reverse().join(".")})` : "Malzeme kaydı yok — depoda olduğu varsayılmaz" }; });
   return { ...m, kayitsiz, arac_baglantisi_hazir: aracKol, ekipler: [...gunO.ekipSet].map((e) => ({ ekip_no: e, ad: gunO.ekipAd.get(e) || `Ekip ${e}` })) };
 }
 // Plan (gün / hafta) — her iş kodu için fiilî durum, QC (ayrı alan), malzeme durumu ve açık issue
