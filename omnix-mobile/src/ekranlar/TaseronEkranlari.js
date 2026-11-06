@@ -309,7 +309,7 @@ export function TaseronFaturalarEkrani({ navigation }) {
       {v.yukleniyor && !v.veri ? <><IskeletKart /><IskeletKart /></> : null}
       {v.hata && !v.veri ? <Kart><HataDurum hata={v.hata} baslik="Faturalar alınamadı" onTekrar={v.yenile} /></Kart> : null}
       <EskiVeriBandi v={v} style={{ marginBottom: aralik.s }} />
-      {v.veri && !rows.length ? <Kart><BosDurum ikon="receipt-outline" baslik="Henüz fatura kaydı yok" aciklama="Hakediş ve ödemelerinizi Hakediş ve Cari ekranından görebilirsiniz." eylem="Hakediş ve Cari" onEylem={() => navigation.navigate("TaseronCari")} /></Kart> : null}
+      {v.veri && !rows.length ? <Kart><BosDurum ikon="receipt-outline" baslik="Henüz fatura kaydı yok" aciklama="Hakediş ve ödemelerinizi Hakediş ve Cari ekranından görebilirsiniz." eylem="Finans" onEylem={() => navigation.navigate("TaseronFinans")} /></Kart> : null}
       {rows.map((f) => {
         const d = FATURA_DURUM[f.durum] || { ad: f.durum, ton: "notr" };
         return (

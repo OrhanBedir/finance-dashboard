@@ -10,7 +10,8 @@ const L = [is("BU1_NR700", "BEKLIYOR"), is("BU1_L1800", "DEVAM", { sorun: true }
 
 test("filtreler: montaj / QC / sorun bağımsız; kısmi iş tamamlanan sayılmaz", () => {
   const s = sayac(L);
-  assert.deepEqual(s, { tumu: 5, montaj_bekleyen: 1, devam: 3, tamamlanan: 1, qc_ok: 1, sorun: 2 });
+  const { tumu, montaj_bekleyen, devam, tamamlanan, qc_ok, sorun } = s;
+  assert.deepEqual({ tumu, montaj_bekleyen, devam, tamamlanan, qc_ok, sorun }, { tumu: 5, montaj_bekleyen: 1, devam: 3, tamamlanan: 1, qc_ok: 1, sorun: 2 });
   assert.equal(filtreUyar(L[2], "tamamlanan"), false);
   assert.ok(filtreUyar(L[3], "tamamlanan") && filtreUyar(L[3], "sorun") && filtreUyar(L[3], "qc_ok"));
 });

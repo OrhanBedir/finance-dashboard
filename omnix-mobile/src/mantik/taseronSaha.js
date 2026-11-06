@@ -10,7 +10,18 @@ export const FILTRELER = [
   { kod: "qc_ok", ad: "QC OK" },
   { kod: "sorun", ad: "Alarm / sorun" },
 ];
+// 06.11.2026 durum grupları (sunucu iş.gruplar): bir iş birden çok gruba girebilir — sayaçlar toplanmaz
+export const GRUP_FILTRELER = [
+  { kod: "tumu", ad: "Tümü" },
+  { kod: "atanan", ad: "Atanan · montaj bekliyor" },
+  { kod: "devam", ad: "Montaj devam ediyor" },
+  { kod: "qc_bekleyen", ad: "Montaj tamam · QC bekliyor" },
+  { kod: "qc_ok", ad: "QC OK (kapanmış)" },
+  { kod: "eksik", ad: "Eksik / Issue / Clean Up" },
+];
 export function filtreUyar(is, kod) {
+  if (Array.isArray(is.gruplar) && ["atanan", "qc_bekleyen", "eksik"].includes(kod)) return is.gruplar.includes(kod);
+  if (Array.isArray(is.gruplar) && kod === "devam") return is.gruplar.includes("devam");
   switch (kod) {
     case "montaj_bekleyen": return is.montaj?.durum === "BEKLIYOR";
     case "devam": return ["DEVAM", "KISMI", "KONTROL"].includes(is.montaj?.durum);
@@ -64,9 +75,30 @@ export function gecmisSayac(satirlar) {
 export const bolgeler = (satirlar) => [...new Set((satirlar || []).map((x) => x.bolge || x.il).filter(Boolean))].sort((a, b) => a.localeCompare(b, "tr"));
 export function sayac(isler) {
   const o = {};
-  for (const f of FILTRELER) o[f.kod] = (isler || []).filter((x) => filtreUyar(x, f.kod)).length;
+  for (const f of [...FILTRELER, ...GRUP_FILTRELER]) o[f.kod] = (isler || []).filter((x) => filtreUyar(x, f.kod)).length;
   return o;
 }
+
+// ── YAKINIMDAKİ SAHALAR ── kuş uçuşu mesafe (karayolu değil), yalnız sunucunun verdiği yetkili iş listesinde ve kayıtlı konumu
+// olan sahalarda. Konumu olmayan sahaya mesafe uydurulmaz. Yakınlık işlem yetkisi vermez (düğmeler yine sunucudan).
+export const YAKIN_KM = [5, 10, 25, 50];
+export function mesafeKm(a, b) {
+  if (!a || !b || ![a.lat, a.lng, b.lat, b.lng].every((v) => Number.isFinite(Number(v)))) return null;
+  const R = 6371, r = (d) => (Number(d) * Math.PI) / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(h)) * 10) / 10;
+}
+export function yakinSahalar(isler, konum, km) {
+  if (!konum) return { yakin: [], konumsuz: (isler || []).filter((x) => !x.konum).length };
+  const yakin = (isler || []).map((x) => ({ ...x, mesafe_km: mesafeKm(konum, x.konum) })).filter((x) => x.mesafe_km != null && x.mesafe_km <= km)
+    .sort((a, b) => Number(!!b.sorun?.var || !!b.cleanup) - Number(!!a.sorun?.var || !!a.cleanup) || a.mesafe_km - b.mesafe_km);
+  return { yakin, konumsuz: (isler || []).filter((x) => !x.konum).length };
+}
+// Yol tarifi bağlantısı (cihazın harita uygulaması) — yalnız kayıtlı konumda
+export const yolTarifiAdresi = (k, platform = "ios") => (!k ? null : platform === "ios"
+  ? `http://maps.apple.com/?daddr=${k.lat},${k.lng}` : `https://www.google.com/maps/dir/?api=1&destination=${k.lat},${k.lng}`);
+export const bugunMu = (t, simdi = new Date()) => !!t && String(t).slice(0, 10) === new Date(simdi.getTime() + 3 * 3600e3).toISOString().slice(0, 10);
 
 // Montaj durumu → renk / ton (harita pini ve rozet aynı eşleşme)
 export const MONTAJ_RENK = { BEKLIYOR: "MAVI", DEVAM: "SARI", KISMI: "SARI", KONTROL: "GRI", TAMAMLANDI: "YESIL" };

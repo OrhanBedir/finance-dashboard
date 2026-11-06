@@ -35,6 +35,8 @@ const KODLAR = ["BU8001_NR700", "BU8002_NR700", "BU8003_NR700", "BU8004_NR700", 
   await q(`UPDATE subcons SET ana_firma = 'TEKNO', aktif = true WHERE id = ANY($1)`, [[id.TEKNO_EMRAH, id.TEKNO_2KX]]);
   await q(`UPDATE subcons SET ana_firma = NULL, aktif = true WHERE id = ANY($1)`, [[id["TEKNO_İZTAŞ"], id["2KX"], id["İZTAŞ"]]]); // canlıdaki gibi ana firması boş
   await q(`DELETE FROM subcon_takma_ad WHERE subcon_id = ANY($1)`, [Object.values(id)]).catch(() => {});
+  // 06.11.2026 RF portal kapsamı: yalnız TEKNO_EMRAH ve TEKNO_İZTAŞ (TEKNO_2KX / bağımsız firmalar dışarıda)
+  await q(`UPDATE subcons SET rf_portal = (id = ANY($1))`, [[id.TEKNO_EMRAH, id["TEKNO_İZTAŞ"]]]).catch((e) => console.error("rf_portal", e.message));
   // Ekipler (firma bağı ekipler.firma_id)
   await q(`UPDATE ekipler SET firma_id = $1 WHERE ekip_no = 302`, [id.TEKNO_EMRAH]);
   await q(`INSERT INTO ekipler (ekip_no, ad, bolge, plaka, ekip_turu, firma_id, aktif) VALUES (303, 'Emrah Ekip 2', 'Bursa', '16EM303', 'DIS', $1, true)`, [id.TEKNO_EMRAH]);
@@ -52,6 +54,8 @@ const KODLAR = ["BU8001_NR700", "BU8002_NR700", "BU8003_NR700", "BU8004_NR700", 
   };
   const uye = (uid, firma, rol, ekip) => q(`INSERT INTO taseron_saha_uye (user_id, taseron_id, ekip_no, rol, ekleyen) VALUES ($1,$2,$3,$4,'tohum')`, [uid, id[firma], ekip, rol]);
   await uye(await kul("Emrah Sorumlu", E.emrahSorumlu, "TEKNO_EMRAH", "TEKNO"), "TEKNO_EMRAH", "SORUMLU", null);
+  // Firma sahibi: finans açıkça verilir (06.11.2026 — sorumlu rolü tek başına finans açmaz)
+  await q(`UPDATE taseron_saha_uye SET finans = true WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [E.emrahSorumlu]);
   await uye(await kul("Emrah Çalışan Bir", E.emrahCalisan1, "TEKNO_EMRAH", "TEKNO"), "TEKNO_EMRAH", "CALISAN", 302);
   await uye(await kul("Emrah Çalışan İki", E.emrahCalisan2, "TEKNO_EMRAH", "TEKNO"), "TEKNO_EMRAH", "CALISAN", 303);
   await kul("Emrah Firma Hesabı", E.emrahVarsayilan, "TEKNO_EMRAH", "TEKNO"); // üyelik satırı yok → firma geneli

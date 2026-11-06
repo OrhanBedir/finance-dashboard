@@ -10733,7 +10733,7 @@ function RolloutDashboard({ currentUser, saltOkunur = false, excelIzni = true, k
           {/* 04.11.2026: taşeron uygulama hesapları — İş Ata yetkilisi (yetki ve firma kapsamı sunucuda) */}
           {isAtamaYetkili && <button type="button" onClick={() => setShowTaseronHesap(true)} title="Taşeronların Omnix Field Operation hesapları: rol, ekip, yeni hesap, şifre sıfırlama"
             style={{ background: "#fff", color: "#0b1a33", border: "1.5px solid #0b1a33", padding: "9px 15px", borderRadius: "8px", marginLeft: "10px", cursor: "pointer", fontWeight: "700", whiteSpace: "nowrap" }}>
-            👷 Taşeron Hesapları
+            👷 RF Taşeron Hesapları
           </button>}
           {showTaseronHesap && <TaseronHesapModal onClose={() => setShowTaseronHesap(false)} />}
         </div>

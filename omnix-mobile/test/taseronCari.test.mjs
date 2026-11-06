@@ -50,3 +50,36 @@ test("saha ekranı kapalı firma sorumlusu: rol korunur, Sahalar kapanır", () =
   assert.equal(sahaAcik({}), true, "eski sunucu: alan yoksa açık");
   assert.equal(sahaAcik({ taseron_saha: { rol: "KAPALI" } }), false);
 });
+
+import { GRUP_FILTRELER, mesafeKm, yakinSahalar, yolTarifiAdresi, sayac as sahaSayac, filtreUyar } from "../src/mantik/taseronSaha.js";
+import { finansVar } from "../src/mantik/profil.js";
+
+test("durum grupları: bir iş birden çok gruba girebilir; QC bekleyen eksik sayılmaz", () => {
+  const L = [{ kod: "A", gruplar: ["qc_bekleyen"], montaj: { durum: "TAMAMLANDI" }, qc: {}, sorun: {} },
+    { kod: "B", gruplar: ["qc_ok", "eksik"], montaj: { durum: "TAMAMLANDI" }, qc: { durum: "OK" }, sorun: { var: true } },
+    { kod: "C", gruplar: ["atanan"], montaj: { durum: "BEKLIYOR" }, qc: {}, sorun: {} }];
+  const s = sahaSayac(L);
+  assert.equal(s.qc_bekleyen, 1); assert.equal(s.eksik, 1); assert.equal(s.qc_ok, 1); assert.equal(s.atanan, 1);
+  assert.equal(filtreUyar(L[0], "eksik"), false, "QC bekleyen iş eksik montaj değildir");
+  assert.equal(GRUP_FILTRELER.length, 6);
+});
+
+test("yakınımdaki sahalar: kuş uçuşu, konumsuz sahaya mesafe yok, açık eksik önce", () => {
+  const ben = { lat: 41.0, lng: 32.6 };
+  assert.ok(Math.abs(mesafeKm(ben, { lat: 41.1, lng: 32.6 }) - 11.1) < 0.2);
+  assert.equal(mesafeKm(ben, null), null);
+  const L = [{ kod: "Y1", konum: { lat: 41.02, lng: 32.6 } }, { kod: "Y2", konum: { lat: 41.04, lng: 32.6 }, cleanup: { kalem: 2 } },
+    { kod: "U", konum: { lat: 42.0, lng: 32.6 } }, { kod: "K", konum: null }];
+  const r = yakinSahalar(L, ben, 10);
+  assert.deepEqual(r.yakin.map((x) => x.kod), ["Y2", "Y1"]); assert.equal(r.konumsuz, 1);
+  assert.deepEqual(yakinSahalar(L, null, 10).yakin, [], "konum izni yoksa liste boş, uydurma yok");
+  assert.match(yolTarifiAdresi({ lat: 41, lng: 32 }, "android"), /destination=41,32/);
+  assert.equal(yolTarifiAdresi(null), null);
+});
+
+test("finans menüsü: yalnız firma sahibi (sorumlu + finans)", () => {
+  assert.equal(finansVar({ taseron_saha: { rol: "SORUMLU", finans: true } }), true);
+  assert.equal(finansVar({ taseron_saha: { rol: "SORUMLU", finans: false } }), false, "operasyon sorumlusu");
+  assert.equal(finansVar({ taseron_saha: { rol: "CALISAN", finans: true } }), false);
+  assert.equal(finansVar({}), true, "eski sunucu / eski hesap");
+});

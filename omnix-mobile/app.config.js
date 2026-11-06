@@ -73,6 +73,9 @@ module.exports = {
     },
     plugins: [
       "expo-secure-store",
+      // 06.11.2026 "Yakınımdaki Sahalar": yalnız kullanıcı düğmeye basınca, uygulama açıkken konum (arka plan takibi YOK)
+      ["expo-location", { locationWhenInUsePermission: "Yakınınızdaki atanmış sahaları listelemek için konumunuz yalnız siz istediğinizde kullanılır.",
+        isAndroidBackgroundLocationEnabled: false, isIosBackgroundLocationEnabled: false }],
       [
         "expo-image-picker",
         {

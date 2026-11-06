@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { aralik, kose, renk, yazi } from "../tema";
-import { BilgiSatiri, Kart, Metin, Rozet } from "../bilesenler/temel";
+import { BilgiSatiri, BolumBasligi, Kart, Metin, Rozet } from "../bilesenler/temel";
 import { Bant, BosDurum, EskiVeriBandi, HataDurum, IskeletKart } from "../bilesenler/durum";
 import { Ekran } from "../bilesenler/Ekran";
 import { useVeri } from "../api/veri";
@@ -19,6 +19,9 @@ import { hataMetni } from "../mantik/hata";
 
 const tutar = (v, pb) => (v === null || v === undefined ? "—" : para(v, pb));
 const MONTAJ_AD = { BEKLIYOR: "Montaj bekliyor", DEVAM: "Montaj devam ediyor", TAMAMLANDI: "Montaj tamamlandı" };
+const HAKEDIS_DURUM_SECIM = [{ kod: "tumu", ad: "Tümü" }, { kod: "QC_OK", ad: "QC kapanmış" }, { kod: "QC_BEKLIYOR", ad: "QC bekliyor" }, { kod: "TEYIT", ad: "Teyit bekliyor" },
+  { kod: "PLAN", ad: "Planlı" }, { kod: "FIYATSIZ", ad: "Fiyat yok" }];
+const HAKEDIS_TON = { QC_OK: "basari", QC_BEKLIYOR: "uyari", TEYIT: "uyari", PLAN: "notr", PAKET: "notr", FIYATSIZ: "uyari" };
 
 function Cipler({ secenekler, deger, onSec, sayac }) {
   return (
@@ -62,8 +65,11 @@ export function TaseronCariEkrani({ navigation, route }) {
   const [sekme, setSekme] = useState(route?.params?.sekme || "hakedis");
   useEffect(() => { if (route?.params?.sekme) setSekme(route.params.sekme); }, [route?.params?.sekme]);
   const [arama, setArama] = useState("");
+  const [hDurum, setHDurum] = useState("tumu");
+  const [hTarih, setHTarih] = useState("tumu");
   const [acik, setAcik] = useState(null);
   const c = v.veri;
+  const q = c?.qc_esasli || null;
   const o = c?.ozet?.find((x) => x.para_birimi === "TRY") || c?.ozet?.[0] || null;
   const geri = !!route?.params?.yigin; // sekmede değil, başka ekrandan açıldıysa geri düğmesi
   const belgeAc = async (id) => {
@@ -71,7 +77,7 @@ export function TaseronCariEkrani({ navigation, route }) {
     catch (e) { Alert.alert("Belge açılamadı", hataMetni(e)); }
   };
   return (
-    <Ekran baslik="Hakediş ve Cari" geri={geri} altBaslik={c?.firma ? `${c.firma.ad}${c.guncel ? ` · ${tarih(c.guncel)} ${saat(c.guncel)}` : ""}` : undefined}
+    <Ekran baslik="Finans" geri={geri} altBaslik={c?.firma ? `${c.firma.ad}${c.guncel ? ` · ${tarih(c.guncel)} ${saat(c.guncel)}` : ""}` : undefined}
       yenileniyor={v.yenileniyor} onYenile={v.yenile}>
       {v.yukleniyor && !c ? <><IskeletKart yukseklik={140} /><IskeletKart /><IskeletKart /></> : null}
       {v.hata && !c ? <Kart><HataDurum hata={v.hata} baslik={v.hata?.tur === "yetki" ? "Bu bölüme erişiminiz yok" : "Cari bilgisi alınamadı"} onTekrar={v.hata?.tur === "yetki" ? undefined : v.yenile} /></Kart> : null}
@@ -79,23 +85,54 @@ export function TaseronCariEkrani({ navigation, route }) {
       {c?.kart_yok ? <Kart><BosDurum ikon="card-outline" baslik="Cari kartı tanımlı değil" aciklama={c.mesaj} /></Kart> : null}
       {c && !c.kart_yok ? (
         <>
-          {o ? (
-            <Kart style={{ backgroundColor: renk.lacivert, marginBottom: aralik.s }} erisimEtiketi={`${o.yon.metin}: ${para(Math.abs(o.net), o.para_birimi)}`}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Metin tur="etiket" renk="#C7D3E3" style={{ flex: 1, textTransform: "uppercase", letterSpacing: 0.6 }}>Net cari · {c.donem?.ad || "Tüm dönem"}</Metin>
-                <Rozet metin={o.yon.metin} tonAdi={YON_TON[o.yon.kod]} />
+          {q ? (
+            <>
+              {/* 06.11.2026 QC ESASLI HAKEDİŞ — hak edilmiş bedel yalnız QC'si kapanmış iş kalemleri (ortak hesap: tedarikciCari.qcEsasliOzet) */}
+              <Kart style={{ backgroundColor: renk.lacivert, marginBottom: aralik.s }} erisimEtiketi={`${q.yon.metin}: ${para(Math.abs(q.net), q.para_birimi)}`}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Metin tur="etiket" renk="#C7D3E3" style={{ flex: 1, textTransform: "uppercase", letterSpacing: 0.6 }}>Net durum · QC esaslı</Metin>
+                  <Rozet metin={q.yon.kod === "AVANS" ? "Açık avansınız" : q.yon.metin} tonAdi={YON_TON[q.yon.kod]} />
+                </View>
+                <Metin tur="baslikXL" renk="#FFFFFF" style={[yazi.tutar, { marginTop: aralik.xs }]} numberOfLines={1} adjustsFontSizeToFit>{para(Math.abs(q.net), q.para_birimi)}</Metin>
+                <Metin tur="minik" renk="#C7D3E3">{c.firma.ad} · {tarih(c.guncel)} · KDV hariç hakediş, ödenen tutar karşılığında</Metin>
+              </Kart>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
+                <MiniKart ad="QC kapanmış hakediş" deger={para(q.qc_kapanmis, q.para_birimi)} not="Hak edilmiş · KDV hariç" ton={renk.basari} />
+                <MiniKart ad="Gerçekleşen toplam ödeme" deger={para(q.odenen, q.para_birimi)} not="Avans dahil · mahsup/iptal hariç" />
+                <MiniKart ad="Hakedişe uygulanan ödeme" deger={para(q.uygulanan, q.para_birimi)} not="Hakedişten düşülen" />
+                <MiniKart ad="Kalan hakediş alacağı" deger={para(q.kalan, q.para_birimi)} not="Firmanıza ödenecek" ton={q.kalan > 0 ? renk.basari : undefined} />
+                <MiniKart ad="Açık avans" deger={para(q.acik_avans, q.para_birimi)} not="Henüz QC'li işe mahsup edilmedi" ton={q.acik_avans > 0 ? renk.uyari : undefined} />
               </View>
-              <Metin tur="baslikXL" renk="#FFFFFF" style={[yazi.tutar, { marginTop: aralik.xs }]}>{para(Math.abs(o.net), o.para_birimi)}</Metin>
-              <Metin tur="minik" renk="#C7D3E3">{c.firma.model_ad}{c.donem?.baslangic ? ` · ${tarih(c.donem.baslangic)} – ${tarih(c.donem.bitis)}` : ""}</Metin>
-            </Kart>
+              <BolumBasligi baslik="İş bedelleri (ayrı aşamalar)" />
+              <Kart style={{ paddingVertical: aralik.xs }}>
+                <BilgiSatiri etiket="1 · Atanan iş bedeli (plan)" deger={para(q.plan, q.para_birimi)} />
+                <BilgiSatiri etiket="2 · Montajı yapıldı, QC bekliyor" deger={para(q.montaj_qc_bekleyen, q.para_birimi)} />
+                {q.teyit ? <BilgiSatiri etiket="QC teyit bekliyor (çelişkili)" deger={para(q.teyit, q.para_birimi)} /> : null}
+                <BilgiSatiri etiket="3 · QC kapanmış — hak edildi" deger={para(q.qc_kapanmis, q.para_birimi)} son />
+              </Kart>
+              <Pressable onPress={() => navigation.navigate("TaseronAtananBedeller")} accessibilityRole="button" style={{ minHeight: 40, justifyContent: "center", marginTop: 4 }}>
+                <Metin tur="kucukKalin" renk={renk.lacivert}>Atanan iş bedellerini saha saha gör ›</Metin>
+              </Pressable>
+              <Bant tonAdi="notr" ikon="git-compare-outline" baslik="Muhasebe carisiyle mutabakat" style={{ marginTop: aralik.s }}
+                metin={`Muhasebe carisi (yapılan iş esaslı): iş bedeli ${para(q.mutabakat.muhasebe_is_bedeli, "TRY")}, net ${para(Math.abs(q.mutabakat.muhasebe_net), "TRY")} (${q.mutabakat.muhasebe_yon.metin.toLocaleLowerCase("tr-TR")}). QC esaslı hakediş ${para(q.mutabakat.qc_hakedis, "TRY")}. Fark ${para(q.mutabakat.fark, "TRY")}: ${q.mutabakat.aciklama}`} />
+            </>
+          ) : o ? (
+            <>
+              <Kart style={{ backgroundColor: renk.lacivert, marginBottom: aralik.s }} erisimEtiketi={`${o.yon.metin}: ${para(Math.abs(o.net), o.para_birimi)}`}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Metin tur="etiket" renk="#C7D3E3" style={{ flex: 1, textTransform: "uppercase", letterSpacing: 0.6 }}>Net cari · {c.donem?.ad || "Tüm dönem"}</Metin>
+                  <Rozet metin={o.yon.metin} tonAdi={YON_TON[o.yon.kod]} />
+                </View>
+                <Metin tur="baslikXL" renk="#FFFFFF" style={[yazi.tutar, { marginTop: aralik.xs }]}>{para(Math.abs(o.net), o.para_birimi)}</Metin>
+                <Metin tur="minik" renk="#C7D3E3">{c.firma.model_ad}</Metin>
+              </Kart>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
+                {cariKartlari(o).map((k) => <MiniKart key={k.kod} ad={k.ad} deger={tutar(k.deger, o.para_birimi)} not={k.not} />)}
+              </View>
+            </>
           ) : null}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: aralik.s }}>
-            {cariKartlari(o).map((k) => <MiniKart key={k.kod} ad={k.ad} deger={tutar(k.deger, o.para_birimi)} not={k.not}
-              ton={k.kod === "acik_avans" && k.deger > 0 ? renk.uyari : k.kod === "hakedis_kalan" && k.deger > 0 ? renk.basari : undefined} />)}
-          </View>
-          {o?.plan_bedeli ? <Metin tur="minik" renk={renk.metinIkincil} style={{ marginTop: aralik.xs }}>Planlanan (PR) iş bedeli: {para(o.plan_bedeli, o.para_birimi)} · fiziki tamamlandıkça yapılan işe geçer</Metin> : null}
           {(c.uyarilar || []).map((u, i) => <Bant key={i} tonAdi="uyari" ikon="alert-circle-outline" metin={u} style={{ marginTop: aralik.s }} />)}
-          <Bant tonAdi="bilgi" ikon="information-circle-outline" baslik="Nasıl hesaplanıyor?" metin={`${c.kural.is_bedeli} ${c.kural.tarife} ${c.kural.vergi}`} style={{ marginTop: aralik.s, marginBottom: aralik.s }} />
+          <Bant tonAdi="bilgi" ikon="information-circle-outline" baslik="Nasıl hesaplanıyor?" metin={`${c.kural.qc} ${c.kural.is_bedeli} ${c.kural.tarife} ${c.kural.vergi}`} style={{ marginTop: aralik.s, marginBottom: aralik.s }} />
 
           <Cipler secenekler={CARI_SEKMELER} deger={sekme} onSec={(k) => { setSekme(k); setAcik(null); }}
             sayac={{ hakedis: c.hakedisler.length, odeme: c.odemeler.length, hareket: c.hareketler.reduce((t, h) => t + h.satirlar.length, 0), fatura: c.faturalar.length }} />
@@ -103,8 +140,11 @@ export function TaseronCariEkrani({ navigation, route }) {
           {sekme === "hakedis" ? (
             <>
               <Arama deger={arama} onDegis={setArama} ipucu="Site ID, iş kodu ya da kalem kodu" />
+              <Cipler secenekler={HAKEDIS_DURUM_SECIM} deger={hDurum} onSec={setHDurum} />
+              <Cipler secenekler={TARIH_SECIM.slice(0, 3)} deger={hTarih} onSec={setHTarih} />
               {!c.hakedisler.length ? <Kart><BosDurum ikon="construct-outline" baslik="Firmanıza kayıtlı iş kalemi yok" aciklama="Günlük iş girişine işiniz işlendiğinde burada görünür." /></Kart> : null}
-              {hakedisArama(c.hakedisler, arama).map((h) => {
+              {hakedisArama(c.hakedisler, arama).filter((h) => (hDurum === "tumu" || h.hakedis_durum === hDurum)
+                && (hTarih === "tumu" || (hTarih === "kasim" ? String(h.is_tarihi) >= "2026-11-01" : String(h.is_tarihi) <= "2026-10-31"))).map((h) => {
                 const k = `${h.master_works_id}`;
                 return (
                   <Kart key={k} style={{ marginBottom: aralik.xs }} onPress={() => setAcik(acik === k ? null : k)} erisimEtiketi={`${h.fiziksel_id} ${h.site_code}, ${h.fiyat_durum_ad}`}>
@@ -116,7 +156,7 @@ export function TaseronCariEkrani({ navigation, route }) {
                       </View>
                       <View style={{ alignItems: "flex-end", marginLeft: aralik.s }}>
                         <Metin tur="kucukKalin" style={yazi.tutar}>{tutar(h.bedel, h.para_birimi)}</Metin>
-                        <Rozet metin={h.fiyat_durum_ad} tonAdi={FIYAT_TON[h.fiyat_durum] || "notr"} style={{ marginTop: 4 }} />
+                        <Rozet metin={h.hakedis_durum_ad || h.fiyat_durum_ad} tonAdi={HAKEDIS_TON[h.hakedis_durum] || FIYAT_TON[h.fiyat_durum] || "notr"} style={{ marginTop: 4 }} />
                       </View>
                     </View>
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: aralik.xs }}>
@@ -211,6 +251,64 @@ export function TaseronCariEkrani({ navigation, route }) {
               ))}
             </>
           ) : null}
+        </>
+      ) : null}
+    </Ekran>
+  );
+}
+
+// ── ATANAN İŞ BEDELLERİ (yalnız firma sahibi; sunucu çalışana 403) ─────────────────────────────────────────────────
+export function TaseronAtananBedellerEkrani() {
+  const [donem, setDonem] = useState("tumu");
+  const ar = { tumu: {}, kasim: { bas: "2026-11-01" }, once: { bit: "2026-10-31" } }[donem] || {};
+  const v = useVeri(`taseronAtanan:${donem}`, () => taseronPanelApi.atananBedeller(ar));
+  const [acik, setAcik] = useState(null);
+  const d = v.veri;
+  return (
+    <Ekran baslik="Atanan İş Bedelleri" geri altBaslik={d?.firma?.ad} yenileniyor={v.yenileniyor} onYenile={v.yenile}>
+      <Bant tonAdi="uyari" ikon="information-circle-outline" baslik="Planlanan iş bedeli — henüz hak edilmiş alacak değildir" metin="Hak edilmiş bedel yalnız QC'si kapanmış işlerdir (Finans)." style={{ marginBottom: aralik.s }} />
+      <Cipler secenekler={[{ kod: "tumu", ad: "Tüm dönem" }, { kod: "kasim", ad: "1 Kasım'dan beri" }, { kod: "once", ad: "1 Kasım öncesi" }]} deger={donem} onSec={setDonem} />
+      {v.yukleniyor && !d ? <><IskeletKart yukseklik={120} /><IskeletKart /></> : null}
+      {v.hata && !d ? <Kart><HataDurum hata={v.hata} baslik={v.hata?.tur === "yetki" ? "Bu bölüme erişiminiz yok" : "Bedeller alınamadı"} onTekrar={v.hata?.tur === "yetki" ? undefined : v.yenile} /></Kart> : null}
+      {d ? (
+        <>
+          <Kart style={{ backgroundColor: renk.lacivert, marginBottom: aralik.s }}>
+            <Metin tur="etiket" renk="#C7D3E3" style={{ textTransform: "uppercase", letterSpacing: 0.6 }}>Planlanan toplam sözleşme bedeli</Metin>
+            <Metin tur="baslikXL" renk="#FFFFFF" style={[yazi.tutar, { marginTop: aralik.xs }]} numberOfLines={1} adjustsFontSizeToFit>{para(d.toplam, d.para_birimi)}</Metin>
+            <Metin tur="minik" renk="#C7D3E3">{d.fiziksel_saha} fiziksel saha · {d.is_kaydi} iş kaydı · {d.kdv}</Metin>
+          </Kart>
+          {d.fiyatsiz_kalem ? <Bant tonAdi="uyari" metin={`${d.fiyatsiz_kalem} kalemin fiyatı belirlenemedi — toplama girmedi.`} style={{ marginBottom: aralik.s }} /> : null}
+          {!d.sahalar.length ? <Kart><BosDurum ikon="pricetags-outline" baslik="Bu dönemde atanan iş yok" /></Kart> : null}
+          {d.sahalar.map((S) => (
+            <Kart key={S.fiziksel_id} style={{ marginBottom: aralik.xs }} onPress={() => setAcik(acik === S.fiziksel_id ? null : S.fiziksel_id)} erisimEtiketi={`${S.fiziksel_id}, ${para(S.ara_toplam, d.para_birimi)}`}>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <View style={{ flex: 1 }}>
+                  <Metin tur="baslikM">{S.fiziksel_id}</Metin>
+                  <Metin tur="minik" renk={renk.metinIkincil}>{S.isler.length} iş · {S.isler.map((i) => i.site_code.replace(`${S.fiziksel_id}_`, "")).join(", ")}</Metin>
+                </View>
+                <Metin tur="govdeKalin" style={yazi.tutar}>{para(S.ara_toplam, d.para_birimi)}</Metin>
+              </View>
+              {acik === S.fiziksel_id ? S.isler.map((I) => (
+                <View key={I.site_code} style={{ marginTop: aralik.s, borderTopWidth: 0.5, borderTopColor: renk.cizgi, paddingTop: aralik.xs }}>
+                  <View style={{ flexDirection: "row" }}>
+                    <Metin tur="kucukKalin" style={{ flex: 1 }}>{I.site_code}</Metin>
+                    <Metin tur="kucukKalin" style={yazi.tutar}>{para(I.toplam, d.para_birimi)}</Metin>
+                  </View>
+                  <Metin tur="minik" renk={renk.metinSoluk}>İş tarihi {tarih(I.is_tarihi)} ({I.is_tarihi_kaynak}){I.fiyat_eksik ? " · fiyat eksik" : ""}</Metin>
+                  {I.kalemler.map((k, i) => (
+                    <View key={i} style={{ flexDirection: "row", marginTop: 4 }}>
+                      <View style={{ flex: 1, paddingRight: 6 }}>
+                        <Metin tur="minik" numberOfLines={2}>{[k.item_code, k.aciklama].filter(Boolean).join(" · ")}</Metin>
+                        <Metin tur="minik" renk={renk.metinIkincil}>{k.bedel_turu}{k.birim_bedel != null ? ` · ${para(k.birim_bedel, d.para_birimi)}` : ""} · miktar {k.miktar}{k.tarife ? ` · tarife ${tarih(k.tarife.baslangic)}` : ""}</Metin>
+                      </View>
+                      <Metin tur="minik" style={yazi.tutar} renk={k.bedel == null && k.bedel_turu === "Fiyat belirlenemedi" ? renk.uyari : renk.metin}>{k.bedel == null ? "—" : para(k.bedel, d.para_birimi)}</Metin>
+                    </View>
+                  ))}
+                </View>
+              )) : null}
+            </Kart>
+          ))}
+          <Metin tur="minik" renk={renk.metinSoluk} style={{ marginTop: aralik.xs }}>{d.kural}</Metin>
         </>
       ) : null}
     </Ekran>

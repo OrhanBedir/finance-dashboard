@@ -21,4 +21,8 @@ export function sahaRolu(k) {
 // 05.11.2026: firma sorumlusunda "Saha ekranı" kapalıysa Sahalar sekmesi gizlenir; finans / iş görünümü kalır
 export const sahaAcik = (k) => k?.taseron_saha?.saha_acik !== false && sahaRolu(k) !== "KAPALI";
 
+// 06.11.2026 firma sahibi (finans) yetkisi — sunucu /auth/me taseron_saha.finans; alan yoksa (eski sunucu) sorumluya açık.
+// Menü yalnız görünümdür: finans uçları sunucuda ayrıca kapalıdır.
+export const finansVar = (k) => sahaRolu(k) === "SORUMLU" && k?.taseron_saha?.finans !== false;
+
 export const profilAdi = (k) => ({ SAHIP: "Şirket sahibi", YONETICI: "Yönetici" }[k?.yonetim_profili] || null);

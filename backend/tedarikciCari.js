@@ -1099,4 +1099,41 @@ function kur(app, c) {
   return { cariHesapla, rehberOku, katla, fifoDagit, taseronBedeli, hakedisIsleri, kalemDeger };
 }
 
-module.exports = { semaKur, kur, katla };
+// ═══ QC ESASLI HAKEDİŞ (06.11.2026, Orhan) — ortak hesap kaynağı ══════════════════════════════════════════════════════════
+// Hak edilmiş bedel = ilgili kalemin QC'si kapanmış (OK) fiziki iş bedeli. Plan (PR), montajı yapılmış QC bekleyen ve QC kapanmış
+// bedeller ayrı tutulur. QC iş KALEMİ düzeyinde (master_works.qc_durum — PR kaleminin doğrulanmış QC'si) değerlendirilir; aynı sahada
+// başka iş / başka firma QC'si bu işi hakedişe almaz. Kalem QC'si ile işin Rollout QC'si çelişirse "teyit bekliyor" (hakedişe girmez).
+// Paket fiyatlı işte bedeli ana kalem taşır → QC'si de ana kalemin QC'sidir; pakete dahil kalemler bedelsizdir (çift ücret yok).
+// Fiyat seçimi değişmez: iş tarihindeki taşeron fiyatı (QC'nin kapanış günü yeni tarife uygulatmaz). Mevcut yönetim carisi
+// (borç = fiziki iş bedeli) DEĞİŞTİRİLMEDİ; fark mutabakat satırıyla gösterilir.
+//   isler: hakedisIsleri çıktısı · rolloutQc: Map(iş kodu → 'OK'|'NOK'|null) · kalemDeger(x, qty) · nakit: gerçekleşen ödeme (mahsup hariç)
+function qcEsasliOzet(isler, rolloutQc, kalemDeger, nakit = 0) {
+  const r2_ = (n) => Math.round(Number(n || 0) * 100) / 100;
+  const satirlar = [];
+  const T = { plan: 0, montaj_qc_bekleyen: 0, qc_kapanmis: 0, teyit: 0, fiyatsiz_kalem: 0 };
+  for (const x of isler || []) {
+    const fiyatli = !!x.fiyat;
+    const plan = fiyatli ? kalemDeger(x, x.pr_qty) : 0;
+    const fiziki = fiyatli && x.fiziki_qty > 0 ? kalemDeger(x, x.fiziki_qty) : 0;
+    const kq = String(x.qc || "").trim().toUpperCase() || null, sq = rolloutQc?.get(x.site_code) || null;
+    let durum;
+    if (!(x.fiziki_qty > 0)) durum = "PLAN";
+    else if (!fiyatli) durum = ["PAKET"].includes(x.fiyat_durum) ? "PAKET" : "FIYATSIZ";
+    else if (kq === "OK" && (sq === "OK" || !sq)) durum = "QC_OK";
+    else if (kq === "OK" && sq === "NOK") durum = "TEYIT";
+    else if (kq !== "OK" && sq === "OK") durum = "TEYIT";
+    else durum = "QC_BEKLIYOR";
+    T.plan += plan;
+    if (durum === "QC_OK") T.qc_kapanmis += fiziki;
+    else if (durum === "QC_BEKLIYOR") T.montaj_qc_bekleyen += fiziki;
+    else if (durum === "TEYIT") T.teyit += fiziki;
+    if (durum === "FIYATSIZ") T.fiyatsiz_kalem += 1;
+    satirlar.push({ master_works_id: x.master_works_id, site_code: x.site_code, durum, kalem_qc: kq, is_qc: sq, plan_bedel: r2_(plan), fiziki_bedel: r2_(fiziki) });
+  }
+  for (const k of Object.keys(T)) T[k] = r2_(T[k]);
+  const uygulanan = r2_(Math.min(Math.max(0, nakit), T.qc_kapanmis));
+  const kalan = r2_(T.qc_kapanmis - uygulanan), acik_avans = r2_(Math.max(0, nakit) - uygulanan);
+  return { ...T, odenen: r2_(nakit), uygulanan, kalan, acik_avans, net: r2_(kalan - acik_avans), satirlar };
+}
+
+module.exports = { semaKur, kur, katla, qcEsasliOzet };

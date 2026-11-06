@@ -1027,7 +1027,7 @@ async function tazeOturumBilgisi(email) {
   const r = await pool.query(
     `SELECT id, email, role, is_active, status, subcon_name, tenant, marka,
         to_jsonb(users)->>'kullanici_tipi' AS kullanici_tipi, (to_jsonb(users)->>'taseron_id')::int AS taseron_id,
-        to_jsonb(users)->>'yonetim_profili' AS yonetim_profili FROM users
+        to_jsonb(users)->>'yonetim_profili' AS yonetim_profili, to_jsonb(users)->>'oturum_gecersiz_ts' AS oturum_gecersiz_ts FROM users
       WHERE LOWER(TRIM(email)) = $1 ORDER BY id DESC LIMIT 1`, [k]);
   const u = r.rows[0];
   let v = null;
@@ -1040,7 +1040,8 @@ async function tazeOturumBilgisi(email) {
     }
     // 25.10.2026: taşeron adı ve profil alanları da her istekte DB'den (token'daki eski değer 90 gün kalmasın)
     v = { user_id: u.id, role: u.role, marka: u.marka || null, marka_ad: markaAd, hw_yukleme: hw, subcon_name: u.subcon_name || null,
-      kullanici_tipi: u.kullanici_tipi || null, taseron_id: u.taseron_id || null, yonetim_profili: u.yonetim_profili || null };
+      kullanici_tipi: u.kullanici_tipi || null, taseron_id: u.taseron_id || null, yonetim_profili: u.yonetim_profili || null,
+      oturum_gecersiz_ms: u.oturum_gecersiz_ts ? Date.parse(u.oturum_gecersiz_ts) || null : null };
   }
   OTURUM_ONBELLEK.set(k, { t: Date.now(), v });
   return v;
@@ -1057,6 +1058,9 @@ app.use(async (req, res, next) => {
   try {
     const v = await tazeOturumBilgisi(d.email);
     if (!v) return res.status(401).json({ ok: false, error: "Oturum geçersiz veya kullanıcı pasif — lütfen tekrar giriş yapın" });
+    // 06.11.2026: şifre / kullanıcı adı / yetki değişikliğinden ÖNCE verilmiş token kabul edilmez (taşeron hesap yönetimi yazar)
+    if (v.oturum_gecersiz_ms && d.iat && d.iat * 1000 + 999 < v.oturum_gecersiz_ms)
+      return res.status(401).json({ ok: false, error: "Hesap bilgileriniz değişti — lütfen tekrar giriş yapın" });
     req.user = { ...d, ...v };
     req._tazeOturum = req.user;
     next();
@@ -15607,6 +15611,8 @@ taseronSaha.kur(app, { pool, authMiddleware, taseronKapsami: (...a) => omnixPane
   kapsamIsKodlari: async (req) => {
     const K = await rolloutKapsam(req); const fs = await haritaFirmaSuzgeci(req, K); if (fs.hata) throw Object.assign(new Error(fs.hata[1]), { durum: fs.hata[0], mesaj: fs.hata[1] });
     const { rows, yalnizGunluk } = await haritaKapsamSatirlari(K, fs.FM); return { kodlar: new Set([...rows.map((r) => String(r.site_code || "").replace(/\s+/g, "").toUpperCase()), ...yalnizGunluk]) }; },
+  // 06.11.2026: taşeron hesabı düzenlenince oturum tazeleme önbelleği hemen boşaltılır (30 sn beklenmez)
+  oturumOnbellekSil: (email) => { const k = String(email || "").trim().toLowerCase(); OTURUM_ONBELLEK.delete(k); _yetkiOnbellek.delete(k); },
   firmaYonetebilir: async (req, t) => { const K = await rolloutKapsam(req); return !K || String(t.ana_firma || "").trim().toUpperCase() === K.kod || K.esle(t.subcon_name); },
   // 05.11.2026: Rollout RF sütunundaki yalın grup adı (TEKNO / AHY / ŞİMŞEK) → grup kodu (taseronCozum GRUP_ADI kuralı)
   grupKodu: async (ad) => { const es = await rolloutFirmaEsleyicileri(); return taseronCozum.grupAdiMi(es, taseronCozum.adNorm(ad)) ? taseronCozum.grupOf(es, taseronCozum.adNorm(ad)) : null; },

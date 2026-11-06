@@ -124,6 +124,7 @@ export const taseronPanelApi = {
   hakedis: () => api.get("/taseron-panel/hakedis"),
   // 05.11.2026: Hakediş ve Cari — yönetim cari motoruyla aynı hesap (firma oturumdan)
   cari: () => api.get("/taseron-panel/cari", { zamanAsimiMs: 60000 }),
+  atananBedeller: (p = {}) => api.get(`/taseron-panel/atanan-bedeller?${new URLSearchParams(Object.entries(p).filter(([, v]) => v)).toString()}`, { zamanAsimiMs: 60000 }),
   cariBelge: (id) => api.get(`/taseron-panel/cari/odeme/${kodla(id)}/belge`),
   faturalar: () => api.get("/taseron-panel/faturalar"),
   fatura: (id) => api.get(`/taseron-panel/faturalar/${id}`),

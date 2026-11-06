@@ -28,17 +28,18 @@ import { StokIslemEkrani } from "../ekranlar/StokEkranlari";
 import { OnayMasrafDetayEkrani, OnaylarEkrani } from "../ekranlar/OnaylarEkrani";
 import { ProfilEkrani } from "../ekranlar/ProfilEkrani";
 import { PersonelDetayEkrani, PersonelYonetimiEkrani, YonetimAnaSayfa } from "../ekranlar/YonetimEkranlari";
-import { TaseronAnaSayfa, TaseronBaglantiYokEkrani, TaseronBelgelerEkrani, TaseronFaturaDetayEkrani, TaseronFaturalarEkrani,
+import { TaseronBaglantiYokEkrani, TaseronBelgelerEkrani, TaseronFaturaDetayEkrani, TaseronFaturalarEkrani,
   TaseronIsDetayEkrani, TaseronIslerEkrani } from "../ekranlar/TaseronEkranlari";
-import { TaseronMontajTamamlaEkrani, TaseronSahaDetayEkrani, TaseronSahaEkrani } from "../ekranlar/TaseronSahaEkranlari";
-import { TaseronCariEkrani, TaseronYaptiklarimizEkrani } from "../ekranlar/TaseronCariEkranlari";
-import { deneyim as deneyimSec, sahaAcik, sahaRolu } from "../mantik/profil";
+import { TaseronHaritaSekmesi, TaseronIslerSekmesi, TaseronMontajTamamlaEkrani, TaseronSahaDetayEkrani } from "../ekranlar/TaseronSahaEkranlari";
+import { TaseronAtananBedellerEkrani, TaseronCariEkrani, TaseronYaptiklarimizEkrani } from "../ekranlar/TaseronCariEkranlari";
+import { TaseronCalisanAnaSayfa, TaseronSahipAnaSayfa } from "../ekranlar/TaseronAnaEkranlari";
+import { deneyim as deneyimSec, finansVar, sahaAcik, sahaRolu } from "../mantik/profil";
 
 const Yigin = createNativeStackNavigator();
 const Sekme = createBottomTabNavigator();
 
 const IKON = { AnaSayfa: "home", Harcamalar: "wallet", Saha: "navigate", Onaylar: "checkmark-done", Profil: "person-circle",
-  TaseronIsler: "briefcase", TaseronHakedis: "cash", TaseronFaturalar: "receipt", TaseronSaha: "map", TaseronCari: "cash" };
+  TaseronIsler: "briefcase", TaseronHakedis: "cash", TaseronFaturalar: "receipt", TaseronSaha: "map", TaseronCari: "cash", TaseronHarita: "map", TaseronFinans: "cash" };
 const sekmeSecenek = ({ route }) => ({
   headerShown: false,
   tabBarActiveTintColor: renk.lacivert,
@@ -48,28 +49,21 @@ const sekmeSecenek = ({ route }) => ({
   tabBarIcon: ({ color, focused, size }) => <Ionicons name={focused ? IKON[route.name] : `${IKON[route.name]}-outline`} size={size} color={color} />,
 });
 
-// 04.11.2026: firma sorumlusu (ve üyeliği tanımlanmamış firma hesabı) = mevcut taşeron paneli + Sahalar sekmesi.
-// Ekip çalışanı yalnız Sahalar + Profil görür (fiyat / hakediş / fatura sekmesi yok; sunucu da bu uçları 403 yapar).
+// 06.11.2026 RF taşeron menüleri (yetki SUNUCUDA her uçta ayrıca doğrulanır; menü yalnız görünümdür):
+//   Çalışan / operasyon sorumlusu : Ana Sayfa · İşler · Harita · Profil  (fiyat, hakediş, avans, ödeme, cari YOK)
+//   Firma sahibi (finans)         : Ana Sayfa · İşler · Harita · Finans · Profil  ("Saha ekranı" kapalıysa İşler / Harita gizlenir)
 function TaseronSekmeleri() {
   const { kullanici } = useOturum();
   const rol = sahaRolu(kullanici);
-  if (rol === "CALISAN") {
-    return (
-      <Sekme.Navigator screenOptions={sekmeSecenek}>
-        <Sekme.Screen name="TaseronSaha" component={TaseronSahaEkrani} options={{ title: "Sahalar" }} />
-        <Sekme.Screen name="Profil" component={ProfilEkrani} />
-      </Sekme.Navigator>
-    );
-  }
   if (rol === "KAPALI") return <BagsizSekmeleri />;
-  // 05.11.2026: firma sorumlusu = finans (Hakediş ve Cari: hakediş, ödemeler, cari hareketler, faturalar) + saha işlemi.
-  // "Saha ekranı" kapalıysa yalnız Sahalar sekmesi gizlenir; rol düşürülmez.
+  const finans = rol !== "CALISAN" && finansVar(kullanici);
+  const saha = sahaAcik(kullanici);
   return (
     <Sekme.Navigator screenOptions={sekmeSecenek}>
-      <Sekme.Screen name="AnaSayfa" component={TaseronAnaSayfa} options={{ title: "Özet" }} />
-      {sahaAcik(kullanici) ? <Sekme.Screen name="TaseronSaha" component={TaseronSahaEkrani} options={{ title: "Sahalar" }} /> : null}
-      <Sekme.Screen name="TaseronIsler" component={TaseronIslerEkrani} options={{ title: "İşler" }} />
-      <Sekme.Screen name="TaseronCari" component={TaseronCariEkrani} options={{ title: "Hakediş" }} />
+      <Sekme.Screen name="AnaSayfa" component={finans ? TaseronSahipAnaSayfa : TaseronCalisanAnaSayfa} options={{ title: "Ana Sayfa" }} />
+      {saha ? <Sekme.Screen name="TaseronIsler" component={TaseronIslerSekmesi} options={{ title: "İşler" }} /> : null}
+      {saha ? <Sekme.Screen name="TaseronHarita" component={TaseronHaritaSekmesi} options={{ title: "Harita" }} /> : null}
+      {finans ? <Sekme.Screen name="TaseronFinans" component={TaseronCariEkrani} options={{ title: "Finans" }} /> : null}
       <Sekme.Screen name="Profil" component={ProfilEkrani} />
     </Sekme.Navigator>
   );
@@ -120,6 +114,8 @@ export function Navigasyon() {
           <Yigin.Screen name="TaseronBelgeler" component={TaseronBelgelerEkrani} />
           <Yigin.Screen name="TaseronSahaDetay" component={TaseronSahaDetayEkrani} />
           <Yigin.Screen name="TaseronYaptiklarimiz" component={TaseronYaptiklarimizEkrani} />
+          <Yigin.Screen name="TaseronAtananBedeller" component={TaseronAtananBedellerEkrani} />
+          <Yigin.Screen name="TaseronAtananIsler" component={TaseronIslerEkrani} />
           <Yigin.Screen name="TaseronCariYigin" component={TaseronCariEkrani} initialParams={{ yigin: true }} />
           <Yigin.Screen name="TaseronFaturalar" component={TaseronFaturalarEkrani} />
           <Yigin.Screen name="TaseronMontajTamamla" component={TaseronMontajTamamlaEkrani} options={{ gestureEnabled: false }} />

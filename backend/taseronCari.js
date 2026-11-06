@@ -11,6 +11,7 @@
 // Gizlilik: Huawei PO / BoQ satış fiyatı, ana firma marjı, başka taşeronun kaydı, maaş YOK. Çalışan (CALISAN) hesabı bu
 // uçlara giremez (taseronSaha.calisanKapisi). Montaj bildirimi QC / hakediş / ödeme yazmaz; bu uçlar yalnız okur.
 "use strict";
+const { qcEsasliOzet } = require("./tedarikciCari");
 
 const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 const bugunTR = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
@@ -108,6 +109,16 @@ function kur(app, { pool, authMiddleware, taseronKapsami, cariMotor, altMarkaMi 
     catch (e) { if (e.durum) return hata(res, e.durum, e.message); console.error("[taşeron cari]", e.message); hata(res, 500, "Cari bilgisi alınamadı. Lütfen tekrar deneyin."); }
   }];
 
+  // İş kodu → Rollout QC (OK / NOK / boş) — QC esaslı hakedişte kalem QC'si ile çelişki kontrolü için
+  async function rolloutQc(kodlar) {
+    if (!kodlar.length) return new Map();
+    const r = (await pool.query(`SELECT DISTINCT ON (UPPER(TRIM(site_code))) UPPER(TRIM(site_code)) AS kod, NULLIF(UPPER(TRIM(COALESCE(qc_durum,''))),'') AS qc
+      FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[]) ORDER BY UPPER(TRIM(site_code)), updated_at DESC NULLS LAST`, [kodlar]).catch(() => ({ rows: [] }))).rows;
+    return new Map(r.map((x) => [x.kod, x.qc]));
+  }
+  const QC_DURUM_AD = { QC_OK: "QC kapanmış — hak edildi", QC_BEKLIYOR: "Montaj yapıldı — QC bekliyor", TEYIT: "QC teyit bekliyor (kalem ve iş QC'si çelişkili)",
+    PLAN: "Planlı — fiziki iş yok", PAKET: "Paket bedeline dahil", FIYATSIZ: "Fiyat doğrulanamadı" };
+
   app.get("/taseron-panel/cari", ...kapi(async (req, res, K) => {
     const { c0, isler } = await cariOku(K);
     res.set("Cache-Control", "private, no-store");
@@ -124,6 +135,16 @@ function kur(app, { pool, authMiddleware, taseronKapsami, cariMotor, altMarkaMi 
         kalan_alacak: r2(P.kalan || 0), acik_avans: r2(P.avans_acik || 0), iade_alacak: r2((P.iade_alacak || 0) + (P.fazla_odeme || 0)), net, yon: yon(net) };
     });
     const fiyatsiz = satirlar.filter((x) => x.fiziki_miktar > 0 && ["TANIMSIZ", "BELIRSIZ"].includes(x.fiyat_durum));
+    // 06.11.2026 QC ESASLI HAKEDİŞ (ortak kaynak: tedarikciCari.qcEsasliOzet) — yalnız TRY hakediş esaslı caride; muhasebe carisi ayrı kalır
+    const P0 = c0.pb.TRY || {};
+    const qcRp = await rolloutQc([...new Set(isler.map((x) => x.site_code))]);
+    const qce = c0.cari_modeli === "HAKEDIS" ? qcEsasliOzet(isler.filter((x) => (x.fiyat?.pb || "TRY") === "TRY"), qcRp, cariMotor.kalemDeger, r2(P0.nakit || 0)) : null;
+    const qcSatir = new Map((qce?.satirlar || []).map((x) => [x.master_works_id, x]));
+    for (const h of satirlar) { const q = qcSatir.get(h.master_works_id); if (q) { h.hakedis_durum = q.durum; h.hakedis_durum_ad = QC_DURUM_AD[q.durum]; } }
+    const qc_esasli = qce ? { para_birimi: "TRY", ...Object.fromEntries(Object.entries(qce).filter(([k]) => k !== "satirlar")), yon: yon(qce.net),
+      mutabakat: { muhasebe_is_bedeli: r2(P0.hakedis || 0), qc_hakedis: qce.qc_kapanmis, fark: r2((P0.hakedis || 0) - qce.qc_kapanmis),
+        aciklama: "Muhasebe carisi borcu fiziki yapılan iş üzerinden tutar; QC esaslı hakediş yalnız QC'si kapanmış kalemleri sayar. Fark = montajı yapılmış QC bekleyen + teyit bekleyen işler.",
+        muhasebe_net: r2(P0.net || 0), muhasebe_yon: yon(r2(P0.net || 0)) } } : null;
     res.json({
       ok: true, guncel: new Date().toISOString(),
       firma: { id: K.id, ad: K.k.taseron.unvan || c0.ad, model: c0.cari_modeli, model_ad: c0.cari_modeli === "HAKEDIS" ? "Hakediş esaslı cari (fatura zorunlu değil)" : "Faturalı cari" },
@@ -131,10 +152,10 @@ function kur(app, { pool, authMiddleware, taseronKapsami, cariMotor, altMarkaMi 
       kural: {
         is_bedeli: "Yapılan iş bedeli = fiziki tamamlanan miktar × iş tarihindeki taşeron fiyatı (KDV hariç). İş tarihi: montaj başlangıcı; yoksa ilk iş girişi; o da yoksa montaj bitişi.",
         tarife: "01.11.2026 ve sonrasında başlayan işler 01.11.2026 tarifesiyle; öncesi önceki anlaşmayla fiyatlanır. Eski işler yeni tarifeyle yeniden fiyatlanmaz.",
-        qc: "QC durumu ayrı bilgidir; bu caride bedel QC sonucunu beklemez (yönetim carisiyle aynı kural).",
-        vergi: "İş bedeli KDV hariçtir. Ödemeler banka çıkışı tutarıdır (KDV ayrımı kayıtlı değil). Faturalar KDV dahildir. Net bakiye yönetim carisiyle aynı motordan gelir; açık avans gerçekleşen işe tarih sırasıyla mahsup edilir.",
+        qc: "Hak edilmiş bedel yalnız QC'si kapanmış (OK) iş kalemleridir. Montajı yapılmış ama QC'si kapanmamış iş 'QC bekleyen' olarak ayrı gösterilir. Aynı sahada başka iş ya da başka firmanın QC'si bu işi hakedişe almaz.",
+        vergi: "İş bedeli ve hakediş KDV hariçtir. Ödemeler banka çıkışı tutarıdır (KDV ayrımı kayıtlı değil); faturalar KDV dahildir. Ödemeler, avans, mahsup ve iptaller muhasebe carisiyle aynı kayıtlardan gelir; QC esaslı net, ödemenin QC'si kapanmış hakedişe uygulanmasıyla bulunur.",
       },
-      ozet, satir_ozet: { toplam: satirlar.length, is_kodu: new Set(satirlar.map((x) => x.site_code)).size, fiziksel_saha: new Set(satirlar.map((x) => x.fiziksel_id)).size,
+      ozet, qc_esasli, satir_ozet: { toplam: satirlar.length, is_kodu: new Set(satirlar.map((x) => x.site_code)).size, fiziksel_saha: new Set(satirlar.map((x) => x.fiziksel_id)).size,
         fiyatsiz: fiyatsiz.length, paket_dahil: satirlar.filter((x) => x.fiyat_durum === "PAKET").length },
       hakedisler: satirlar,
       odemeler: c0.hareketler.map(hareketGorunum),
@@ -143,6 +164,36 @@ function kur(app, { pool, authMiddleware, taseronKapsami, cariMotor, altMarkaMi 
       uyarilar: c0.uyarilar.filter((u) => ["FIYAT_TANIMSIZ", "AVANS_EKSI"].includes(u.tip)).map((u) => u.mesaj),
       fatura_bos_mesaj: c0.faturalar.length ? null : "Henüz fatura kaydı yok; hakediş ve ödemelerinizi diğer sekmelerden görebilirsiniz.",
     });
+  }));
+
+  // ── ATANAN İŞ BEDELLERİ (06.11.2026) — planlanan sözleşme bedeli (PR miktarı × iş tarihindeki taşeron fiyatı). Hak edilmiş alacak DEĞİL.
+  // Fiziksel saha → tam iş kodu → kalem; paket ana kalemi bedeli taşır, pakete dahil kalemler bedelsiz (çift ücret yok). Yalnız firma sahibi.
+  app.get("/taseron-panel/atanan-bedeller", ...kapi(async (req, res, K) => {
+    const { c0, isler } = await cariOku(K);
+    res.set("Cache-Control", "private, no-store");
+    const tarih = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : null);
+    const bas = tarih(req.query.bas), bit = tarih(req.query.bit);
+    const L = isler.filter((x) => x.pr_qty > 0 && (!bas || String(x.is_tarihi) >= bas) && (!bit || String(x.is_tarihi) <= bit));
+    const sahalar = new Map();
+    let toplam = 0, fiyatsiz = 0;
+    for (const x of L) {
+      const fid = x.fiziksel_id;
+      const S = sahalar.get(fid) || { fiziksel_id: fid, isler: new Map(), ara_toplam: 0 };
+      const I = S.isler.get(x.site_code) || { site_code: x.site_code, is_tarihi: x.is_tarihi, is_tarihi_kaynak: x.is_tarihi_kaynak, kalemler: [], toplam: 0, fiyat_eksik: false };
+      const f = x.fiyat;
+      const bedel = f ? cariMotor.kalemDeger(x, x.pr_qty) : null;
+      if (!f && x.fiyat_durum !== "PAKET") { I.fiyat_eksik = true; fiyatsiz++; }
+      I.kalemler.push({ item_code: x.item_code || null, aciklama: x.aciklama, miktar: x.pr_qty, birim: f?.birim || null,
+        birim_bedel: f ? (f.paket ? f.paket.bedel : f.fiyat) : null, bedel_turu: f?.paket ? `${f.paket.ad} paket (iş kodu başına)` : f ? "Birim" : x.fiyat_durum === "PAKET" ? "Paket bedeline dahil" : "Fiyat belirlenemedi",
+        bedel, tarife: f ? { baslangic: f.bas, kapsam: f.ozel ? "Firmanıza özel fiyat" : "Teknocenter taşeron tarifesi" } : null });
+      if (bedel) { I.toplam = r2(I.toplam + bedel); S.ara_toplam = r2(S.ara_toplam + bedel); toplam = r2(toplam + bedel); }
+      S.isler.set(x.site_code, I); sahalar.set(fid, S);
+    }
+    const liste = [...sahalar.values()].sort((a, b) => a.fiziksel_id.localeCompare(b.fiziksel_id)).map((S) => ({ ...S, isler: [...S.isler.values()].sort((a, b) => a.site_code.localeCompare(b.site_code)) }));
+    res.json({ ok: true, baslik: "Planlanan iş bedeli — henüz hak edilmiş alacak değildir", firma: { id: K.id, ad: K.k.taseron.unvan || c0?.ad || K.k.taseron.subcon_name },
+      donem: { bas, bit }, para_birimi: "TRY", kdv: "KDV hariç", toplam, fiziksel_saha: liste.length, is_kaydi: liste.reduce((t, S) => t + S.isler.length, 0),
+      fiyatsiz_kalem: fiyatsiz, sahalar: liste,
+      kural: "Bedel = PR (atanan) miktarı × iş tarihindeki taşeron işçilik fiyatı (KDV hariç, malzeme hariç). İş tarihi: montaj başlangıcı → ilk iş girişi → montaj bitişi. Fiyatı belirlenemeyen kalem toplama girmez." });
   }));
 
   // Ödeme dekontu: yalnız bu firmanın aktif / iptal hareketi ise; adres listede verilmez

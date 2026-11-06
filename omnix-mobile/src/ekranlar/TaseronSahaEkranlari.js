@@ -5,7 +5,8 @@
 // Fiyat, hakediş, fatura, ödeme verisi bu ekranlarda yoktur; ekran verisi yalnız bellekte tutulur (yalnız form taslağı telefonda).
 // Gönderim: buton kilitli, her istek istek_anahtari taşır; bağlantı yoksa "Gönderilmeyi bekliyor" — başarısızlıkta "Kaydedildi" denmez.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Image, Pressable, ScrollView, StatusBar, TextInput, View } from "react-native";
+import { Alert, Image, Linking, Platform, Pressable, ScrollView, StatusBar, TextInput, View } from "react-native";
+import * as Location from "expo-location";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,7 +26,9 @@ import { kuyrukBosalt, kuyrukDinle, kuyrukDurumu, kuyrukluGonder } from "../tasl
 import { taslak, taslakKaydet, taslakSil, yeniKimlik } from "../taslak/taslakDepo";
 import { fisSec } from "../taslak/fis";
 import { katmanlar } from "../harita/haritaMantik";
-import { FILTRELER, HARITA_LEJANT, KAPSAMLAR, MONTAJ_TON, BOS_TAMAMLA, haritaSahalari, kapsamUyar, qcTon, sayac as sayacHesapla, suz, tamamlaGovdesi, tamamlaHatalari } from "../mantik/taseronSaha";
+import { GRUP_FILTRELER, HARITA_LEJANT, KAPSAMLAR, MONTAJ_TON, BOS_TAMAMLA, YAKIN_KM, haritaSahalari, kapsamUyar, qcTon, sayac as sayacHesapla, suz, tamamlaGovdesi, tamamlaHatalari,
+  yakinSahalar, yolTarifiAdresi } from "../mantik/taseronSaha";
+import { finansVar } from "../mantik/profil";
 import { saat, tarih } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
 
@@ -48,13 +51,20 @@ function useBekleyenler(kapsam) {
 }
 
 // ── SAHALARIM / HARİTA ─────────────────────────────────────────────────────────────────────────────────────────────
-export function TaseronSahaEkrani({ navigation }) {
+// 06.11.2026: alt sekmeler "İşler" (liste) ve "Harita" aynı iş listesini kullanır (sabit görünüm); eski tek ekran (segmentli) korunur
+export function TaseronIslerSekmesi(p) { return <TaseronSahaEkrani {...p} sabit="liste" />; }
+export function TaseronHaritaSekmesi(p) { return <TaseronSahaEkrani {...p} sabit="harita" />; }
+
+export function TaseronSahaEkrani({ navigation, route, sabit }) {
   const kenar = useSafeAreaInsets();
-  const { kapsam } = useOturum();
+  const { kapsam, kullanici } = useOturum();
+  const finans = finansVar(kullanici);
   const gecersizKil = useGecersizKil();
   const v = useVeri(ANAHTAR, () => taseronSahaApi.isler());
-  const [gorunum, setGorunum] = useState("liste");
-  const [filtre, setFiltre] = useState("tumu");
+  const [gorunum, setGorunum] = useState(sabit || "liste");
+  const [yakin, setYakin] = useState(null); // null | { durum: "bekliyor"|"izin_yok"|"hata"|"tamam", konum, km }
+  const [filtre, setFiltre] = useState(route?.params?.filtre || "tumu");
+  useEffect(() => { if (route?.params?.filtre) setFiltre(route.params.filtre); }, [route?.params?.filtre]);
   const [arama, setArama] = useState("");
   const [kapsamSec, setKapsamSec] = useState("firma");
   const [secili, setSecili] = useState(null);
@@ -74,15 +84,33 @@ export function TaseronSahaEkrani({ navigation }) {
   const k = useMemo(() => katmanlar(sahalar), [sahalar]);
   const baslik = veri?.ekip ? `${veri.firma?.ad} · ${veri.ekip.ad}` : veri?.firma?.ad || "Sahalarım";
   const ac = (kod) => navigation.navigate("TaseronSahaDetay", { kod });
+  // Yakınımdaki sahalar: yalnız kullanıcı düğmeye basınca, tek seferlik konum (arka plan takibi yok); izin yoksa harita/liste aynen çalışır
+  const yakinAc = async (km = yakin?.km || 10) => {
+    setYakin({ durum: "bekliyor", km });
+    try {
+      const izin = await Location.requestForegroundPermissionsAsync();
+      if (izin.status !== "granted") return setYakin({ durum: "izin_yok", km });
+      const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setYakin({ durum: "tamam", km, konum: { lat: p.coords.latitude, lng: p.coords.longitude } });
+    } catch { setYakin({ durum: "hata", km }); }
+  };
+  const yakinSonuc = useMemo(() => (yakin?.durum === "tamam" ? yakinSahalar(isler, yakin.konum, yakin.km) : null), [yakin, isler]);
 
   return (
     <View style={{ flex: 1, backgroundColor: renk.zemin }}>
       <View style={{ backgroundColor: renk.lacivert, paddingTop: kenar.top + aralik.xs, paddingBottom: aralik.s }}>
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: aralik.m }}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Metin tur="baslikL" renk="#FFFFFF" accessibilityRole="header">Sahalar</Metin>
+            <Metin tur="baslikL" renk="#FFFFFF" accessibilityRole="header">{sabit === "harita" ? "Saha Haritası" : sabit === "liste" ? "İşler" : "Sahalar"}</Metin>
             <Metin tur="minik" renk="#B8C7DA" numberOfLines={1}>{baslik}{veri?.rol === "CALISAN" ? " · ekip görünümü" : veri ? " · firma görünümü" : ""}</Metin>
           </View>
+          {finans && gorunum === "liste" ? (
+            <Pressable onPress={() => navigation.navigate("TaseronAtananBedeller")} accessibilityRole="button" accessibilityLabel="Atanan İş Bedelleri" hitSlop={8}
+              style={({ pressed }) => [{ height: 36, paddingHorizontal: 10, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.14)", flexDirection: "row", alignItems: "center", marginRight: 6 }, pressed && { opacity: 0.6 }]}>
+              <Ionicons name="pricetags-outline" size={16} color="#FFFFFF" />
+              <Metin tur="etiket" renk="#FFFFFF" style={{ marginLeft: 5 }}>Bedeller</Metin>
+            </Pressable>
+          ) : null}
           <Pressable onPress={() => navigation.navigate("TaseronYaptiklarimiz")} accessibilityRole="button" accessibilityLabel="Yaptığımız Sahalar" hitSlop={8}
             style={({ pressed }) => [{ height: 36, paddingHorizontal: 10, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.14)", flexDirection: "row", alignItems: "center" }, pressed && { opacity: 0.6 }]}>
             <Ionicons name="ribbon-outline" size={16} color="#FFFFFF" />
@@ -93,8 +121,8 @@ export function TaseronSahaEkrani({ navigation }) {
             <Ionicons name="refresh" size={22} color="#FFFFFF" />
           </Pressable>
         </View>
-        {/* Sahalarım / Harita */}
-        <View style={{ flexDirection: "row", marginHorizontal: aralik.m, marginTop: aralik.s, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: kose.m, padding: 3 }}>
+        {/* Sahalarım / Harita (alt sekmeden sabit açılmışsa gösterilmez) */}
+        {sabit ? null : <View style={{ flexDirection: "row", marginHorizontal: aralik.m, marginTop: aralik.s, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: kose.m, padding: 3 }}>
           {[["liste", "Sahalarım", "list"], ["harita", "Harita", "map"]].map(([kod, ad, ikon]) => {
             const sec = gorunum === kod;
             return (
@@ -105,7 +133,7 @@ export function TaseronSahaEkrani({ navigation }) {
               </Pressable>
             );
           })}
-        </View>
+        </View>}
         <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: aralik.m, marginTop: aralik.s, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: kose.m, paddingHorizontal: aralik.s }}>
           <Ionicons name="search" size={18} color="#B8C7DA" />
           <TextInput value={arama} onChangeText={setArama} placeholder="Site ID ya da iş kodu ara" placeholderTextColor="#8FA3BC" autoCapitalize="characters"
@@ -127,7 +155,7 @@ export function TaseronSahaEkrani({ navigation }) {
           </View>
         ) : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: aralik.m, paddingTop: aralik.s, gap: aralik.xs }}>
-          {FILTRELER.map((f) => {
+          {GRUP_FILTRELER.map((f) => {
             const sec = filtre === f.kod;
             return (
               <Pressable key={f.kod} onPress={() => setFiltre(f.kod)} accessibilityRole="button" accessibilityState={{ selected: sec }}
@@ -161,6 +189,7 @@ export function TaseronSahaEkrani({ navigation }) {
             <HaritaTuvali k={k} sahalar={sahalar} secili={secili?.id || null} onSaha={(s) => setSecili(s)} onIl={() => {}} aktifIller={[]}
               alt={0} toplam={haritaSahalari(isler).length} onListe={() => setGorunum("liste")} benimGoster={false} lejant={HARITA_LEJANT} yaklasikLejant={false} />
             {secili ? <HaritaSahaPaneli s={secili} onKapat={() => setSecili(null)} onIs={ac} /> : null}
+            {!secili ? <YakinPaneli yakin={yakin} sonuc={yakinSonuc} onAc={yakinAc} onKapat={() => setYakin(null)} onIs={ac} /> : null}
           </View>
         )}
     </View>
@@ -183,8 +212,70 @@ function SahaKarti({ x, onPress }) {
         {x.ekip ? <Rozet metin={x.ekip.ad} tonAdi="marka" ikon="people-outline" /> : <Rozet metin="Ekibe ayrılmamış" tonAdi="notr" />}
         {!x.islem.montaj ? <Rozet metin="Salt okunur" tonAdi="notr" ikon="eye-outline" /> : null}
       </View>
+      {x.plan_tarihi || x.atanan?.length ? <Metin tur="minik" renk={renk.metinIkincil} style={{ marginTop: 6 }} numberOfLines={1}>
+        {[x.plan_tarihi ? `Plan ${tarih(x.plan_tarihi)}` : null, x.atanan?.length ? x.atanan.join(", ") : null].filter(Boolean).join(" · ")}</Metin> : null}
       {x.konum_yok ? <Metin tur="minik" renk={renk.metinSoluk} style={{ marginTop: 6 }}>Konum kayıtlı değil — yalnız listede görünür</Metin> : null}
     </Kart>
+  );
+}
+
+// Yakınımdaki sahalar paneli (harita üstünde): kuş uçuşu mesafe, yalnız yetkili iş listesi; yakınlık işlem yetkisi vermez
+function YakinPaneli({ yakin, sonuc, onAc, onKapat, onIs }) {
+  const kenar = useSafeAreaInsets();
+  if (!yakin) {
+    return (
+      <Pressable onPress={() => onAc(10)} accessibilityRole="button" accessibilityLabel="Yakınımdaki sahalar"
+        style={({ pressed }) => [{ position: "absolute", left: aralik.m, top: aralik.m, flexDirection: "row", alignItems: "center", height: 44, paddingHorizontal: 14,
+          borderRadius: 23, backgroundColor: renk.lacivert }, golge, pressed && { opacity: 0.85 }]}>
+        <Ionicons name="locate" size={18} color="#FFFFFF" />
+        <Metin tur="kucukKalin" renk="#FFFFFF" style={{ marginLeft: 6 }}>Yakınımdaki Sahalar</Metin>
+      </Pressable>
+    );
+  }
+  return (
+    <View style={[{ position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: renk.yuzey, borderTopLeftRadius: kose.l, borderTopRightRadius: kose.l,
+      paddingHorizontal: aralik.m, paddingTop: aralik.s, paddingBottom: kenar.bottom + aralik.s, maxHeight: 360 }, golge]}>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View style={{ flex: 1 }}>
+          <Metin tur="baslikM">Yakınımdaki Sahalar</Metin>
+          <Metin tur="minik" renk={renk.metinIkincil}>Kuş uçuşu mesafe · yalnız size açık işler · konum kayıtlı sahalar</Metin>
+        </View>
+        <Pressable onPress={onKapat} accessibilityRole="button" accessibilityLabel="Kapat" hitSlop={8} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="close" size={22} color={renk.metinIkincil} />
+        </Pressable>
+      </View>
+      <View style={{ flexDirection: "row", gap: 6, marginVertical: aralik.xs }}>
+        {YAKIN_KM.map((km) => {
+          const sec = yakin.km === km;
+          return (
+            <Pressable key={km} onPress={() => onAc(km)} accessibilityRole="button" accessibilityState={{ selected: sec }}
+              style={{ height: 34, paddingHorizontal: 12, borderRadius: 17, justifyContent: "center", backgroundColor: sec ? renk.lacivert : renk.zemin }}>
+              <Metin tur="etiket" renk={sec ? "#FFFFFF" : renk.metin}>{km} km</Metin>
+            </Pressable>
+          );
+        })}
+      </View>
+      {yakin.durum === "bekliyor" ? <Metin tur="kucuk" renk={renk.metinIkincil}>Konum alınıyor…</Metin> : null}
+      {yakin.durum === "izin_yok" ? <Bant tonAdi="notr" ikon="location-outline" metin="Konum izni verilmedi. Harita ve liste normal çalışır; izni telefon ayarlarından açabilirsiniz." /> : null}
+      {yakin.durum === "hata" ? <Bant tonAdi="uyari" metin="Konum alınamadı. Tekrar deneyin." eylem="Tekrar" onEylem={() => onAc(yakin.km)} /> : null}
+      {sonuc ? (
+        <ScrollView>
+          {!sonuc.yakin.length ? <Metin tur="kucuk" renk={renk.metinIkincil}>{yakin.km} km içinde size açık saha yok.</Metin> : null}
+          {sonuc.yakin.map((x) => (
+            <Pressable key={x.kod} onPress={() => onIs(x.kod)} accessibilityRole="button"
+              style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", minHeight: 52, borderTopWidth: 0.5, borderTopColor: renk.cizgi }, pressed && { opacity: 0.7 }]}>
+              <View style={{ flex: 1 }}>
+                <Metin tur="govdeKalin">{x.fiziksel_id} · {x.kod}</Metin>
+                <Metin tur="minik" renk={x.sorun?.var || x.cleanup ? renk.uyari : renk.metinIkincil} numberOfLines={1}>
+                  {[`${x.mesafe_km} km (kuş uçuşu)`, x.montaj.ad, x.cleanup ? `Clean Up: ${x.cleanup.kalem} eksik` : null, x.sorun?.var && !x.cleanup ? "Açık sorun" : null].filter(Boolean).join(" · ")}</Metin>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={renk.metinSoluk} />
+            </Pressable>
+          ))}
+          {sonuc.konumsuz ? <Metin tur="minik" renk={renk.metinSoluk} style={{ marginTop: 4 }}>{sonuc.konumsuz} işin konumu kayıtlı değil — mesafe hesaplanmadı (listede görünür).</Metin> : null}
+        </ScrollView>
+      ) : null}
+    </View>
   );
 }
 
@@ -274,6 +365,9 @@ export function TaseronSahaDetayEkrani({ route, navigation }) {
               <BilgiSatiri etiket="İş kodu" deger={x.kod} />
               <BilgiSatiri etiket="İş türü" deger={x.is_turu} />
               <BilgiSatiri etiket="Ekip" deger={x.ekip?.ad || "Ekibe ayrılmamış"} />
+              {x.atanan?.length ? <BilgiSatiri etiket="Atanan" deger={x.atanan.join(", ")} /> : null}
+              {x.plan_tarihi ? <BilgiSatiri etiket="Plan tarihi" deger={tarih(x.plan_tarihi)} /> : null}
+              {x.il || x.bolge ? <BilgiSatiri etiket="İl / bölge" deger={[x.il, x.bolge].filter(Boolean).join(" · ")} /> : null}
               <BilgiSatiri etiket="Montaj başlangıcı" deger={zaman(x.montaj.baslama) || "—"} />
               <BilgiSatiri etiket="Montaj bitişi" deger={zaman(x.montaj.bitis) || "—"} />
               {!x.qc.gizli ? <BilgiSatiri etiket="QC" deger={x.qc.kapanis ? `${x.qc.ad} · ${tarih(x.qc.kapanis)}` : x.qc.ad} son /> : <BilgiSatiri etiket="QC" deger="Bu iş kolunun QC bilgisi sizde değil" son />}
@@ -283,6 +377,9 @@ export function TaseronSahaDetayEkrani({ route, navigation }) {
           {!x.islem.montaj ? <Bant tonAdi="notr" ikon="eye-outline" baslik="Salt okunur" metin={x.islem.neden} style={{ marginTop: aralik.s }} />
             : !x.islem.basla && !x.islem.tamamla && x.islem.engel ? <Bant tonAdi="notr" ikon="information-circle-outline" metin={x.islem.engel} style={{ marginTop: aralik.s }} /> : null}
           {x.montaj_kaynagi ? <Bant tonAdi="bilgi" ikon="git-branch-outline" metin={x.montaj_kaynagi} style={{ marginTop: aralik.s }} /> : null}
+          {x.cleanup ? <Bant tonAdi="uyari" ikon="construct-outline" baslik="Clean Up açık" metin={`${x.cleanup.kalem} eksik kalem (${x.cleanup.durum === "TASLAK" ? "taslak" : x.cleanup.durum.toLowerCase()}). Eksik tamamlandığında bildirimi mevcut Clean Up akışıyla yapın; kaydı merkez onaylar.`} style={{ marginTop: aralik.s }} /> : null}
+          {x.konum ? <Buton baslik="Yol tarifi" ikon="navigate-outline" tur="ikincil" style={{ marginTop: aralik.s }}
+            onPress={() => Linking.openURL(yolTarifiAdresi(x.konum, Platform.OS)).catch(() => Alert.alert("Harita açılamadı"))} /> : null}
 
           <BolumBasligi baslik="Açık sorunlar" />
           {!x.sorun.var ? <Kart><Metin tur="kucuk" renk={renk.metinIkincil}>Açık sorun kaydı yok.</Metin></Kart>

@@ -108,7 +108,8 @@ test("liste ve harita aynı veri: konumsuz iş yalnız listede, tahmini konum yo
   assert.equal(v.sayac.qc_ok, 1); assert.equal(v.isler.find((x) => x.kod === "BU8007_NR700").montaj.durum, "TAMAMLANDI");
   const b10 = v.isler.find((x) => x.kod === "BU8010_NR700");
   assert.equal(b10.montaj.durum, "TAMAMLANDI", "QC NOK fiziksel tamamlanmayı geri almaz");
-  assert.equal(b10.sorun.kayitlar[0].etiket, "Doğrulanmış: QC NOK");
+  // 06.11.2026: QC NOK eksik / sorun sayılmaz — "Montaj tamam · QC bekliyor" grubunda
+  assert.equal(b10.sorun.var, false); assert.ok(b10.gruplar.includes("qc_bekleyen") && !b10.gruplar.includes("eksik"));
   const ara = await ok(T.emrah, "/taseron-saha/isler?q=bu8001");
   assert.deepEqual(kodlar(ara), ["BU8001_NR700"]);
 });
@@ -245,8 +246,9 @@ test("hesap yönetimi: firma listesi, hesap açma (rol + ekip), mükerrer ad, ka
   // Her çalıştırmada yeni kullanıcı adı (hesap silinip aynı adla açılırsa sunucunun e-posta→kimlik önbelleği eski kimliği tutar)
   const ek = Date.now().toString(36), Y1 = `emrah.yeni.${ek}`, Y2 = `iztas.yeni.${ek}`;
   // Teknocenter yöneticisi yalnız kendi kapsamındaki firmaları görür
-  const fl = await ok(T.tekno, "/taseron-saha/yonetim/firmalar?q=2KX");
-  assert.ok(fl.firmalar.some((f) => f.kod === "TEKNO_2KX") && !fl.firmalar.some((f) => f.kod === "2KX"), "bağımsız 2KX Teknocenter listesinde yok");
+  // 06.11.2026: liste yalnız RF portalındaki firmalar; kapsama eklenecek firma araması (aday=1) yine yöneticinin kapsamıyla sınırlı
+  const fl = await ok(T.tekno, "/taseron-saha/yonetim/firmalar?aday=1&q=2KX");
+  assert.ok(fl.firmalar.some((f) => f.kod === "TEKNO_2KX") && !fl.firmalar.some((f) => f.kod === "2KX"), "bağımsız 2KX Teknocenter aday listesinde yok");
   assert.equal(fl.hesap_acabilir, true);
   assert.equal((await istek(T.emrah, "/taseron-saha/yonetim/firmalar")).durum, 403, "taşeron yönetim listesine giremez");
   // Hesap aç
@@ -255,7 +257,7 @@ test("hesap yönetimi: firma listesi, hesap açma (rol + ekip), mükerrer ad, ka
   assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Emrah Yeni", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 311 } })).durum, 400, "başka firmanın ekibi");
   assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: b2, ad: "X", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN" } })).durum, 404, "kapsam dışı firma");
   const a = await ok(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Emrah Yeni", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } });
-  assert.equal(a.kullanici.rol, "CALISAN"); assert.equal(JSON.stringify(a).includes("Saha2026x"), false, "şifre yanıtta dönmez");
+  assert.equal(a.kullanici.yetki, "CALISAN"); assert.equal(JSON.stringify(a).includes("Saha2026x"), false, "şifre yanıtta dönmez");
   assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Başka", kullanici_adi: Y1, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } })).durum, 409, "aynı kullanıcı adı");
   assert.equal((await istek(T.tekno, "/taseron-saha/yonetim/hesap", { method: "POST", govde: { taseron_id: em, ad: "Erc Hesabı", kullanici_adi: E.erc, sifre: "Saha2026x", rol: "CALISAN", ekip_no: 303 } })).durum, 409, "var olan ERC hesabı ele geçirilemez");
   // Yeni hesap giriş yapar, yalnız kendi ekibini görür
