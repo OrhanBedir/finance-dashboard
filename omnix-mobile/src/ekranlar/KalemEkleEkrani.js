@@ -146,6 +146,11 @@ export function KalemEkleEkrani({ navigation, route }) {
     const aday = (yanit.adaylar || []).find((a) => a.no === (tek?.aday_no ?? secim[0]?.aday_no));
     let onizlemeUri = null;
     if (tur === "kirpik" && aday?.onizleme) { try { onizlemeUri = onizlemeSakla(kapsam, aday.onizleme)?.uri || null; } catch { onizlemeUri = null; } }
+    // Köşeler elle düzeltildiyse küçük önizleme de o kırpmayı göstersin: sunucu saklı orijinalden aynı kırpmayı üretir.
+    // Önizleme alınamazsa yalnız küçük resim orijinal kalır (rozet "Düzeltildi"); kaydedilecek ek yine sunucuda kırpılır.
+    if (tur === "duzeltildi" && secim.length === 1 && tek?.kose && masrafApi.fisOnizle) {
+      try { const o = await masrafApi.fisOnizle(yanit.isleme_id, tek.kose); onizlemeUri = onizlemeSakla(kapsam, o?.onizleme)?.uri || null; } catch { onizlemeUri = null; }
+    }
     fotoYaz(f.uri, { onIsleme: { durum: "onaylandi", isleme_id: yanit.isleme_id, secimler: secim, tur, adet: secim.length }, onizlemeUri, istekler: null, kirpmadanOnay: false });
   };
 

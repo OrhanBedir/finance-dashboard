@@ -26477,6 +26477,27 @@ app.post("/hr/masraf-form/:formId/fis-isle", taseronDegil, fisUploadKapi, async 
   } catch (e) { fisHataYaniti(res, e); }
 });
 
+// 06.11.2026: elle düzeltilen köşelerin kırpılmış önizlemesi — saklı orijinalden, eklemeyle AYNI kırpma kodu (fisUret).
+// Model çağrılmaz, ek/kalem oluşmaz; yalnız işlemin sahibi (aynı kullanıcı) ve işlem forma/kaleme bağlı formun yetkilisi.
+app.post("/hr/masraf-fis-isleme/:id/onizle", taseronDegil, async (req, res) => {
+  try {
+    const u = optionalAuth(req);
+    if (!u) return res.status(401).json({ error: "Oturum gerekli" });
+    const isl = (await pool.query(`SELECT * FROM masraf_fis_isleme WHERE id=$1`, [Number(req.params.id)])).rows[0];
+    if (!isl || isl.kullanici_email !== _eposta(u)) return res.status(404).json({ error: "Fiş işlemi bulunamadı" });
+    const y = await masrafFormYetki(req, isl.form_id);
+    if (y.hata) return res.status(y.hata[0]).json({ error: y.hata[1] });
+    if (!(y.duzenlenebilir || (y.onayda && y.tam))) return res.status(403).json({ error: "Bu formun durumunda fiş eklenemez" });
+    if (!isl.orijinal_yol) return res.status(410).json({ error: "Fotoğrafın saklama süresi doldu — lütfen fotoğrafı yeniden yükleyin" });
+    const buf = await ozelIndir(isl.orijinal_depo, isl.orijinal_yol);
+    const d = await fisKirpma.dosyaDogrula(buf);
+    if (d.sha256 !== isl.sha256) throw new Error("Saklanan orijinal fotoğraf bütünlük denetiminden geçmedi");
+    const kose = fisKirpma.koseDogrula(req.body?.kose, { w: d.w, h: d.h });
+    const o = await fisKirpma.fisUret(buf, kose);
+    res.json({ isleme_id: isl.id, kose: o.kose, olcu: { w: o.w, h: o.h }, onizleme: await fisKirpma.onizleme(o.buffer) });
+  } catch (e) { fisHataYaniti(res, e); }
+});
+
 // Onaylanan otomatik / düzeltilmiş kırpmayı ek yapar: kırpma orijinalden SUNUCUDA yeniden üretilir.
 // secimler: [{ aday_no?, kose?:[[x,y]×4], kirpma?: "yok", istek_id }] — her seçim aynı kaleme ayrı ek olur.
 // istek_id tekrar denemede aynı eki döndürür (çift ek yok); aynı aday aynı kaleme ikinci kez eklenmez.

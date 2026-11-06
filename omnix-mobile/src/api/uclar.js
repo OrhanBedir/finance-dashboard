@@ -41,6 +41,8 @@ export const masrafApi = {
   fisIsle: (kalemId, dosya) => api.yukle(`/hr/masraf-belge/${kalemId}/isle`, dosya),
   // 06.11.2026: kalem kaydı olmadan, fotoğraf seçilince otomatik kırpma önizlemesi (sunucuda forma bağlı geçici işlem)
   fisOnIsle: (formId, dosya) => api.yukle(`/hr/masraf-form/${formId}/fis-isle`, dosya),
+  // 06.11.2026: elle düzeltilen köşelerin kırpılmış önizlemesi (sunucu saklı orijinalden, eklemeyle aynı kırpma; model yok)
+  fisOnizle: (islemeId, kose) => api.post(`/hr/masraf-fis-isleme/${islemeId}/onizle`, { kose }, { zamanAsimiMs: 60000 }),
   fisEkle: (kalemId, islemeId, secimler) => api.post(`/hr/masraf-belge/${kalemId}`, { isleme_id: islemeId, secimler }, { zamanAsimiMs: 120000 }),
   belgeSil: (id) => api.sil(`/hr/masraf-belge/${id}`),
   gonder: (id) => api.put(`/hr/masraf-form/${id}/submit`),
