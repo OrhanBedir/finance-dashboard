@@ -18,6 +18,7 @@ import { TeknoSahaSecici, TalepKalemEditoru, MalzemeKatalogPanel, kalemKontrol, 
 import HwMalzemePanel from "./HwMalzeme.jsx"; // 31.10.2026: HW (Huawei) saha malzemesi kabul / depo / ekip hareketleri
 import { RolloutHaftalikModal, PlanIsSecimi, FIILI_RENK, planAdayi, planAdayUygun } from "./Operasyon.jsx"; // 31.10.2026: Rollout Weekly Plan + Plan Yap iş seçimi
 import { TaseronSahaRaporlari, TaseronSahaRaporModal, TaseronHesapModal } from "./TaseronSahaRaporlari.jsx"; // 04.11.2026: taşeron saha raporları (Teknocenter inceleme / PR durumu)
+import { OrgYonetimSeridi, OrgEkipKart, OrgAracModal, OrgOperasyonModal, OrgBirlestirModal, OrgIndirModal, orgIstek2 } from "./OrgSema.jsx"; // 06.11.2026: kurumsal org şeması + müşteri çıktısı
 import "react-image-crop/dist/ReactCrop.css";
 import towerIcon from "./assets/tower.svg";
 
@@ -6130,6 +6131,20 @@ const ORG_YONETIM = {
   izmir: { mudur: { ad: "SERDAR ALTINOVA", tel: "5321619481", gorev: "İzmir Bölge Müdürü" }, supervizor: { ad: "KASIM EVİN", tel: "5321531797", gorev: "İzmir Süpervizörü" } },
   ortak: { mudur: { ad: "NURCAN KUŞ", tel: "5392596108", gorev: "Ankara & Bursa Bölge Müdürü" }, supervizor: { ad: "FIRAT KENAN ONGUN", tel: "5322127865", gorev: "Ankara & Bursa Süpervizörü" } },
 };
+// 06.11.2026: proje üst yönetimi ve destek fonksiyonları (eski SVG şemadaki kadro) — şema ve müşteri çıktısı aynı sabitten.
+// Yalnız "tüm organizasyon" kapsamında gösterilir; alt marka (ör. Teknocenter) operasyon çıktısında bilinmeyen kadro uydurulmaz.
+const ORG_UST_YONETIM = {
+  ust: [{ ad: "DÜZGÜN ŞİMŞEK", gorev: "Project Director" }, { ad: "ORHAN BEDİR", gorev: "Project Manager" }],
+  destek: [{ ad: "HATİCE OMUŞ", gorev: "IFIS · Survey · BTK · Atlas" }, { ad: "ERENCAN ŞİMŞEK", gorev: "EHS Officer" },
+    { ad: "TUĞÇE YELMEN", gorev: "Invoicing & Acceptance Coord." }, { ad: "EMRE AKDEĞİRMEN", gorev: "Warehouse & Inventory Coord." }],
+};
+// Bölge yönetimi (telefon çıktıya / şemaya taşınmaz): ekibin bölgesi → yönetim kaydı. Ankara ve Bursa ortak yönetimdir.
+const orgBolgeYonetimAnahtari = (bolge) => (/İZM|IZM/i.test(bolge || "") ? "izmir" : /ANK|BUR/i.test(bolge || "") ? "ortak" : null);
+const orgBolgeYonetimleri = (bolgeler) => {
+  const say = {}; for (const b of bolgeler) { const k = orgBolgeYonetimAnahtari(b); if (k) say[k] = (say[k] || 0) + 1; }
+  return ["izmir", "ortak"].filter((k) => say[k]).map((k) => ({ ad: k === "izmir" ? "İzmir" : "Ankara & Bursa", ekip: say[k],
+    mudur: { ad: ORG_YONETIM[k].mudur.ad, gorev: ORG_YONETIM[k].mudur.gorev }, supervizor: { ad: ORG_YONETIM[k].supervizor.ad, gorev: ORG_YONETIM[k].supervizor.gorev } }));
+};
 // Operasyon bölgeleri ve il kapsamları — Huawei BoQ "Delivery Region" haritasıyla (20260902) çapraz kontrol edildi.
 // Not: Yalova BoQ'da Region 2 (IST ASIA) görünse de operasyonel olarak Bursa bölgesine bağlıdır (Orhan kararı, 13.10.2026).
 const ORG_BOLGELER = [
@@ -6143,7 +6158,8 @@ const ORG_SEHIR_MERKEZ = { "İZMİR": { lat: 38.4237, lng: 27.1428 }, "BURSA": {
 // Ad zaten firmayla başlıyorsa (eski kayıtlar: "FERRUMX Ekip 1") firma tekrar eklenmez.
 const orgEkipAdi = (e) => (e.ad && e.ad.trim()) || `Ekip ${e.ekip_no}`;
 // 28.10.2026: ekip bir firma kaydına (subcons) bağlıysa firmanın GÜNCEL görünen adı; değilse eski serbest taşeron adı
-const orgEkipFirma = (e) => String(e.firma_gorunen || e.taseron_adi || "").trim();
+// 06.11.2026: iç ekipte firma = bağlı firma (eski serbest "TEK" yazısı değil); tür ekip satırından gelir, addan tahmin edilmez
+const orgEkipFirma = (e) => String(e.ekip_turu === "IC" ? (e.bagli_firma_ad || e.bagli_firma || "") : (e.firma_gorunen || e.taseron_adi || "")).trim();
 // 16.10.2026: "TEKNO EkipN" kendi başına tam addır (firma öneki eklenmez); firma öneki yalnız ayrı bir kelimeyse kırpılır
 // ("TEK" ≠ "TEKNO …" başlangıcı). Ad değişse de firma kimliği (taseron_adi) ve yetkiler aynı kalır.
 const orgEkipTeknoMu = (e) => /^TEKNO\b/i.test(String(e?.ad || "").trim());
@@ -6153,7 +6169,8 @@ const orgEkipAdSade = (e) => {
   const al = ad.toLocaleLowerCase("tr-TR"), fl = f.toLocaleLowerCase("tr-TR");
   return al.startsWith(fl) && /^([\s—\-·:]|$)/.test(ad.slice(f.length)) ? ad.slice(f.length).replace(/^[\s—\-·:]+/, "") || ad : ad;
 };
-const orgEkipTamAd = (e) => orgEkipTeknoMu(e) ? orgEkipAdi(e) : orgEkipFirma(e) ? `${orgEkipFirma(e)} — ${orgEkipAdSade(e)}` : orgEkipAdi(e);
+// İç ekibin adı kendi başına tam addır; taşeron ekibinde firma adı ekip adıyla aynıysa tekrar yazılmaz ("TEKNO_EMRAH — TEKNO_EMRAH" olmaz)
+const orgEkipTamAd = (e) => orgEkipTeknoMu(e) || e.ekip_turu === "IC" || e.firma_ad_ayni ? orgEkipAdi(e) : orgEkipFirma(e) ? `${orgEkipFirma(e)} — ${orgEkipAdSade(e)}` : orgEkipAdi(e);
 // TEKNO ekipleri kalıcı numara sırasıyla (Ekip1 … Ekip10), ardından diğer ekipler kayıt numarasıyla
 const orgEkipNo = (e) => { const n = Number(e?.ekip_sira); if (n > 0) return n; const m = String(e?.ad || "").match(/^TEKNO\s*Ekip\s*(\d+)/i); return m ? Number(m[1]) : null; };
 const orgEkipSira = (a, b) => { const x = orgEkipNo(a), y = orgEkipNo(b); if (x && y) return x - y; if (x) return -1; if (y) return 1; return Number(a.ekip_no) - Number(b.ekip_no); };
@@ -6435,10 +6452,14 @@ const orgIstek = async (method, yol, govde) => {
 };
 const ORG_TIP_TR = { OLUSTURMA: "Oluşturuldu", DUZENLEME: "Düzenlendi", AD_DUZELT: "Adı düzeltildi", UNVAN: "Resmi unvan değişti", DURUM: "Durum değişti",
   YENI_FIRMA: "Yeni firmayla çalışmaya geçildi", SEF: "Ekip şefi değişti", UYE_EKLE: "Personel eklendi", UYE_CIKAR: "Personel ekipten çıkarıldı",
-  UYE_TASI_GIRIS: "Personel başka ekipten taşındı", UYE_TASI_CIKIS: "Personel başka ekibe taşındı", SILME: "Silindi", SINIFLANDIRMA: "Ekip türü / iş etiketi" };
+  UYE_TASI_GIRIS: "Personel başka ekipten taşındı", UYE_TASI_CIKIS: "Personel başka ekibe taşındı", SILME: "Silindi", SINIFLANDIRMA: "Ekip türü / iş etiketi",
+  BIRLESTIRME: "Mükerrer kayıt bu ekibe birleştirildi", BIRLESTIRILDI: "Kayıt başka ekibe birleştirildi", BIRLESTIRME_GERI: "Birleştirme geri alındı", GERI_ALMA: "Geri alındı",
+  ARAC_TAHSIS: "Araç tahsis edildi", ARAC_TAHSIS_BITIR: "Araç tahsisi sona erdi", OPERASYON_CIKIS: "Operasyondan çıkarıldı", OPERASYON_BAGLA: "Operasyona bağlandı", TEYIT: "Bilgiler teyit edildi" };
 const ORG_ALAN_TR = { ad: "Ad", unvan: "Resmi unvan", bolge: "Bölge", aciklama: "Açıklama", firma: "Firma", durum: "Durum", sef: "Ekip şefi", uye: "Personel",
   baslangic: "Başlangıç", bitis: "Bitiş", onceki_ekip: "Önceki ekip", yeni_firma: "Yeni firma", plaka: "Plaka", taseron_adi: "Taşeron adı", ekip_turu: "Ekip türü",
-  bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", belge: "Belge / dayanak", gecerlilik: "Geçerlilik tarihi" };
+  bagli_firma: "Bağlı firma", is_etiketi: "İş etiketi", belge: "Belge / dayanak", gecerlilik: "Geçerlilik tarihi", tur: "Ekip türü", operasyon: "Operasyon",
+  operasyon_bitis: "Operasyon bitişi", firma_karti: "Firma kartı", surucu: "Sürücü", bit: "Bitiş", bas: "Başlangıç", eski_adlar: "Eski adlar", is_etiketleri: "İş etiketleri",
+  birlesen_kayit: "Birleşen kayıt", birlesen_ekip_no: "Birleştiği ekip", ekip_sira: "Şema sırası", sira: "Şema sırası", aktif: "Aktif", teyit: "Teyit" };
 const orgBugun = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
 const ORG_INP = { width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: "9px", fontSize: "13.5px", boxSizing: "border-box", background: "#fff", fontFamily: "inherit" };
 const ORG_BTN_RENK = {
@@ -6569,16 +6590,19 @@ function OrgEkipFormModal({ ekip, firmalar, bolgeler, varsayilanFirma, onClose, 
   const ic = ekip && ekip.ekip_turu === "IC";
   const secenekler = firmalar.filter((x) => x.tip === "TASERON" ? (x.aktif || (ekip && x.id === ekip.firma_id)) : x.tip === "KENDI");
   const ilk = ekip ? (ekip.firma_id ? `F${ekip.firma_id}` : ic ? `M:${String(ekip.bagli_firma || "ERC").toUpperCase()}` : "") : (varsayilanFirma || secenekler[0]?.anahtar || "");
-  const [f, setF] = useState({ firma: ilk, ad: ekip?.ad || "", bolge: ekip?.bolge || "", aciklama: ekip?.aciklama || "", gerekce: "" });
+  const [f, setF] = useState({ firma: ilk, ad: ekip?.ad || "", bolge: ekip?.bolge || "", aciklama: ekip?.aciklama || "", gerekce: "", operasyon: "" });
   const [hata, setHata] = useState(""); const [bekle, setBekle] = useState(false);
   const firmaDegisti = !yeni && f.firma !== ilk;
+  // 06.11.2026: tür seçimden okunur ve açıkça yazılır (firma kartı → taşeron ekibi, kendi firma → iç ekip); isimden tahmin edilmez
+  const taseronSecili = f.firma.startsWith("F");
   const kaydet = async () => {
     setHata("");
     if (!f.firma) { setHata("Firma seçin"); return; }
     if (!String(f.ad).trim()) { setHata("Ekip adı yazın"); return; }
     if (firmaDegisti && !f.gerekce.trim()) { setHata("Firma bağlantısı değişikliği için gerekçe yazın"); return; }
+    if (yeni && taseronSecili && !f.operasyon) { setHata("Taşeron ekibinin hangi firmanın operasyonunda çalışacağını seçin"); return; }
     setBekle(true);
-    const firmaAlan = f.firma.startsWith("F") ? { firma_id: Number(f.firma.slice(1)) } : { bagli_firma: f.firma.slice(2) };
+    const firmaAlan = taseronSecili ? { firma_id: Number(f.firma.slice(1)), tur: "DIS", operasyon_firma: f.operasyon } : { bagli_firma: f.firma.slice(2), tur: "IC" };
     const r = yeni ? await orgIstek("POST", "/org/ekip", { ...firmaAlan, ad: f.ad, bolge: f.bolge, aciklama: f.aciklama, gerekce: f.gerekce })
       : await orgIstek("PUT", `/org/ekip/${ekip.ekip_no}`, { ad: f.ad, bolge: f.bolge, aciklama: f.aciklama, gerekce: f.gerekce, ...(firmaDegisti && f.firma.startsWith("F") ? { firma_id: Number(f.firma.slice(1)) } : {}) });
     setBekle(false);
@@ -6599,6 +6623,18 @@ function OrgEkipFormModal({ ekip, firmalar, bolgeler, varsayilanFirma, onClose, 
         </select>
       </OrgAlan>
       {firmaDegisti && <OrgBilgi renk="sari">Firma bağlantısı <b>{firmaAd(ilk) || "—"}</b> → <b>{firmaAd(f.firma)}</b> olarak değişecek. Geçmiş işler, hakediş ve fatura kayıtları yeni firmaya aktarılmaz.</OrgBilgi>}
+      {f.firma && <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#0f172a", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "9px", padding: "7px 11px", marginBottom: "11px" }}>
+        Ekip türü: {taseronSecili ? "Taşeron ekibi — ayrı firmanın ekibi; firma kartı, cari ve personel işvereni değişmez" : "İç ekip — firmanın kendi personeli"}</div>}
+      {yeni && taseronSecili && (
+        <OrgAlan etiket="Operasyonu yöneten firma" ipucu="Ekip bu firmanın organizasyon şemasında ve iş seçicilerinde görünür.">
+          <select value={f.operasyon} onChange={(e) => setF({ ...f, operasyon: e.target.value })} style={ORG_INP}>
+            <option value="">Seçin…</option>
+            {secenekler.filter((x) => x.tip === "KENDI").map((x) => <option key={x.anahtar} value={x.anahtar.slice(2)}>{x.ad}</option>)}
+            {!secenekler.some((x) => x.anahtar === "M:ERC") && <option value="ERC">Şimşek Haberleşme</option>}
+            {ALT_MARKA_LISTE.filter((m) => !secenekler.some((x) => x.anahtar === `M:${m.kod}`)).map((m) => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
+          </select>
+        </OrgAlan>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: "10px" }}>
         <OrgAlan etiket="Ekip adı" ipucu="Ör. Ekip 1 — kartta “Firma — Ekip adı” olarak görünür.">
           <input value={f.ad} onChange={(e) => setF({ ...f, ad: e.target.value })} style={ORG_INP} autoFocus={yeni} />
@@ -6881,7 +6917,8 @@ function OrgGecmisModal({ modul, id, baslik, onClose }) {
   );
 }
 
-// Saha ekipleri bölümü: firma kartı + altında ekip kartları; arama, bölge / firma / durum filtreleri (varsayılan: aktifler)
+// Saha ekipleri bölümü (06.11.2026): A. İç Ekipler → B. Taşeron Firmalar → C. Türü seçilmemiş eski kayıtlar. Tür ve operasyon
+// ekip satırından gelir (isimden tahmin yok); sıra sunucudan (ekip_sira). Tüm düzenleme işlemleri karttaki TEK menüdedir.
 function OrgEkipYonetimBolumu({ yapi, onYenile, onDetay }) {
   const [filtre, setFiltre] = useState({ ara: "", bolge: "", firma: "", durum: "aktif" });
   const [modal, setModal] = useState(null); // { tur, ... }
@@ -6892,113 +6929,116 @@ function OrgEkipYonetimBolumu({ yapi, onYenile, onDetay }) {
   const q = filtre.ara.trim().toLocaleLowerCase("tr-TR");
   const ekipUygun = (e) => (filtre.durum === "tumu" || (filtre.durum === "aktif" ? e.etkin : !e.etkin))
     && (!filtre.bolge || String(e.bolge || "") === filtre.bolge) && (!filtre.firma || e.firma_anahtar === filtre.firma)
-    && (!q || `${orgEkipTamAd(e)} ${e.bolge || ""} ${(e.uyeler || []).map((p) => p.ad_soyad).join(" ")}`.toLocaleLowerCase("tr-TR").includes(q));
-  const SIRA = { KENDI: 0, TASERON: 1, BAGLANMAMIS: 2 };
-  const gruplar = [...firmalar].sort((a, b) => (Number(!a.aktif) - Number(!b.aktif)) || (SIRA[a.tip] - SIRA[b.tip]) || String(a.ad).localeCompare(String(b.ad), "tr"))
-    .map((fm) => ({ fm, list: ekipler.filter((e) => e.firma_anahtar === fm.anahtar && ekipUygun(e)).sort(orgEkipSira) }))
-    .filter(({ fm, list }) => list.length > 0 || (!q && !filtre.bolge && (!filtre.firma || filtre.firma === fm.anahtar) && fm.tip === "TASERON" && fm.ekip_sayisi === 0
-      && (filtre.durum === "tumu" || (filtre.durum === "aktif" ? fm.aktif : !fm.aktif))));
-  const toplamGorunen = gruplar.reduce((s, g) => s + g.list.length, 0);
-  const renkOf = (b) => /İZM|IZM/i.test(b || "") ? "#0369a1" : /ANK/i.test(b || "") ? "#b45309" : /BUR/i.test(b || "") ? "#15803d" : "#1e3a5f";
+    && (!q || `${e.ad || ""} ${e.firma_gorunen || e.taseron_adi || ""} ${(e.eski_adlar || []).join(" ")} ${e.bolge || ""} ${(e.uyeler || []).map((p) => p.ad_soyad).join(" ")}`.toLocaleLowerCase("tr-TR").includes(q));
+  const gorunen = ekipler.filter(ekipUygun); // sunucu sırası korunur: iç ekipler, taşeronlar, diğerleri (ekip_sira)
+  const firmaOf = (e) => firmalar.find((x) => x.anahtar === e.firma_anahtar) || null;
   const sel = { ...ORG_INP, width: "auto", padding: "7px 9px", fontSize: "12.5px" };
   const durumBtn = (k, ad) => <button key={k} onClick={() => setFiltre({ ...filtre, durum: k })} aria-pressed={filtre.durum === k}
     style={{ border: "none", background: filtre.durum === k ? "#1e3a5f" : "transparent", color: filtre.durum === k ? "#fff" : "#334155", padding: "6px 12px", borderRadius: "7px", fontSize: "12.5px", fontWeight: 700, cursor: "pointer" }}>{ad}</button>;
-  const firmaMenu = (fm) => fm.tip !== "TASERON" || !izin.yonet ? null : [
-    { ad: "✏️ Adı düzelt", fn: () => setModal({ tur: "firmaForm", mod: "ad", firma: fm }) },
-    { ad: "📜 Resmi unvan değişikliği", fn: () => setModal({ tur: "firmaForm", mod: "unvan", firma: fm }) },
-    fm.aktif && { ad: "🔁 Yeni firmayla çalış", fn: () => setModal({ tur: "yeniFirma", firma: fm }) },
-    { ad: fm.aktif ? "⏸ Pasife al" : "▶ Aktif et", fn: () => setModal({ tur: "durum", tip: "firma", kayit: fm }) },
-    { ad: "🕘 Değişiklik geçmişi", fn: () => setModal({ tur: "gecmis", modul: "firma", id: fm.id, baslik: fm.ad }) },
-    izin.sil && fm.kaynak === "ORG" && fm.ekip_sayisi === 0 && { ad: "🗑 Sil (kullanılmamış kayıt)", tehlike: true, fn: async () => {
-      if (!window.confirm(`${fm.ad} kaydı silinsin mi? Yalnız hiç kullanılmamış hatalı kayıtlar silinebilir.`)) return;
-      const r = await orgIstek("DELETE", `/org/firma/${fm.id}`, { gerekce: "Hatalı kayıt" }); if (!r.ok) alert(r.j.error || "Silinemedi"); onYenile(); } },
+  const operasyonlar = izin.marka ? (yapi?.operasyonlar || []).filter((o) => o.kod === izin.marka)
+    : [{ kod: "ERC", ad: "Şimşek Haberleşme" }, ...ALT_MARKA_LISTE.map((m) => ({ kod: m.kod, ad: m.ad }))];
+  const teyitEt = async (e) => { const r = await orgIstek2("POST", `/org/ekip/${e.ekip_no}/teyit`, {}); if (!r.ok) alert(r.j.error || "Teyit kaydedilemedi"); onYenile(); };
+  // Taşeron firma kartı işlemleri (yalnız ana firma): ekibin menüsünde "Firma:" önekiyle — ayrı firma satırı / tekrar eden ad üretilmez
+  const firmaSecenekleri = (fm) => !fm || fm.tip !== "TASERON" || !izin.yonet || izin.marka || fm.salt_okunur ? [] : [
+    { ad: "🏢 Firma: adı düzelt", fn: () => setModal({ tur: "firmaForm", mod: "ad", firma: fm }) },
+    { ad: "🏢 Firma: resmi unvan değişikliği", fn: () => setModal({ tur: "firmaForm", mod: "unvan", firma: fm }) },
+    fm.aktif && { ad: "🏢 Firma: yeni firmayla çalış", fn: () => setModal({ tur: "yeniFirma", firma: fm }) },
+    { ad: fm.aktif ? "🏢 Firma: pasife al" : "🏢 Firma: aktif et", fn: () => setModal({ tur: "durum", tip: "firma", kayit: fm }) },
+    { ad: "🏢 Firma: değişiklik geçmişi", fn: () => setModal({ tur: "gecmis", modul: "firma", id: fm.id, baslik: fm.ad }) },
   ];
   const ekipMenu = (e) => !izin.yonet ? null : [
-    { ad: "✏️ Düzenle", fn: () => setModal({ tur: "ekipForm", ekip: e }) },
-    { ad: "👥 Personelleri Yönet", fn: () => setModal({ tur: "personel", ekipNo: e.ekip_no }) },
-    { ad: "⭐ Ekip Şefini Değiştir", fn: () => setModal({ tur: "sef", ekipNo: e.ekip_no }) },
+    { ad: "✏️ Düzenle (ad · bölge · firma)", fn: () => setModal({ tur: "ekipForm", ekip: e }) },
+    { ad: "👥 Personelleri yönet", fn: () => setModal({ tur: "personel", ekipNo: e.ekip_no }) },
+    { ad: "⭐ Ekip şefini belirle", fn: () => setModal({ tur: "sef", ekipNo: e.ekip_no }) },
+    e.aktif !== false && { ad: "🚗 Araç tahsisi", fn: () => setModal({ tur: "arac", ekipNo: e.ekip_no }) },
+    e.etkin && { ad: "✅ Bilgileri teyit et", fn: () => teyitEt(e) },
+    e.tur === "DIS" && e.aktif !== false && e.operasyon_firma && { ad: "🚪 Operasyondan çıkar", fn: () => setModal({ tur: "operasyon", mod: "cikar", ekipNo: e.ekip_no }) },
+    e.tur === "DIS" && e.firma_id && (e.aktif === false || !e.operasyon_firma) && { ad: "🔗 Operasyona bağla", fn: () => setModal({ tur: "operasyon", mod: "bagla", ekipNo: e.ekip_no }) },
     { ad: e.aktif === false ? "▶ Aktif et" : "⏸ Pasife al", fn: () => setModal({ tur: "durum", tip: "ekip", kayit: e }) },
-    { ad: "🕘 Değişiklik geçmişi", fn: () => setModal({ tur: "gecmis", modul: "ekip", id: e.ekip_no, baslik: orgEkipTamAd(e) }) },
+    izin.sil && e.uye_sayisi === 0 && e.tur && { ad: "🔀 Mükerrer kaydı birleştir", fn: () => setModal({ tur: "birlestir", ekipNo: e.ekip_no }) },
+    { ad: "🕘 Değişiklik geçmişi", fn: () => setModal({ tur: "gecmis", modul: "ekip", id: e.ekip_no, baslik: e.ad }) },
+    ...firmaSecenekleri(firmaOf(e)),
     izin.sil && e.uye_sayisi === 0 && { ad: "🗑 Sil (kullanılmamış kayıt)", tehlike: true, fn: async () => {
-      if (!window.confirm(`${orgEkipTamAd(e)} silinsin mi? Kullanılmış ekip silinemez — pasife alın.`)) return;
+      if (!window.confirm(`${e.ad} silinsin mi? Kullanılmış ekip silinemez — pasife alın.`)) return;
       const r = await orgIstek("DELETE", `/org/ekip/${e.ekip_no}`, { gerekce: "Hatalı kayıt" }); if (!r.ok) alert(r.j.error || "Silinemedi"); onYenile(); } },
   ];
   const ekipBul = (no) => ekipler.find((x) => x.ekip_no === no);
+  const kart = (e) => <OrgEkipKart key={e.ekip_no} e={e} yonetici={!!izin.yonet} onClick={() => onDetay(e)} menu={<OrgKartMenu secenekler={ekipMenu(e)} etiket={`${e.ad} işlemleri`} acik />} />;
+  const IZGARA = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px", alignItems: "start" };
+  const Baslik = ({ harf, ad, n, alt }) => (
+    <div style={{ display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap", borderBottom: "2px solid #1e3a5f", paddingBottom: "6px", margin: "18px 0 12px" }}>
+      <span style={{ fontSize: "15.5px", fontWeight: 800, color: "#1e3a5f" }}>{harf}. {ad}</span>
+      <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b" }}>{n} ekip</span>
+      {alt && <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>{alt}</span>}
+    </div>
+  );
+  // A: iç ekipler — bağlı firmaya göre (Teknocenter İç Ekipleri, …). B: taşeron ekipleri. C: türü seçilmemiş eski kayıtlar.
+  const icGruplar = [...new Set(gorunen.filter((e) => e.tur === "IC").map((e) => e.operasyon_firma || "ERC"))]
+    .map((kod) => ({ kod, ad: gorunen.find((e) => e.tur === "IC" && (e.operasyon_firma || "ERC") === kod)?.bagli_firma_ad || kod, list: gorunen.filter((e) => e.tur === "IC" && (e.operasyon_firma || "ERC") === kod) }));
+  const taseronlar = gorunen.filter((e) => e.tur === "DIS"), digerleri = gorunen.filter((e) => !e.tur);
+  // Ekibi olmayan taşeron firma kartları (yönetim için; şemada ekip olarak yer almaz)
+  const ekipsizFirmalar = izin.yonet && !izin.marka && !q && !filtre.bolge ? firmalar.filter((fm) => fm.tip === "TASERON" && fm.ekip_sayisi === 0
+    && (!filtre.firma || filtre.firma === fm.anahtar) && (filtre.durum === "tumu" || (filtre.durum === "aktif" ? fm.aktif : !fm.aktif))) : [];
+  const harfler = "ABCDEFGH"; let hi = 0;
+  const aktifSay = ekipler.filter((e) => e.etkin), kisiSay = new Set(aktifSay.flatMap((e) => (e.uyeler || []).map((p) => p.id))).size;
+  const aracSay = new Set(aktifSay.flatMap((e) => (e.arac?.liste || []).map((a) => a.plaka_n))).size;
   return (
-    <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginTop: "18px", marginBottom: "18px", textAlign: "left" }}>
+    <div className="org-ekipler" style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "16px 20px", marginTop: "18px", marginBottom: "18px", textAlign: "left" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
-        <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>👷 Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 500, color: "#94a3b8" }}>{ekipler.filter((e) => e.etkin).length} aktif ekip · {ekipler.filter((e) => e.etkin).reduce((s, e) => s + e.uye_sayisi, 0)} kişi · karta tıkla → ekip detayı</span></div>
+        <div style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>Saha Ekipleri <span style={{ fontSize: "11.5px", fontWeight: 600, color: "#64748b" }}>{aktifSay.length} aktif ekip · {kisiSay} kişi · {yapi?.arac_veri_hatasi ? "araç verisi alınamadı" : `${aracSay} araç`}</span></div>
         {izin.yonet && (
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {!izin.marka && <button style={orgBtn("ikincil")} onClick={() => setModal({ tur: "firmaForm", mod: "yeni" })}>＋ Firma / Taşeron Ekle</button>}
+          <div className="org-yazdirma-gizle" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {!izin.marka && <button style={orgBtn("ikincil")} onClick={() => setModal({ tur: "firmaForm", mod: "yeni" })}>＋ Taşeron Firma Ekle</button>}
             <button style={orgBtn("ana")} onClick={() => setModal({ tur: "ekipForm", ekip: null, varsayilan: filtre.firma })}>＋ Ekip Ekle</button>
           </div>
         )}
       </div>
-      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "14px" }}>
-        <input value={filtre.ara} onChange={(e) => setFiltre({ ...filtre, ara: e.target.value })} placeholder="🔍 Firma, ekip ya da personel ara" aria-label="Ekip ara" style={{ ...ORG_INP, flex: "1 1 220px", width: "auto", padding: "7px 10px", fontSize: "12.5px" }} />
+      <div className="org-yazdirma-gizle" style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "4px" }}>
+        <input value={filtre.ara} onChange={(e) => setFiltre({ ...filtre, ara: e.target.value })} placeholder="Ekip, firma, personel ya da eski ad ara" aria-label="Ekip ara" style={{ ...ORG_INP, flex: "1 1 220px", width: "auto", padding: "7px 10px", fontSize: "12.5px" }} />
         <select value={filtre.bolge} onChange={(e) => setFiltre({ ...filtre, bolge: e.target.value })} aria-label="Bölge filtresi" style={sel}><option value="">Tüm bölgeler</option>{bolgeler.map((b) => <option key={b} value={b}>{b}</option>)}</select>
         <select value={filtre.firma} onChange={(e) => setFiltre({ ...filtre, firma: e.target.value })} aria-label="Firma filtresi" style={sel}><option value="">Tüm firmalar</option>{firmalar.map((f) => <option key={f.anahtar} value={f.anahtar}>{f.ad}{f.aktif ? "" : " (pasif)"}</option>)}</select>
         <div role="group" aria-label="Durum filtresi" style={{ display: "inline-flex", background: "#f1f5f9", borderRadius: "9px", padding: "3px" }}>{durumBtn("aktif", "Aktifler")}{durumBtn("pasif", "Pasifler")}{durumBtn("tumu", "Tümü")}</div>
       </div>
-      {gruplar.length === 0 && <div style={{ fontSize: "13px", color: "#94a3b8", padding: "16px", textAlign: "center" }}>{filtre.durum === "pasif" ? "Pasif firma / ekip yok" : "Filtreye uyan ekip yok"}</div>}
-      {gruplar.map(({ fm, list }) => (
-        <div key={fm.anahtar} style={{ marginBottom: "16px", opacity: fm.aktif ? 1 : 0.6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: fm.aktif ? "#f8fafc" : "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: "11px", marginBottom: "10px" }}>
-            <span style={{ fontSize: "16px" }}>{fm.tip === "KENDI" ? "🏢" : "🤝"}</span>
-            <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <b style={{ fontSize: "14px", color: "#0f172a" }}>{fm.ad}</b>
-                <OrgRozet aktif={fm.aktif} />
-                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>{fm.tip === "KENDI" ? "Kendi ekiplerimiz" : fm.tip === "TASERON" ? "Taşeron firma" : "Firma kaydına bağlı değil"}</span>
-              </div>
-              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "1px" }}>{fm.ekip_sayisi} ekip ({fm.aktif_ekip} aktif) · {fm.kisi} kişi{fm.unvan ? ` · ${fm.unvan}` : ""}{fm.tip === "BAGLANMAMIS" && izin.yonet ? " · ekip kartında Düzenle → Firma ile bağlayın" : ""}</div>
-            </div>
-            <OrgKartMenu secenekler={firmaMenu(fm)} etiket={`${fm.ad} firma işlemleri`} />
-          </div>
-          {list.length === 0 ? <div style={{ fontSize: "12.5px", color: "#94a3b8", padding: "0 12px 4px" }}>Bu firmada ekip yok{izin.yonet && fm.aktif ? " — “+ Ekip Ekle” ile açın" : ""}</div> : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
-              {list.map((e) => {
-                const renk = renkOf(e.bolge);
-                return (
-                  <div key={e.ekip_no} onClick={() => onDetay(e)} role="button" tabIndex={0} onKeyDown={(ev) => { if (ev.key === "Enter") onDetay(e); }} aria-label={`${orgEkipTamAd(e)} ekip detayı`}
-                    style={{ border: "1.5px solid #e2e8f0", borderRadius: "12px", overflow: "visible", cursor: "pointer", opacity: e.etkin ? 1 : 0.55, background: "#fff" }}>
-                    <div style={{ background: e.etkin ? `linear-gradient(120deg,#1e3a5f,${renk})` : "#94a3b8", color: "#fff", padding: "8px 10px 8px 12px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", borderRadius: "10px 10px 0 0" }}>
-                      <span style={{ minWidth: 0 }}>
-                        <span style={{ display: "block", fontWeight: 800, fontSize: "13.5px" }}>{orgEkipTamAd(e)}</span>
-                        <span style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginTop: "3px" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#fde68a" }}>📍 {e.bolge || "Bölge atanmadı"}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 800, background: e.etkin ? "rgba(220,252,231,0.95)" : "#e2e8f0", color: e.etkin ? "#166534" : "#334155", borderRadius: "999px", padding: "0 7px" }}>{e.aktif === false ? "PASİF" : !e.firma_aktif ? "FİRMA PASİF" : "Aktif"}</span>
-                          <span style={{ fontSize: "10.5px", fontWeight: 700, background: "rgba(255,255,255,0.18)", borderRadius: "6px", padding: "0 6px" }}>{e.uye_sayisi ? `${e.uye_sayisi} kişi` : "personel yok"}</span>
-                        </span>
-                      </span>
-                      <OrgKartMenu secenekler={ekipMenu(e)} etiket={`${orgEkipTamAd(e)} işlemleri`} acik />
-                    </div>
-                    <div style={{ padding: "8px 12px" }}>
-                      {e.sef_gerekli && <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "7px", padding: "3px 8px", marginBottom: "5px" }}>⚠ Ekip şefi ayrıldı — yeni şef seçin</div>}
-                      {(e.uyeler || []).map((p) => {
-                        const sef = e.sef ? e.sef.id === p.id : e.sef_eski_kural?.id === p.id;
-                        return (
-                          <div key={p.id} style={{ padding: "4px 0", borderBottom: "1px dashed #f1f5f9", display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: "12.5px", fontWeight: sef ? 800 : 600, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.ad_soyad}</div>
-                              {sef ? <span style={{ display: "inline-block", marginTop: "2px", fontSize: "10px", fontWeight: 800, color: "#1e40af", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "999px", padding: "1px 8px" }}>⭐ Ekip şefi</span>
-                                : p.unvan ? <span style={{ display: "block", marginTop: "1px", fontSize: "10.5px", color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.unvan}</span> : null}
-                            </div>
-                            {p.ekip_arac_plaka && <span style={{ color: "#1d4ed8", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap" }}>🚗 {p.ekip_arac_plaka}</span>}
-                          </div>
-                        );
-                      })}
-                      {!(e.uyeler || []).length && <div style={{ fontSize: "12px", color: "#94a3b8", padding: "4px 0" }}>Personel henüz atanmadı{izin.yonet ? " — ⋯ → Personelleri Yönet" : ""}</div>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {gorunen.length === 0 && ekipsizFirmalar.length === 0 && <div style={{ fontSize: "13px", color: "#94a3b8", padding: "16px", textAlign: "center" }}>{filtre.durum === "pasif" ? "Pasif ekip yok" : "Filtreye uyan ekip yok"}</div>}
+      {icGruplar.map((g) => (
+        <div key={g.kod}><Baslik harf={harfler[hi++]} ad={`${g.ad} İç Ekipleri`} n={g.list.length} alt="firmanın kendi personeli" /><div style={IZGARA}>{g.list.map(kart)}</div></div>
       ))}
-      {toplamGorunen > 0 && filtre.durum !== "aktif" && <div style={{ fontSize: "11.5px", color: "#64748b" }}>Soluk kartlar pasif kayıtlardır; şemada ve Excel/PNG çıktısında yer almaz.</div>}
+      {taseronlar.length > 0 && (
+        <div><Baslik harf={harfler[hi++]} ad="Taşeron Firmalar" n={taseronlar.length} alt="ayrı firmaların ekipleri — firma kartı, cari ve personel işvereni ayrıdır" /><div style={IZGARA}>{taseronlar.map(kart)}</div></div>
+      )}
+      {digerleri.length > 0 && (
+        <div><Baslik harf={harfler[hi++]} ad="Türü Seçilmemiş Ekipler" n={digerleri.length} alt={izin.yonet ? "eski kayıtlar — tür ve firma bağlantısı Düzenle / Ekip Ayarları'ndan açıkça seçilir" : "eski kayıtlar"} /><div style={IZGARA}>{digerleri.map(kart)}</div></div>
+      )}
+      {ekipsizFirmalar.length > 0 && (
+        <div className="org-yazdirma-gizle" style={{ marginTop: "16px" }}>
+          <div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", marginBottom: "6px" }}>EKİBİ OLMAYAN TAŞERON FİRMA KARTLARI</div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {ekipsizFirmalar.map((fm) => (
+              <div key={fm.anahtar} style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "5px 6px 5px 11px", background: fm.aktif ? "#f8fafc" : "#f1f5f9", opacity: fm.aktif ? 1 : 0.65 }}>
+                <b style={{ fontSize: "12.5px", color: "#0f172a" }}>{fm.ad}</b><OrgRozet aktif={fm.aktif} />
+                <OrgKartMenu etiket={`${fm.ad} firma işlemleri`} secenekler={[...firmaSecenekleri(fm),
+                  izin.sil && fm.kaynak === "ORG" && { ad: "🗑 Sil (kullanılmamış kayıt)", tehlike: true, fn: async () => {
+                    if (!window.confirm(`${fm.ad} kaydı silinsin mi? Yalnız hiç kullanılmamış hatalı kayıtlar silinebilir.`)) return;
+                    const r = await orgIstek("DELETE", `/org/firma/${fm.id}`, { gerekce: "Hatalı kayıt" }); if (!r.ok) alert(r.j.error || "Silinemedi"); onYenile(); } }]} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {izin.sil && (yapi?.birlesenler || []).length > 0 && (
+        <div className="org-yazdirma-gizle" style={{ marginTop: "16px", fontSize: "12px", color: "#64748b" }}>
+          <div style={{ fontWeight: 800, marginBottom: "4px" }}>BİRLEŞTİRİLMİŞ MÜKERRER KAYITLAR <span style={{ fontWeight: 500 }}>(şemada ve seçicilerde görünmez; kimlik izi için durur)</span></div>
+          {yapi.birlesenler.map((b) => (
+            <div key={b.ekip_no} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "2px 0" }}>
+              <span>#{b.ekip_no} {b.ad} → #{b.hedef_ekip_no} {ekipBul(b.hedef_ekip_no)?.ad || ""}</span>
+              <button style={{ ...orgBtn("ikincil"), padding: "2px 9px", fontSize: "11.5px" }} onClick={async () => {
+                const g = window.prompt(`#${b.ekip_no} ${b.ad} birleştirmesi geri alınsın mı? Gerekçe yazın:`); if (!g || !g.trim()) return;
+                const r = await orgIstek2("POST", `/org/ekip/${b.ekip_no}/birlestir-geri-al`, { gerekce: g.trim() }); if (!r.ok) alert(r.j.error || "Geri alınamadı"); onYenile(); }}>Geri al</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {filtre.durum !== "aktif" && gorunen.length > 0 && <div className="org-yazdirma-gizle" style={{ fontSize: "11.5px", color: "#64748b", marginTop: "10px" }}>Soluk kartlar pasif kayıtlardır; müşteri çıktısında yer almaz.</div>}
       {modal?.tur === "firmaForm" && <OrgFirmaFormModal mod={modal.mod} firma={modal.firma} onClose={kapat} onBitti={bitti} />}
       {modal?.tur === "ekipForm" && <OrgEkipFormModal ekip={modal.ekip} firmalar={firmalar} bolgeler={bolgeler} varsayilanFirma={modal.varsayilan} onClose={kapat} onBitti={bitti} />}
       {modal?.tur === "personel" && ekipBul(modal.ekipNo) && <OrgPersonelModal ekip={ekipBul(modal.ekipNo)} ekipler={ekipler} onClose={kapat} onBitti={onYenile} />}
@@ -7006,6 +7046,9 @@ function OrgEkipYonetimBolumu({ yapi, onYenile, onDetay }) {
       {modal?.tur === "durum" && <OrgDurumModal tip={modal.tip} kayit={modal.kayit} onClose={kapat} onBitti={bitti} />}
       {modal?.tur === "yeniFirma" && <OrgYeniFirmaModal firma={modal.firma} ekipler={ekipler} bolgeler={bolgeler} onClose={kapat} onBitti={bitti} />}
       {modal?.tur === "gecmis" && <OrgGecmisModal modul={modal.modul} id={modal.id} baslik={modal.baslik} onClose={kapat} />}
+      {modal?.tur === "arac" && ekipBul(modal.ekipNo) && <OrgAracModal ekip={ekipBul(modal.ekipNo)} onClose={kapat} onBitti={bitti} />}
+      {modal?.tur === "operasyon" && ekipBul(modal.ekipNo) && <OrgOperasyonModal ekip={ekipBul(modal.ekipNo)} mod={modal.mod} operasyonlar={operasyonlar} bolgeler={bolgeler} onClose={kapat} onBitti={bitti} />}
+      {modal?.tur === "birlestir" && ekipBul(modal.ekipNo) && <OrgBirlestirModal kaynak={ekipBul(modal.ekipNo)} ekipler={ekipler} onClose={kapat} onBitti={bitti} />}
     </div>
   );
 }
@@ -7020,6 +7063,7 @@ function OrgSemasiPanel({ currentUser }) {
   const [ekipDetay, setEkipDetay] = useState(null); // tıklanan ekip (detay modalı — herkes görür)
   const [yapi, setYapi] = useState(null);           // 28.10.2026: GET /org/yapi — şema, kartlar, Excel/PNG tek kaynak
   const [personelEkipNo, setPersonelEkipNo] = useState(null); // detay modalından "Personelleri Yönet"
+  const [showIndir, setShowIndir] = useState(false);          // 06.11.2026: "Güncel Organizasyonu İndir" (PDF / PNG / Excel)
   // 28.10.2026: düzenleme yetkisi sunucudan (org_yonet) — e-posta listesi kaldırıldı; şema herkese görünür kalır
   const canEdit = yapi?.izinler?.yonet === true;
   const loadOrgData = async () => {
@@ -7082,207 +7126,44 @@ function OrgSemasiPanel({ currentUser }) {
   // Detay modalı her açılışta güncel araç/ekip listesini çeker
   useEffect(() => { if (ekipDetay) loadOrgData(); }, [ekipDetay?.ekip_no]);
   const aktifAraclar = aracList.filter(orgAracAktifMi).sort((x, y) => String(x.plaka).localeCompare(String(y.plaka)));
-  const ekipAdi = (e) => (e.ad && e.ad.trim()) || `Ekip ${e.ekip_no}`;
-  // 21.09.2026 (Orhan): şemada her ekibin altında In-house / Subcon (taşeron adı) + plaka
-  const ekipTip = (e) => orgEkipFirma(e) && e.ekip_turu !== "IC" ? `Subcon · ${orgEkipFirma(e).toLocaleUpperCase("tr-TR")}` : "In-house";
-  const ekipPlaka = (e) => (e.plaka && e.plaka.trim()) || (ekipUyeleri(e.ekip_no).map(p => p.ekip_arac_plaka).find(Boolean) || "");
-  const ekipAlt = (e) => `${ekipTip(e)}${ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : ""}`;
-  const svgRef = useRef(null);
-  // Şemayı PNG olarak indir (e-posta eki için) — SVG → canvas 2×
-  const indirPng = () => {
-    const svg = svgRef.current; if (!svg) return;
-    const xml = new XMLSerializer().serializeToString(svg);
-    const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement("canvas"); c.width = 1250 * 2; c.height = 900 * 2; // viewBox ile aynı oran (ortak yönetim + 3 bölge + 9 ekip kesilmez)
-      const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
-      ctx.drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      const a = document.createElement("a"); a.download = `Organizasyon_Semasi_${new Date().toISOString().slice(0, 10)}.png`;
-      a.href = c.toDataURL("image/png"); a.click();
-    };
-    img.src = url;
-  };
   // 12.10.2026 (Orhan): ekipler pasife alınabilir (aktif=false) — şema, kartlar ve Excel yalnız aktifleri gösterir;
   // pasif ekiplerin personel bağları (ekip_bilgisi) korunur. Şablon ekipler sablon_kodu ile tekildir.
   // 28.10.2026: firması pasif ekip de şemada / çıktıda görünmez (etkin = ekip aktif VE firma aktif)
   const aktifEkipler = ekipler.filter(e => (e.etkin ?? e.aktif !== false)).sort(orgEkipSira);
-  const bolgeEkipleri = (anahtar) => aktifEkipler.filter(e => String(e.bolge || "").toLocaleUpperCase("tr-TR").includes(anahtar));
-  const izmirEkipleri = () => { const a = bolgeEkipleri("İZM"); return a.concat(bolgeEkipleri("IZM").filter(e => !a.includes(e))); };
-  // Kutu adı: "Firma — Ekip" (şablonlar firma + ekip adıyla gösterilir)
-  // Ad mantığı modül düzeyinde (orgEkip*) — harita paneliyle ortak
-  const ekipFirma = orgEkipFirma, ekipAdSade = orgEkipAdSade, ekipTamAd = orgEkipTamAd;
-  const ekipKisi = (e) => ekipUyeleri(e.ekip_no).length;
-  const ekipDurumYazi = (e) => { const n = ekipKisi(e); return n ? `${n} kişi` : "Personel henüz atanmadı"; };
-  // Yönetim kadrosu — şema, PNG ve Excel aynı listeden. Ankara ve Bursa ORTAK yönetim: Nurcan Kuş + Fırat Kenan Ongun
-  // tek kayıt, iki bölge (ayrı personel kaydı açılmaz).
-  const YONETIM = ORG_YONETIM; // modül düzeyi sabit — harita da aynısını kullanır
-  const bolgeYonetim = (bolge) => (/İZM|IZM/i.test(bolge || "") ? YONETIM.izmir : YONETIM.ortak);
-  const NAVY = "#1e3a5f", BLUE = "#2563eb", IZMIR = "#0c4a6e", ANKARA = "#7c2d12", BURSA = "#14532d";
-  const Box = ({ x, y, w, h, fill, stroke, nameText, title, sub, light, dashed, nameSize }) => (
-    <g>
-      <rect x={x} y={y} width={w} height={h} rx="10" fill={light ? "#fff" : fill} stroke={stroke || fill} strokeWidth="2" strokeDasharray={dashed ? "6 4" : "0"} filter="url(#gölge)" />
-      {!light && <rect x={x} y={y} width={w} height="6" rx="3" fill="rgba(255,255,255,0.25)" />}
-      <text x={x + w / 2} y={title ? y + (sub ? 26 : 30) : y + h / 2 + 5} textAnchor="middle" fontSize={nameSize || 15} fontWeight="800" fill={light ? "#0f172a" : "#fff"} fontFamily="Arial">{nameText}</text>
-      {title && <text x={x + w / 2} y={y + (sub ? 45 : 52)} textAnchor="middle" fontSize="11.5" fontWeight="600" fill={light ? "#475569" : "rgba(255,255,255,0.85)"} fontFamily="Arial">{title}</text>}
-      {sub && <text x={x + w / 2} y={y + 61} textAnchor="middle" fontSize="10" fill={light ? "#94a3b8" : "rgba(255,255,255,0.7)"} fontFamily="Arial">{sub}</text>}
-    </g>
-  );
-  const L = ({ d }) => <path d={d} stroke="#94a3b8" strokeWidth="2" fill="none" />;
-
-  const indirExcel = () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const COLS = 13, border = (c) => ({ style: "medium", color: { rgb: c } });
-    const boxS = (fillRgb, fontRgb, sz = 12) => ({
-      fill: { patternType: "solid", fgColor: { rgb: fillRgb } },
-      font: { bold: true, color: { rgb: fontRgb }, sz, name: "Arial" },
-      alignment: { horizontal: "center", vertical: "center", wrapText: true },
-      border: { top: border("1E3A5F"), bottom: border("1E3A5F"), left: border("1E3A5F"), right: border("1E3A5F") },
-    });
-    const wsData = Array.from({ length: 30 }, () => Array(COLS).fill(""));
-    const merges = [];
-    const ws = {};
-    const kutuSatirlari = new Set(); // kutu içeren satırlar yüksek yazılır
-    const setBox = (r1, c1, r2, c2, text, fill, font, sz) => {
-      wsData[r1][c1] = text;
-      merges.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
-      for (let r = r1; r <= r2; r++) { kutuSatirlari.add(r); for (let c = c1; c <= c2; c++) {
-        const a = XLSXStyle.utils.encode_cell({ r, c });
-        ws[`__style__${a}`] = boxS(fill, font, sz);
-      } }
-    };
-    // Sheet 1 — Organization Chart (12.10.2026 düzeni: üst yönetim → İzmir | Ankara & Bursa ortak yönetim → bölgeler → ekipler)
-    const izmX = izmirEkipleri(), ankX = bolgeEkipleri("ANK"), burX = bolgeEkipleri("BUR");
-    setBox(1, 0, 1, 12, "ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart · İzmir · Ankara · Bursa", "1E3A5F", "FFFFFF", 14);
-    setBox(3, 5, 4, 7, "DÜZGÜN ŞİMŞEK\nProject Director", "1E3A5F", "FFFFFF");
-    setBox(6, 5, 7, 7, "ORHAN BEDİR\nProject Manager", "2563EB", "FFFFFF");
-    setBox(9, 0, 10, 2, "HATİCE OMUŞ\nIFIS · Survey · BTK · Atlas", "F1F5F9", "0F172A", 11);
-    setBox(9, 3, 10, 5, "ERENCAN ŞİMŞEK\nEHS Officer", "F1F5F9", "0F172A", 11);
-    setBox(9, 7, 10, 9, "TUĞÇE YELMEN\nInvoicing & Acceptance Coordinator", "F1F5F9", "0F172A", 11);
-    setBox(9, 10, 10, 12, "EMRE AKDEĞİRMEN\nWarehouse & Inventory Coordinator", "F1F5F9", "0F172A", 11);
-    setBox(12, 0, 12, 4, `İZMİR REGION · ${izmX.length} EKİP`, "0C4A6E", "FFFFFF");
-    setBox(12, 6, 12, 12, `ANKARA & BURSA — ORTAK YÖNETİM · ${ankX.length + burX.length} EKİP`, "1E3A5F", "FFFFFF");
-    setBox(13, 1, 14, 3, `${YONETIM.izmir.mudur.ad}\nİzmir Bölge Müdürü`, "0369A1", "FFFFFF", 11);
-    setBox(13, 8, 14, 10, `${YONETIM.ortak.mudur.ad}\nAnkara & Bursa Bölge Müdürü`, "1E3A5F", "FFFFFF", 11);
-    setBox(16, 1, 17, 3, `${YONETIM.izmir.supervizor.ad}\nİzmir Süpervizörü`, "E0F2FE", "0C4A6E", 11);
-    setBox(16, 8, 17, 10, `${YONETIM.ortak.supervizor.ad}\nAnkara & Bursa Süpervizörü`, "E2E8F0", "1E3A5F", 11);
-    setBox(19, 6, 19, 8, `ANKARA · ${ankX.length} EKİP`, "7C2D12", "FFFFFF", 10);
-    setBox(19, 10, 19, 12, `BURSA · ${burX.length} EKİP`, "14532D", "FFFFFF", 10);
-    // Ekip kutuları: "Firma — Ekip" + kişi sayısı ya da "Personel henüz atanmadı" (+plaka); 2 sütunlu ızgara
-    const xlEkipKutu = (e, r, c1, c2, fill, font) => setBox(r, c1, r + 1, c2, `${ekipTamAd(e)}\n${ekipDurumYazi(e)}${ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : ""}`, fill, font, 9);
-    izmX.forEach((e, i) => xlEkipKutu(e, 19 + Math.floor(i / 2) * 3, i % 2 === 0 ? 0 : 3, i % 2 === 0 ? 1 : 4, "F8FAFC", "0C4A6E"));
-    ankX.forEach((e, i) => xlEkipKutu(e, 21 + Math.floor(i / 2) * 3, i % 2 === 0 ? 6 : 8, i % 2 === 0 ? 6 : 8, "FFF7ED", "7C2D12"));
-    burX.forEach((e, i) => { const son = i === burX.length - 1 && burX.length % 2 === 1; const c = son ? 11 : (i % 2 === 0 ? 10 : 12); xlEkipKutu(e, 21 + Math.floor(i / 2) * 3, c, c, "F0FDF4", "14532D"); });
-    setBox(28, 0, 28, 12, `Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · ${today}`, "F1F5F9", "64748B", 9);
-    const ws1 = XLSXStyle.utils.aoa_to_sheet(wsData);
-    ws1["!merges"] = merges;
-    ws1["!cols"] = Array(COLS).fill({ wch: 14 });
-    ws1["!rows"] = wsData.map((_, i) => ({ hpt: i === 1 ? 30 : (kutuSatirlari.has(i) ? 24 : 12) }));
-    Object.keys(ws).forEach(k => { const a = k.replace("__style__", ""); if (!ws1[a]) ws1[a] = { v: "", t: "s" }; ws1[a].s = ws[k]; });
-    // Sheet 2 — Details (12.10.2026): CANLI veriden — üst yönetim + bölge yönetimi (sabit kadro) + aktif ekipler ve
-    // sistemdeki üyeleri. Personel atanmamış ekipte ad/görev/tel BOŞ bırakılır (uydurulmaz). Ankara ve Bursa
-    // satırlarında müdür Nurcan Kuş, süpervizör Fırat Kenan Ongun (tek kayıt, iki bölge).
-    const SIMSEK = "ŞİMŞEK HABERLEŞME";
-    const UST_YONETIM = [
-      ["DÜZGÜN ŞİMŞEK",   "Proje Direktörü",         "5062939538"],
-      ["ORHAN BEDİR",     "Proje Müdürü",            "5497419222"],
-      ["HATİCE OMUŞ",     "BTK&IFIS Birim Müdürü",   "5525473667"],
-      ["ERENCAN ŞİMŞEK",  "İSG Koordinatörü",        ""],
-      ["TUĞÇE YELMEN",    "Muhasebe",                "5330165678"],
-      ["EMRE AKDEĞİRMEN", "Envanter&Depo Sorumlusu", "5426166144"],
-    ];
-    const dHead = ["Team List", "Adı Soyadı", "Görevi", "Bölge", "Tel NO", "Firma Adı", "Bölge Müdürü", "Süpervizör"];
-    const dRows = [];
-    UST_YONETIM.forEach(([ad, gorev, tel]) => dRows.push(["", ad, gorev, "İzmir-Ankara-Bursa", tel, SIMSEK, "", ""]));
-    dRows.push(["", YONETIM.izmir.mudur.ad, "Bölge Müdürü", "İzmir Bölge", YONETIM.izmir.mudur.tel, SIMSEK, "", ""]);
-    dRows.push(["", YONETIM.izmir.supervizor.ad, "Süpervizör", "İzmir Bölge", YONETIM.izmir.supervizor.tel, SIMSEK, YONETIM.izmir.mudur.ad, ""]);
-    dRows.push(["", YONETIM.ortak.mudur.ad, "Bölge Müdürü", "Ankara & Bursa Bölge", YONETIM.ortak.mudur.tel, SIMSEK, "", ""]);
-    dRows.push(["", YONETIM.ortak.supervizor.ad, "Süpervizör", "Ankara & Bursa Bölge", YONETIM.ortak.supervizor.tel, SIMSEK, YONETIM.ortak.mudur.ad, ""]);
-    const bolgeSira = (b) => (/İZM|IZM/i.test(b || "") ? 1 : /ANK/i.test(b || "") ? 2 : /BUR/i.test(b || "") ? 3 : 9);
-    [...aktifEkipler].sort((a, b) => bolgeSira(a.bolge) - bolgeSira(b.bolge) || orgEkipSira(a, b)).forEach(e => {
-      const y = bolgeYonetim(e.bolge), firma = (e.ekip_turu !== "IC" && orgEkipFirma(e)) || SIMSEK, bolge = e.bolge ? `${e.bolge} Bölge` : "";
-      const uyeler = ekipUyeleri(e.ekip_no);
-      if (!uyeler.length) dRows.push([ekipTamAd(e), "", "", bolge, "", firma, y.mudur.ad, y.supervizor.ad]);
-      uyeler.forEach(p => dRows.push([ekipTamAd(e), p.ad_soyad || "", p.unvan || "", bolge, p.telefon || "", firma, y.mudur.ad, y.supervizor.ad]));
-    });
-    const dData = [dHead, ...dRows];
-    const ws2 = XLSXStyle.utils.aoa_to_sheet(dData);
-    ws2["!cols"] = [{ wch: 24 }, { wch: 30 }, { wch: 24 }, { wch: 20 }, { wch: 13 }, { wch: 20 }, { wch: 22 }, { wch: 22 }];
-    ws2["!rows"] = dData.map((_, i) => ({ hpt: i === 0 ? 24 : 18 }));
-    dHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws2[a]) ws2[a].s = boxS("1E3A5F", "FFFFFF", 11); });
-    dRows.forEach((_, ri) => dHead.forEach((__, ci) => {
-      const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws2[a]) return;
-      ws2[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial", bold: ci === 0 }, alignment: { horizontal: [4].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
-    }));
-    ws2["!freeze"] = { xSplit: 0, ySplit: 1 };
-
-    // 3. sayfa: EKİPLER — canlı veriden (kim hangi ekipte, hangi araçla)
-    const eHead = ["Ekip", "Bölge", "Adı Soyadı", "Ünvanı", "Tel No", "Araç Plaka"];
-    const eRows = [];
-    // Aktif ekipler önce; pasif ekipler (eski kayıtlar, bağları korunur) "(pasif)" etiketiyle altta
-    const _pasifMi = (e) => !(e.etkin ?? e.aktif !== false);
-    [...aktifEkipler, ...ekipler.filter(_pasifMi)].forEach(e => {
-      const etiket = ekipTamAd(e) + (_pasifMi(e) ? " (pasif)" : "");
-      const uyeler = ekipUyeleri(e.ekip_no);
-      if (!uyeler.length) { eRows.push([etiket, e.bolge || "", _pasifMi(e) ? "" : "— personel henüz atanmadı —", "", "", ""]); return; }
-      uyeler.forEach(p => eRows.push([etiket, e.bolge || "", p.ad_soyad, p.unvan || "", p.telefon || "", p.ekip_arac_plaka || ""]));
-    });
-    const atanmamis = personelList.filter(p => p.aktif && !ayrildi(p) && !String(p.ekip_bilgisi || "").trim());
-    atanmamis.forEach(p => eRows.push(["— Ekipsiz —", "", p.ad_soyad, p.unvan || "", p.telefon || "", ""]));
-    const eData = [eHead, ...eRows];
-    const ws3 = XLSXStyle.utils.aoa_to_sheet(eData);
-    ws3["!cols"] = [{ wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 24 }, { wch: 14 }, { wch: 13 }];
-    ws3["!rows"] = eData.map((_, i) => ({ hpt: i === 0 ? 24 : 20 }));
-    eHead.forEach((_, ci) => { const a = XLSXStyle.utils.encode_cell({ r: 0, c: ci }); if (ws3[a]) ws3[a].s = boxS("1E3A5F", "FFFFFF", 11); });
-    eRows.forEach((_, ri) => eHead.forEach((__, ci) => {
-      const a = XLSXStyle.utils.encode_cell({ r: ri + 1, c: ci }); if (!ws3[a]) return;
-      ws3[a].s = { fill: { patternType: "solid", fgColor: { rgb: ri % 2 === 0 ? "F0F6FF" : "FFFFFF" } }, font: { sz: 10, name: "Arial", bold: ci === 0 }, alignment: { horizontal: [1, 4, 5].includes(ci) ? "center" : "left", vertical: "center" }, border: { top: { style: "thin", color: { rgb: "DBEAFE" } }, bottom: { style: "thin", color: { rgb: "DBEAFE" } }, left: { style: "thin", color: { rgb: "DBEAFE" } }, right: { style: "thin", color: { rgb: "DBEAFE" } } } };
-    }));
-    ws3["!freeze"] = { xSplit: 0, ySplit: 1 };
-
-    const wb = XLSXStyle.utils.book_new();
-    XLSXStyle.utils.book_append_sheet(wb, ws1, "Organization Chart");
-    XLSXStyle.utils.book_append_sheet(wb, ws2, "Details");
-    XLSXStyle.utils.book_append_sheet(wb, ws3, "Ekipler");
-    const buf = XLSXStyle.write(wb, { type: "array", bookType: "xlsx" });
-    JSZip.loadAsync(buf).then(zip => {
-      const jobs = [];
-      zip.folder("xl/worksheets").forEach((name, file) => {
-        if (!/^sheet\d+\.xml$/.test(name)) return;
-        jobs.push(file.async("string").then(xml => {
-          zip.file(`xl/worksheets/${name}`, xml.replace('<sheetView workbookViewId="0"/>', '<sheetView showGridLines="0" workbookViewId="0"/>').replace('<sheetView tabSelected="1" workbookViewId="0"/>', '<sheetView showGridLines="0" tabSelected="1" workbookViewId="0"/>'));
-        }));
-      });
-      return Promise.all(jobs).then(() => zip.generateAsync({ type: "blob", compression: "STORE" }));
-    }).then(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `SIMSEK_TT_Wireless_Org_Chart_${today}.xlsx`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
-  };
+  const ekipTamAd = orgEkipTamAd; // ad mantığı modül düzeyinde (orgEkip*) — harita paneliyle ortak
+  // 06.11.2026: kurum başlığı oturumun gerçek kimliğinden — alt marka (ör. Teknocenter) kendi adıyla; sabit Şimşek başlığı yok
+  const altMarka = yapi?.izinler?.marka || null;
+  const kurumAd = altMarka ? (altMarkaBilgi(altMarka)?.ad || altMarka) : "Şimşek Haberleşme";
+  // Bölgesel yönetim: aktif ekiplerin bölgelerinden (ekibi olmayan bölgenin yönetimi çizilmez). Üst yönetim yalnız tüm organizasyonda.
+  const yonetimBolgeleri = orgBolgeYonetimleri(aktifEkipler.map((e) => e.bolge).filter(Boolean));
+  const yonetimOf = useCallback((v) => {
+    const bolgeler = orgBolgeYonetimleri(v.bolumler.flatMap((b) => b.ekipler.map((e) => e.bolge).filter(Boolean))).map(({ ekip, ...b }) => b);
+    return v.kapsam.operasyon ? { ust: [], destek: [], bolgeler } : { ...ORG_UST_YONETIM, bolgeler };
+  }, []);
 
   return (
-    <div style={{ padding: "24px 28px", maxWidth: "1350px", margin: "0 auto" }}>
+    <div className="org-sayfa" style={{ padding: "24px 28px", maxWidth: "1350px", margin: "0 auto" }}>
+      {/* Yazdırma: yalnız şema (yönetim + ekip kartları) — menü, düğme ve filtreler basılmaz; kartlar sayfa ortasında bölünmez */}
+      <style>{`@media print { body * { visibility: hidden !important; } .org-sayfa, .org-sayfa * { visibility: visible !important; } .org-sayfa { position: absolute; left: 0; top: 0; width: 100%; padding: 0 !important; }
+        .org-yazdirma-gizle, .org-sayfa button { display: none !important; } .org-kart { break-inside: avoid; box-shadow: none !important; } .org-ekipler, .org-yonetim-kutu { box-shadow: none !important; border: none !important; } }
+        @media (max-width: 640px) { .org-sayfa { padding: 14px 12px !important; } }`}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "18px" }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>🏢 Organizasyon Şeması</h2>
-          <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>ŞİMŞEK HABERLEŞME — TT Wireless Project · İzmir · Ankara · Bursa</div>
+        <div style={{ textAlign: "left" }}>
+          <h2 style={{ margin: 0, fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>Organizasyon Şeması</h2>
+          <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>{kurumAd} — saha organizasyonu{altMarka ? "" : " · TT Wireless Project"} · {new Date().toLocaleDateString("tr-TR")}</div>
         </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div className="org-yazdirma-gizle" style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
           {/* Haritadan Gör (13.10.2026): operasyon bölgeleri + depo/ofis — herkes görür, şemayı/veriyi değiştirmez */}
           <button onClick={() => setShowHarita(true)} title="Operasyon bölgelerimiz ve ofislerimiz" style={{ padding: "10px 14px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #1e3a5f", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>🗺 Haritadan Gör</button>
           {canEdit && (
             <button onClick={() => setShowEkip(true)} style={{ padding: "10px 18px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #1e3a5f", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>⚙ Ekip Ayarları</button>
           )}
-          <button onClick={indirPng} title="Şemayı resim olarak indir (e-posta eki)" style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer", marginRight: "8px" }}>🖼 PNG İndir</button>
-          <button onClick={indirExcel} style={{ padding: "10px 22px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>📋 Excel İndir</button>
+          <button onClick={() => window.print()} title="Şemayı yazdır" style={{ padding: "10px 14px", background: "#fff", color: "#1e3a5f", border: "1.5px solid #1e3a5f", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>🖨 Yazdır</button>
+          <button onClick={() => setShowIndir(true)} title="Müşteriye gönderilecek PDF / PNG / Excel" style={{ padding: "10px 18px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: "10px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}>⬇ Güncel Organizasyonu İndir</button>
         </div>
       </div>
 
+      {showIndir && <OrgIndirModal yonetimOf={yonetimOf} onClose={() => setShowIndir(false)} />}
       {/* Operasyon haritası — Esc ile kapanır; şemayı ve verileri değiştirmez */}
       {showHarita && <OrgHaritaModal ekipler={ekipler} ofisler={ofisler} canEdit={canEdit} onKonumKaydet={ofisKonumKaydet} onClose={() => setShowHarita(false)} />}
 
@@ -7301,7 +7182,7 @@ function OrgSemasiPanel({ currentUser }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: "17px", fontWeight: 800 }}>{ekipTamAd(e)}</div>
                   <div style={{ fontSize: "12px", opacity: 0.8, marginTop: "2px" }}>
-                    {e.bolge ? `📍 ${e.bolge}` : "Bölge atanmadı"} · {uyeler.length} kişi{orgEkipFirma(e) ? ` · 🤝 ${orgEkipFirma(e)}` : ""}{e.aktif === false ? " · PASİF" : e.firma_aktif === false ? " · FİRMA PASİF" : ""}
+                    {e.tur_ad ? `${e.tur_ad} · ` : ""}{e.bolge ? `Bölge: ${e.bolge}` : "Bölge atanmadı"} · {uyeler.length} kişi{orgEkipFirma(e) && !e.firma_ad_ayni ? ` · ${e.ekip_turu === "IC" ? "Bağlı firma" : "Firma"}: ${orgEkipFirma(e)}` : ""}{e.aktif === false ? " · PASİF" : e.firma_aktif === false ? " · FİRMA PASİF" : ""}
                   </div>
                   {e.aciklama && <div style={{ fontSize: "12px", opacity: 0.85, marginTop: "2px" }}>{e.aciklama}</div>}
                 </div>
@@ -7383,17 +7264,17 @@ function OrgSemasiPanel({ currentUser }) {
                       style={{ padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "12.5px", fontFamily: "monospace" }} />
                     {/* 21.10.2026: ekip türü + bağlı firma + HW iş etiketi — sınıflandırma ekip kimliğine bağlıdır, ad değişse de korunur */}
                     <div style={{ gridColumn: "1 / -1", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                      <select value={e.ekip_turu || ""} onChange={ev => saveEkip({ ...e, ekip_turu: ev.target.value || null, bagli_firma: ev.target.value === "IC" ? (e.bagli_firma || (TEKNO_FIRMA_RE.test(String(e.taseron_adi || "")) ? "TEKNO" : "")) : (ev.target.value === "DIS" ? null : e.bagli_firma) })}
+                      <select value={e.ekip_turu || ""} onChange={ev => saveEkip({ ...e, ekip_turu: ev.target.value || null, bagli_firma: ev.target.value === "IC" ? (e.bagli_firma || (TEKNO_FIRMA_RE.test(String(e.taseron_adi || "")) ? "TEKNO" : "")) : e.bagli_firma })}
                         title="Kendi ekibimiz: firmanın kendi personeli (dış taşeron borcu oluşmaz). Dış taşeron: fatura kesen alt yüklenici."
                         style={{ padding: "5px 8px", border: `1px solid ${e.ekip_turu ? "#d1d5db" : "#f59e0b"}`, background: e.ekip_turu ? "#fff" : "#fffbeb", borderRadius: "8px", fontSize: "12px", fontWeight: 600 }}>
                         <option value="">Ekip türü seçilmedi</option>
-                        <option value="IC">Kendi Ekibimiz (In-house)</option>
-                        <option value="DIS">Dış Taşeron</option>
+                        <option value="IC">İç ekip (kendi personelimiz)</option>
+                        <option value="DIS">Taşeron ekibi</option>
                       </select>
-                      {e.ekip_turu === "IC" && (
-                        <select value={e.bagli_firma || ""} onChange={ev => saveEkip({ ...e, bagli_firma: ev.target.value || null })} title="Ekibin bağlı olduğu firma"
-                          style={{ padding: "5px 8px", border: `1px solid ${e.bagli_firma ? "#d1d5db" : "#dc2626"}`, borderRadius: "8px", fontSize: "12px", fontWeight: 600 }}>
-                          <option value="">Bağlı firma seçin</option>
+                      {(e.ekip_turu === "IC" || e.ekip_turu === "DIS") && (
+                        <select value={e.bagli_firma || ""} onChange={ev => saveEkip({ ...e, bagli_firma: ev.target.value || null })} title={e.ekip_turu === "IC" ? "Ekibin bağlı olduğu firma" : "Taşeron ekibinin çalıştığı operasyonu yöneten firma (firma kartı ve cari değişmez)"}
+                          style={{ padding: "5px 8px", border: `1px solid ${e.bagli_firma ? "#d1d5db" : e.ekip_turu === "IC" ? "#dc2626" : "#f59e0b"}`, borderRadius: "8px", fontSize: "12px", fontWeight: 600 }}>
+                          <option value="">{e.ekip_turu === "IC" ? "Bağlı firma seçin" : "Operasyon firması seçilmedi"}</option>
                           <option value="ERC">Şimşek Haberleşme</option>
                           {ALT_MARKA_LISTE.map(m => <option key={m.kod} value={m.kod}>{m.ad}</option>)}
                         </select>
@@ -7412,106 +7293,14 @@ function OrgSemasiPanel({ currentUser }) {
         </div>
       )}
 
-      <div style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px", overflowX: "auto" }}>
-        <svg ref={svgRef} viewBox="0 0 1250 900" width="1250" height="900" style={{ width: "100%", height: "auto", minWidth: "900px", display: "block" }} xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <filter id="gölge" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.12" />
-            </filter>
-          </defs>
-          <text x="625" y="26" textAnchor="middle" fontSize="17" fontWeight="900" fill={NAVY} fontFamily="Arial" letterSpacing="0.5">ŞİMŞEK HABERLEŞME — TT Wireless Project Organization Chart</text>
-          {/* Direktör → PM */}
-          <Box x={475} y={48} w={300} h={72} fill={NAVY} nameText="DÜZGÜN ŞİMŞEK" title="Project Director" />
-          <L d="M625 120 V156" />
-          <Box x={475} y={156} w={300} h={72} fill={BLUE} nameText="ORHAN BEDİR" title="Project Manager" />
-          {/* PM → destek fonksiyonları */}
-          <L d="M625 228 V252 M205 252 H1045 M205 252 V276 M485 252 V276 M765 252 V276 M1045 252 V276" />
-          <Box x={80} y={276} w={250} h={64} light stroke="#64748b" nameText="HATİCE OMUŞ" title="IFIS · Survey · BTK · Atlas" />
-          <Box x={360} y={276} w={250} h={64} light stroke="#64748b" nameText="ERENCAN ŞİMŞEK" title="EHS Officer" />
-          <Box x={640} y={276} w={250} h={64} light stroke="#64748b" nameText="TUĞÇE YELMEN" title="Invoicing & Acceptance Coord." />
-          <Box x={920} y={276} w={250} h={64} light stroke="#64748b" nameText="EMRE AKDEĞİRMEN" title="Warehouse & Inventory Coord." />
-          {/* PM → İzmir yönetimi (x=230) ve Ankara–Bursa ortak yönetimi (x=825) — 12.10.2026 düzeni */}
-          <L d="M625 340 V368 M230 368 H825 M230 368 V396 M825 368 V396" />
-          {(() => {
-            // Ekip kutusu (3 satır, 150 px'e sığar): firma / ekip adı / durum (+plaka). Firma yoksa ekip adı üstte.
-            // EkipKutu ve Izgara BİLEŞEN değil düz fonksiyon olarak çağrılır: render içinde tanımlı bileşen her
-            // render'da yeniden mount olur ve kutu tıklaması (mousedown→mouseup arasında) kaybolabilir.
-            const W = 150, H = 72;
-            const EkipKutu = ({ e, x, y, stroke }) => {
-              // TEKNO ekiplerinde ad tek satır ("TEKNO Ekip1"); firma satırı tekrar edilmez
-              const firma = orgEkipTeknoMu(e) ? "" : ekipFirma(e), ad = ekipAdSade(e);
-              const durum = ekipDurumYazi(e) + (ekipPlaka(e) ? ` · ${ekipPlaka(e)}` : "");
-              const ust = firma || ad, orta = firma ? ad : durum, alt = firma ? durum : undefined;
-              const boy = (s) => (s.length > 18 ? 10.5 : s.length > 14 ? 11.5 : 12.5);
-              return (
-                <g key={e.ekip_no} onClick={() => setEkipDetay(e)} style={{ cursor: "pointer" }}>
-                  <Box x={x} y={y} w={W} h={H} light stroke={stroke} nameText={ust} title={orta} sub={alt} nameSize={boy(ust)} />
-                </g>
-              );
-            };
-            // Ekipleri 2 sütuna yerleştir (2×2 / 2+1); merkez cx, ilk satır y0, satır aralığı 100
-            const Izgara = ({ list, cx, y0, stroke, ustY }) => {
-              if (!list.length) return <text x={cx} y={y0 + 30} textAnchor="middle" fontSize="11.5" fill="#94a3b8" fontFamily="Arial">Ekip tanımlı değil</text>;
-              const n = list.length, solX = cx - 85, sagX = cx + 85, satir = Math.ceil(n / 2);
-              const sonY = y0 + (satir - 1) * 100;
-              const tek = n % 2 === 1;                                   // son satırda tek kutu → ortalanır
-              const ciftSonY = tek ? (satir > 1 ? sonY - 100 : null) : sonY; // sol/sağ sütunun indiği en alt satır
-              const yollar = [`M${cx} ${ustY} V${ustY + 8}`];
-              if (ciftSonY != null) yollar.push(`M${solX} ${ustY + 8} H${sagX} M${solX} ${ustY + 8} V${ciftSonY} M${sagX} ${ustY + 8} V${ciftSonY}`);
-              if (tek) yollar.push(`M${cx} ${ustY + 8} V${sonY}`);     // ortadaki kutu: sütunlar arası boşluktan iner
-              return (
-                <g>
-                  <L d={yollar.join(" ")} />
-                  {list.map((e, i) => {
-                    const satirNo = Math.floor(i / 2), sonSatir = satirNo === satir - 1;
-                    const x = (tek && sonSatir) ? cx - 75 : (i % 2 === 0 ? solX - 75 : sagX - 75);
-                    return EkipKutu({ e, x, y: y0 + satirNo * 100, stroke });
-                  })}
-                </g>
-              );
-            };
-            const izm = izmirEkipleri(), ank = bolgeEkipleri("ANK"), bur = bolgeEkipleri("BUR");
-            return (
-              <g>
-                {/* ── İZMİR BÖLGESİ (mavi) ── */}
-                <rect x={40} y={396} width={380} height={484} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
-                <rect x={40} y={396} width={380} height={38} rx="14" fill={IZMIR} />
-                <rect x={40} y={420} width={380} height={14} fill={IZMIR} />
-                <text x={230} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">İZMİR REGION · {izm.length} EKİP</text>
-                <Box x={105} y={456} w={250} h={72} fill="#0369a1" nameText={YONETIM.izmir.mudur.ad} title="İzmir Bölge Müdürü" />
-                <L d="M230 528 V560" />
-                <Box x={105} y={560} w={250} h={64} light stroke="#0369a1" nameText={YONETIM.izmir.supervizor.ad} title="İzmir Süpervizörü" />
-                {Izgara({ list: izm, cx: 230, y0: 690, stroke: "#0369a1", ustY: 624 })}
-
-                {/* ── ANKARA & BURSA ORTAK YÖNETİM (nötr lacivert) ── */}
-                <rect x={440} y={396} width={770} height={484} rx="14" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
-                <rect x={440} y={396} width={770} height={38} rx="14" fill={NAVY} />
-                <rect x={440} y={420} width={770} height={14} fill={NAVY} />
-                <text x={825} y={421} textAnchor="middle" fontSize="14" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA &amp; BURSA — ORTAK YÖNETİM · {ank.length + bur.length} EKİP</text>
-                <Box x={700} y={456} w={250} h={72} fill={NAVY} nameText={YONETIM.ortak.mudur.ad} title="Ankara & Bursa Bölge Müdürü" />
-                <L d="M825 528 V560" />
-                <Box x={700} y={560} w={250} h={64} light stroke={NAVY} nameText={YONETIM.ortak.supervizor.ad} title="Ankara & Bursa Süpervizörü" />
-                {/* Süpervizör → iki bölge */}
-                <L d="M825 624 V640 M632 640 H1015 M632 640 V652 M1015 640 V652" />
-
-                {/* ANKARA (turuncu) */}
-                <rect x={452} y={652} width={360} height={216} rx="12" fill="#fffbf5" stroke="#e7d5c0" strokeWidth="1.5" />
-                <rect x={452} y={652} width={360} height={30} rx="12" fill={ANKARA} />
-                <rect x={452} y={670} width={360} height={12} fill={ANKARA} />
-                <text x={632} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">ANKARA · {ank.length} EKİP</text>
-                {Izgara({ list: ank, cx: 632, y0: 700, stroke: "#b45309", ustY: 682 })}
-
-                {/* BURSA (yeşil) */}
-                <rect x={835} y={652} width={360} height={216} rx="12" fill="#f0fdf4" stroke="#bbf7d0" strokeWidth="1.5" />
-                <rect x={835} y={652} width={360} height={30} rx="12" fill={BURSA} />
-                <rect x={835} y={670} width={360} height={12} fill={BURSA} />
-                <text x={1015} y={672} textAnchor="middle" fontSize="12.5" fontWeight="800" fill="#fff" fontFamily="Arial" letterSpacing="1">BURSA · {bur.length} EKİP</text>
-                {Izgara({ list: bur, cx: 1015, y0: 700, stroke: "#15803d", ustY: 682 })}
-              </g>
-            );
-          })()}
-          <text x={625} y={893} textAnchor="middle" fontSize="10.5" fill="#94a3b8" fontFamily="Arial">Prepared by ŞİMŞEK HABERLEŞME MEKATRONİK SAN. TİC. LTD. ŞTİ. · {new Date().toLocaleDateString("tr-TR")}</text>
-        </svg>
+      {/* 06.11.2026: önce bölgesel yönetim hiyerarşisi, altında A. İç Ekipler / B. Taşeron Firmalar (kartlar /org/yapi'den) */}
+      <div className="org-yonetim-kutu" style={{ background: "#fff", borderRadius: "16px", border: "1px solid #f1f5f9", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", padding: "18px" }}>
+        <div style={{ background: "#1e3a5f", color: "#fff", borderRadius: "10px", padding: "10px 16px", marginBottom: "14px", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "10px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "16px", fontWeight: 800, letterSpacing: ".02em" }}>{kurumAd.toLocaleUpperCase("tr-TR")} — SAHA ORGANİZASYONU</span>
+          <span style={{ fontSize: "12px", fontWeight: 600, opacity: 0.85 }}>{aktifEkipler.length} aktif ekip</span>
+        </div>
+        <OrgYonetimSeridi ust={altMarka ? [] : ORG_UST_YONETIM.ust} destek={altMarka ? [] : ORG_UST_YONETIM.destek} bolgeler={yonetimBolgeleri} />
+        {yonetimBolgeleri.length === 0 && <div style={{ fontSize: "12.5px", color: "#94a3b8", textAlign: "center", marginTop: "8px" }}>Bölgesi atanmış aktif ekip yok — bölge yönetimi gösterilemiyor.</div>}
       </div>
 
       {/* Saha ekipleri (28.10.2026): firma kartı + ekip kartları, ⋯ menüsü, arama ve filtreler — /org/yapi tek kaynak */}
@@ -7521,8 +7310,8 @@ function OrgSemasiPanel({ currentUser }) {
         <OrgPersonelModal ekip={ekipler.find(x => x.ekip_no === personelEkipNo)} ekipler={ekipler} onClose={() => setPersonelEkipNo(null)} onBitti={loadOrgData} />
       )}
 
-      <div style={{ fontSize: "11px", color: "#92400e", marginTop: "10px" }}>
-        💡 Excel çıktısı 3 sayfadır: "Organization Chart" (şema), "Details" (üst yönetim + bölge yönetimi + ekipler; bölge müdürü/süpervizör kolonlu, atanmamış personel alanları boş) ve "Ekipler" (canlı üyeler). PNG, şema ve Excel aynı verilerden üretilir.
+      <div className="org-yazdirma-gizle" style={{ fontSize: "11px", color: "#64748b", marginTop: "10px" }}>
+        “Güncel Organizasyonu İndir” ile PDF, PNG ve Excel aynı veri görüntüsünden üretilir; çıktıda maaş, maliyet, hakediş, kimlik, telefon ve iç not yer almaz. “Atanmadı” kayıt olmadığını, “Veri alınamadı” bilginin okunamadığını gösterir.
       </div>
     </div>
   );

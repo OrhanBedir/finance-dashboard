@@ -2213,8 +2213,9 @@ const _rolloutEtiketOnbellek = new Map();
 async function markaRolloutEtiketleri(kod) {
   const c = _rolloutEtiketOnbellek.get(kod);
   if (c && Date.now() - c.t < YETKI_TTL_MS) return c.v;
-  const r = await pool.query(`SELECT ad, COALESCE(is_etiketleri, '{}') AS etiketler FROM ekipler
-    WHERE UPPER(TRIM(COALESCE(bagli_firma,''))) = $1`, [kod]).catch(() => ({ rows: [] }));
+  // 06.11.2026: ekibin eski görünen adları (eski_adlar) da etikettir — ad düzeltmesi geçmiş kayıtların kapsamını değiştirmez
+  const r = await pool.query(`SELECT ad, COALESCE(is_etiketleri, '{}') || COALESCE((SELECT array_agg(x) FROM jsonb_array_elements_text(COALESCE(to_jsonb(ekipler)->'eski_adlar','[]'::jsonb)) x), '{}') AS etiketler
+    FROM ekipler WHERE UPPER(TRIM(COALESCE(bagli_firma,''))) = $1`, [kod]).catch(() => ({ rows: [] }));
   const yabanci = ALT_MARKALAR.filter((m) => m.kod !== kod).map((m) => new RegExp(markaRolloutDeseni(m)));
   const v = new Set();
   for (const e of r.rows || []) for (const t of [e.ad, ...(e.etiketler || [])]) {
@@ -13953,12 +13954,13 @@ async function haritaVerisi(req, { firma } = {}) {
     const fiiliMap = await fiiliDurum.durumHaritasi(pool, tumKodlar, { rows: rowMapH });
     const ekipAd = await hwMalzeme.ekipAdlari(pool);
     const malzMap = await hwMalzeme.durumHaritasi(pool, tumKodlar, { rows: rowMapH, montajMap: fiiliMap, ekipAd });
-    const ekipKayit = new Map((await pool.query(`SELECT e.ekip_no, e.ad, e.bolge, e.ekip_turu, e.bagli_firma, s.subcon_name AS firma_adi FROM ekipler e LEFT JOIN subcons s ON s.id = e.firma_id`).catch(() => ({ rows: [] }))).rows.map((e) => [Number(e.ekip_no), e]));
+    const ekipKayit = new Map((await pool.query(`SELECT e.ekip_no, e.ad, e.bolge, e.ekip_turu, e.bagli_firma, e.firma_id, s.subcon_name AS firma_adi FROM ekipler e LEFT JOIN subcons s ON s.id = e.firma_id`).catch(() => ({ rows: [] }))).rows.map((e) => [Number(e.ekip_no), e]));
     const ekipBilgi = (no) => { const e = ekipKayit.get(Number(no)); return e ? { ekip_no: Number(no), ad: e.ad || `Ekip ${no}`, bolge: e.bolge || null, tip: hwMalzeme.ekipTipi(e).kod,
-      firma: String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "SIMSEK").toUpperCase() : null, firma_adi: e.firma_adi || null } : { ekip_no: Number(no), ad: `Ekip ${no}`, tip: "TANIMSIZ" }; };
+      firma: String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "SIMSEK").toUpperCase() : null, firma_adi: e.firma_adi || null,
+      operasyonda: !!K && orgEkip.ekipOperasyonda(e, K.kod) } : { ekip_no: Number(no), ad: `Ekip ${no}`, tip: "TANIMSIZ" }; };
     // Alt marka: başka firmanın ekibi adıyla verilmez (yalnız "başka firma ekibi"). 02.11.2026: firma adı doğrulanmış eşleşme veren
     // dış (taşeron) ekip de firmanın ekibidir (ör. Teknocenter → TEKNO_EMRAH)
-    const ekipGoster = (no) => { const b = ekipBilgi(no); const bizim = !K || (b.tip === "INHOUSE" && b.firma === K.kod) || (b.tip === "TASERON" && !!b.firma_adi && K.esle(b.firma_adi));
+    const ekipGoster = (no) => { const b = ekipBilgi(no); const bizim = !K || b.operasyonda || (b.tip === "INHOUSE" && b.firma === K.kod) || (b.tip === "TASERON" && !!b.firma_adi && K.esle(b.firma_adi));
       return bizim ? b : { ekip_no: null, ad: "Başka firma ekibi", tip: b.tip, baska_firma: true }; };
     for (const sh of sahalar) {
       for (const x of sh.isler) {
@@ -14432,12 +14434,15 @@ async function planEkipleri(req, ekipNo = null) {
     ekipNo != null ? [Number(ekipNo)] : []);
   // 02.11.2026: alt marka hesabı kendi iç ekiplerine ek olarak firma adı doğrulanmış eşleşme veren dış (taşeron) ekiplerini de görür
   // (ör. Teknocenter → TEKNO_EMRAH); taşeron olmak tek başına dışlama nedeni değildir. İsim benzerliğiyle yeni eşleşme üretilmez.
-  const ekipler = r.rows.filter((e) => !K || (String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "").toUpperCase() === K.kod : !!(e.firma_adi && K.esle(e.firma_adi))));
+  // 06.11.2026: tek kapsam kuralı (orgEkip.ekipOperasyonda) — taşeron ekibinin operasyon firması ekip satırındaysa (bagli_firma) o
+  // esas alınır (ör. TEKNO_İZTAŞ: firma adı "İztaş" olsa da Teknocenter operasyonunda); yazılmamış eski kayıtta firma adı eşleşmesi.
+  const ekipFirmada = (e, kod, esle) => orgEkip.ekipTuru(e) === "IC" || orgEkip.ekipOperasyonFirma(e) ? orgEkip.ekipOperasyonda(e, kod) : !!(e.firma_adi && esle && esle(e.firma_adi));
+  const ekipler = r.rows.filter((e) => !K || ekipFirmada(e, K.kod, K.esle));
   if (!ekipler.length) return [];
   // 02.11.2026: ERC görünümünde de yalnız Teknocenter ekipleri — iç ekip (bagli_firma TEKNO) ya da firma adı doğrulanmış Tekno eşleşmesi
   // veren dış ekip (ör. TEKNO_EMRAH). Taşeron olmak tek başına dışlama nedeni değildir; isim benzerliğiyle yeni eşleşme üretilmez.
   const teknoEs = (await rolloutFirmaEsleyicileri()).find((m) => m.kod === HARITA_ZORUNLU_FIRMA);
-  const teknoEkip = (e) => (String(e.ekip_turu || "").toUpperCase() === "IC" ? String(e.bagli_firma || "").toUpperCase() === HARITA_ZORUNLU_FIRMA : !!(teknoEs && e.firma_adi && teknoEs.esle(e.firma_adi)));
+  const teknoEkip = (e) => ekipFirmada(e, HARITA_ZORUNLU_FIRMA, teknoEs && teknoEs.esle);
   const ekiplerTekno = ekipler.filter(teknoEkip);
   if (!ekiplerTekno.length) return [];
   const p = await pool.query(`SELECT id, ad_soyad, LOWER(TRIM(email)) AS email, telefon, unvan, ekip_arac_plaka, TRIM(ekip_bilgisi) AS ekip,
@@ -14448,7 +14453,7 @@ async function planEkipleri(req, ekipNo = null) {
     const uyeler = p.rows.filter((x) => x.ekip === String(e.ekip_no));
     const sef = uyeler.find((x) => x.id === e.sef_personel_id) || uyeler.find((x) => /şef|sef/i.test(String(x.unvan || ""))) || null;
     const ic = String(e.ekip_turu || "").toUpperCase() === "IC";
-    const firma = ic ? (String(e.bagli_firma || "").toUpperCase() || "SIMSEK") : (es.find((m) => m.esle(e.firma_adi || ""))?.kod || null);
+    const firma = ic ? (String(e.bagli_firma || "").toUpperCase() || "SIMSEK") : (orgEkip.ekipOperasyonFirma(e) || es.find((m) => m.esle(e.firma_adi || ""))?.kod || null);
     return { ekip_no: e.ekip_no, ad: e.ad || `Ekip ${e.ekip_no}`, bolge: e.bolge || null, ekip_turu: e.ekip_turu || null, firma, firma_adi: e.firma_adi || null,
       sef: sef ? { ad: sef.ad_soyad, telefon: sef.telefon || null, kaynak: e.sef_personel_id === sef.id ? "Ekip şefi kaydı" : "Ünvanında şef geçen üye" } : null,
       plaka: e.plaka || sef?.ekip_arac_plaka || uyeler.find((x) => x.ekip_arac_plaka)?.ekip_arac_plaka || null,
@@ -14871,7 +14876,8 @@ async function opKapsamIsKodlari(req) {
   const rowMap = new Map(rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
   return (req._hwKapsam = { K, rows: rowMap, kodlar: new Set([...rowMap.keys(), ...yalnizGunluk]) });
 }
-const opEkipKapsamda = async (req, e) => { const K = await rolloutKapsam(req); return !K || (String(e?.ekip_turu || "").toUpperCase() === "IC" && String(e?.bagli_firma || "").toUpperCase() === K.kod); };
+// 06.11.2026: tek kapsam kuralı — iç ekip + kendi operasyonuna bağlı, firma kartı doğrulanmış taşeron ekibi (orgEkip.ekipOperasyonda)
+const opEkipKapsamda = async (req, e) => { const K = await rolloutKapsam(req); return !K || orgEkip.ekipOperasyonda(e, K.kod); };
 async function opMontajFiili(kodlar) {
   const rows = new Map((await pool.query(`SELECT * FROM rollout_progress WHERE UPPER(TRIM(site_code)) = ANY($1::text[])`, [kodlar.map((k) => String(k).toUpperCase())]).catch(() => ({ rows: [] })))
     .rows.map((r) => [String(r.site_code || "").replace(/\s+/g, "").toUpperCase(), r]));
@@ -15581,7 +15587,10 @@ async function isAtamaDetay(id) {
 }
 
 // Organizasyon şeması tek kaynağı (/org/*): firma ve ekip kartları, üyelik geçmişi, yetki (org_yonet / org_sil)
-const orgPanel = orgEkip.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi, detectTenant });
+// 06.11.2026: ekip adı / türü / birleştirme değişince etiket ve plan önbellekleri hemen boşaltılır (harita, İş Ata eski adla kalmasın)
+const orgPanel = orgEkip.kur(app, { pool, authMiddleware, islemGecmisiYaz, altMarkaKullanicisi, detectTenant,
+  ekipDegisti: () => { _rolloutEtiketOnbellek.clear(); _planAraOnbellek.clear(); },
+  aracIslemLog: (...a) => aracIslemLog(...a) });
 // Tedarikçi cari hesabı (/finance/marka-cari/*): Teknocenter Taşeron Faturaları / Avans ve Ödeme ekranı — firma kapsamı
 // MARKA PANELİ katmanından, ödeme yazma mali yetki matrisinden (tedarikciCari.js başlığı)
 tedarikciCari.semaKur(pool);
@@ -28163,7 +28172,7 @@ app.post("/hr/arac-takip/:id/tahsis", aracTakipOkuma, async (req, res) => {
       if (k && !k.bordro.map((x) => String(x).toUpperCase()).includes(String(p.marka).toUpperCase())) return res.status(403).json({ ok: false, error: "Bu personel firmanızın kapsamında değil" });
     }
     if (ekipNo) {
-      const e = (await pool.query(`SELECT ekip_no, ekip_turu, bagli_firma FROM ekipler WHERE ekip_no = $1`, [ekipNo])).rows[0];
+      const e = (await pool.query(`SELECT ekip_no, ekip_turu, bagli_firma, firma_id FROM ekipler WHERE ekip_no = $1`, [ekipNo])).rows[0];
       if (!e) return res.status(404).json({ ok: false, error: "Ekip bulunamadı" });
       if (!(await opEkipKapsamda(req, e))) return res.status(403).json({ ok: false, error: "Bu ekip firmanızın kapsamında değil" });
     }
@@ -29299,8 +29308,10 @@ async function ekipTuruIlkSiniflandirma() {
 const _etiketNorm = (v) => String(v || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/[^A-Z0-9ÇĞÖŞÜ]+/g, "");
 // Markanın kendi (IC) ekipleri: [{ ekip_no, ad, bolge, aktif, etiketler:[UPPER] }] — pasif ekipler de dahil (geçmiş işleri onlarındır)
 async function icEkipleri(marka) {
-  const r = await pool.query(`SELECT ekip_no, ad, bolge, aktif, COALESCE(is_etiketleri, '{}') AS etiketler
-    FROM ekipler WHERE ekip_turu='IC' AND UPPER(COALESCE(bagli_firma,'')) = $1 ORDER BY ekip_sira NULLS LAST, ekip_no`,
+  // 06.11.2026: başka ekibe birleştirilmiş mükerrer kayıt ayrı ekip sayılmaz (maliyet / iş iki ekibe yazılmaz); eski adlar da eşleşir
+  const r = await pool.query(`SELECT ekip_no, ad, bolge, aktif, COALESCE(is_etiketleri, '{}') AS etiketler,
+      COALESCE((SELECT array_agg(x) FROM jsonb_array_elements_text(COALESCE(to_jsonb(ekipler)->'eski_adlar','[]'::jsonb)) x), '{}') AS eski_adlar
+    FROM ekipler WHERE ekip_turu='IC' AND UPPER(COALESCE(bagli_firma,'')) = $1 AND (to_jsonb(ekipler)->>'birlesen_ekip_no') IS NULL ORDER BY ekip_sira NULLS LAST, ekip_no`,
     [String(marka || "").toUpperCase()]).catch(() => ({ rows: [] }));
   return r.rows.map(e => ({ ...e, etiketler: (e.etiketler || []).map(x => String(x || "").trim().toUpperCase()).filter(Boolean) }));
 }
@@ -29310,7 +29321,7 @@ async function icEkipAdiMi(marka, ad) {
   const n = _etiketNorm(ad);
   if (!n) return null;
   for (const e of await icEkipleri(marka)) {
-    if (_etiketNorm(e.ad) === n || e.etiketler.some(t => _etiketNorm(t) === n)) return e;
+    if (_etiketNorm(e.ad) === n || e.etiketler.some(t => _etiketNorm(t) === n) || (e.eski_adlar || []).some(t => _etiketNorm(t) === n)) return e;
   }
   return null;
 }
@@ -29342,7 +29353,7 @@ app.post("/hr/ekipler", orgPanel.yonetKapisi, async (req, res) => {
       ad = `TEKNO Ekip${nx}`; yeniSira = nx;
     }
     if (ad && /^TEKNO\b/i.test(ad)) {
-      const ayni = await pool.query(`SELECT ekip_no FROM ekipler WHERE ekip_no<>$1 AND LOWER(TRIM(ad))=LOWER($2)`, [no, ad]);
+      const ayni = await pool.query(`SELECT ekip_no FROM ekipler WHERE ekip_no<>$1 AND LOWER(TRIM(ad))=LOWER($2) AND (to_jsonb(ekipler)->>'birlesen_ekip_no') IS NULL`, [no, ad]);
       if (ayni.rows.length) return res.status(409).json({ error: `"${ad}" adı Ekip ${ayni.rows[0].ekip_no} tarafından kullanılıyor — TEKNO ekip adları benzersizdir` });
     }
     if (yeniSira) await pool.query(`UPDATE ekipler SET ekip_sira=$2 WHERE ekip_no=$1`, [no, yeniSira]).catch(() => {});
@@ -29383,6 +29394,7 @@ app.post("/hr/ekipler", orgPanel.yonetKapisi, async (req, res) => {
       Object.assign(r.rows[0], u2.rows[0] || {});
       await islemGecmisiYaz(req, "ekip", no, "SINIFLANDIRMA", eskiOz, yeniOz, null);
     }
+    _rolloutEtiketOnbellek.clear(); _planAraOnbellek.clear();
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
