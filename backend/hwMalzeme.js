@@ -292,7 +292,7 @@ function kur(app, deps) {
   async function ekipDogrula(db, req, no) {
     const n = Number(no);
     if (!Number.isInteger(n) || n <= 0) throw new HwHata("Ekibi seçin");
-    const r = await db.query(`SELECT ekip_no, ad, COALESCE(aktif,true) AS aktif, ekip_turu, bagli_firma FROM ekipler WHERE ekip_no = $1`, [n]);
+    const r = await db.query(`SELECT ekip_no, ad, COALESCE(aktif,true) AS aktif, ekip_turu, bagli_firma, firma_id FROM ekipler WHERE ekip_no = $1`, [n]);
     if (!r.rows.length) throw new HwHata("Ekip kaydı bulunamadı");
     if (!(await deps.ekipKapsamda(req, r.rows[0]))) throw new HwHata("Bu ekip erişim kapsamınızda değil", 403);
     return r.rows[0];
@@ -648,7 +648,7 @@ function kur(app, deps) {
     try {
       goruntuleKapi(req);
       const depolar = (await pool.query(`SELECT id, ad, bolge, tur FROM ofis_depo WHERE UPPER(COALESCE(durum,'AKTİF')) <> 'PASİF' ORDER BY (tur ILIKE '%depo%') DESC, id`).catch(() => ({ rows: [] }))).rows;
-      const e = (await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma, COALESCE(aktif,true) AS aktif FROM ekipler WHERE COALESCE(aktif,true) ORDER BY ad`).catch(() => ({ rows: [] }))).rows;
+      const e = (await pool.query(`SELECT ekip_no, ad, bolge, ekip_turu, bagli_firma, firma_id, COALESCE(aktif,true) AS aktif FROM ekipler WHERE COALESCE(aktif,true) ORDER BY ad`).catch(() => ({ rows: [] }))).rows;
       const ekipler = [];
       for (const x of e) if (await deps.ekipKapsamda(req, x)) ekipler.push({ ekip_no: x.ekip_no, ad: x.ad, bolge: x.bolge, ekip_tipi: ekipTipi(x) });
       // 05.11.2026: teslim / devirde seçilebilecek araçlar (kapsamdaki aktif araçlar) + kurulum durumu
