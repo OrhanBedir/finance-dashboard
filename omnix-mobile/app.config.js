@@ -42,7 +42,7 @@ module.exports = {
     slug: "omnix",
     owner: "orhanbedir",
     scheme: "omnix",
-    version: "1.2.0",
+    version: "1.3.0",
     orientation: "portrait",
     icon: ORTAM.ikon,
     userInterfaceStyle: "light",
