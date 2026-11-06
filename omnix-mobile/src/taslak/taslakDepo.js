@@ -79,7 +79,7 @@ export function taslakSil(kapsam, id) {
     const t = v[id];
     delete v[id];
     await yaz(kapsam, v);
-    (t?.fotolar || []).forEach((f) => fotoSil(f.uri));
+    (t?.fotolar || []).forEach((f) => { fotoSil(f.uri); if (f.onizlemeUri) fotoSil(f.onizlemeUri); });
   });
 }
 
@@ -102,6 +102,16 @@ export function fotoSakla(kapsam, kaynakUri, mime = "image/jpeg") {
   const hedef = new File(klasor(kapsam), ad);
   new File(kaynakUri).copy(hedef);
   return { uri: hedef.uri, ad, mime, boyut: hedef.size };
+}
+
+// 06.11.2026: onaylanan kırpma önizlemesi (sunucunun data:image/jpeg;base64 çıktısı) kapsam klasörüne yazılır → { uri }.
+// Yalnız ekranda küçük önizleme için; sunucuya giden ek, sunucunun orijinalden ürettiği kırpmadır.
+export function onizlemeSakla(kapsam, dataUrl) {
+  const m = /^data:image\/(jpeg|png);base64,(.+)$/s.exec(String(dataUrl || ""));
+  if (!m) return null;
+  const hedef = new File(klasor(kapsam), `kirpik-${yeniKimlik()}.${m[1] === "png" ? "png" : "jpg"}`);
+  hedef.write(m[2], { encoding: "base64" });
+  return { uri: hedef.uri };
 }
 
 export function fotoVarMi(uri) {

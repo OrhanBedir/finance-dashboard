@@ -92,10 +92,56 @@ test("onaya gönderilmiş forma kalem eklenmez", async () => {
   assert.equal(s.sayac.kalem, 0);
 });
 
-test("kırpma servisi yoksa (eski sunucu) doğrudan yüklemeye düşer", async () => {
+test("kırpma servisi yoksa (eski sunucu) orijinal SESSİZCE yüklenmez; kullanıcı 'kırpmadan' derse yüklenir (06.11.2026)", async () => {
+  // Karar verilmezse (Daha sonra): fiş eklenmez, kalem kayıtlı kalır, taslak kalıcı "servis yok" işareti almaz
   const s = sahteSunucu({ isleVar: false }); const d = depo(taslakYap());
-  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }] });
-  assert.equal(s.sayac.isle, 1); assert.equal(s.sayac.belge, 1); assert.equal(d.t.kirpmaServisiYok, true);
+  const r = await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], kirpmaYok: async () => null });
+  assert.equal(r.yarim, true); assert.equal(s.sayac.belge, 0); assert.equal(d.t.kirpmaServisiYok, undefined);
+  // Tekrar denemede servis yeniden denenir; kullanıcı açıkça "kırpmadan" seçerse orijinal bir kez yüklenir
+  const r2 = await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], kirpmaYok: async () => "kirpmadan" });
+  assert.equal(r2.yarim, undefined); assert.equal(s.sayac.isle, 2); assert.equal(s.sayac.belge, 1); assert.equal(d.t.fotolar[0].durum, "yuklendi");
+  // Eski taslaktaki kalıcı işaret artık okunmaz: servis yine denenir
+  const s3 = sahteSunucu({ isleVar: true }); const d3 = depo(taslakYap({ kirpmaServisiYok: true }));
+  await kalemGonder({ taslak: d3.t, kaydet: d3.kaydet, api: s3.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }] });
+  assert.equal(s3.sayac.isle, 1); assert.equal(s3.sayac.ekle, 1); assert.equal(s3.sayac.belge, 0);
+});
+
+test("kalem bulunamadı / yetki hatası kırpmasız yüklemeye düşmez, hata olarak döner", async () => {
+  const s = sahteSunucu({ isleVar: true }); const d = depo(taslakYap({ adim: { kalemId: 1 } }));
+  s.api.fisIsle = async () => { throw new ApiHatasi("bulunamadi", "Kalem bulunamadı", { durumKodu: 404, sunucuMesaji: "Kalem bulunamadı" }); };
+  await assert.rejects(kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], kirpmaYok: async () => "kirpmadan" }), /Kalem bulunamadı/);
+  assert.equal(s.sayac.belge, 0);
+  s.api.fisIsle = async () => { throw new ApiHatasi("yetki", "Bu kaleme fiş ekleme yetkiniz yok", { durumKodu: 403, sunucuMesaji: "x" }); };
+  await assert.rejects(kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], kirpmaYok: async () => "kirpmadan" }), (e) => e.tur === "yetki");
+  assert.equal(s.sayac.belge, 0);
+});
+
+test("seçimde onaylanan kırpma (ön işleme) kaydette kaleme bağlanır: model yeniden çağrılmaz, tek ek", async () => {
+  const s = sahteSunucu({ isleVar: true });
+  const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "bekliyor", onIsleme: { durum: "onaylandi", isleme_id: 77, secimler: [{ aday_no: 1 }], tur: "kirpik" } }] }));
+  let modal = 0, isl = null;
+  const ekle0 = s.api.fisEkle; s.api.fisEkle = async (kid, i, sc) => { isl = i; return ekle0(kid, i, sc); };
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => { modal++; return [{ aday_no: 1 }]; } });
+  assert.equal(s.sayac.isle, 0, "fisIsle (model) çağrılmadı"); assert.equal(modal, 0, "onay penceresi ikinci kez açılmadı");
+  assert.equal(isl, 77); assert.equal(s.sayac.ekle, 1); assert.equal(s.sayac.belge, 0); assert.equal(d.t.fotolar[0].durum, "yuklendi");
+});
+
+test("ön işleme sunucuda bulunamazsa (süresi doldu) ön onay düşer, kırpma yeniden sorulur", async () => {
+  const s = sahteSunucu({ isleVar: true });
+  const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "bekliyor", onIsleme: { durum: "onaylandi", isleme_id: 77, secimler: [{ aday_no: 1 }] } }] }));
+  const ekle0 = s.api.fisEkle;
+  s.api.fisEkle = async (kid, i, sc) => { if (i === 77) throw new ApiHatasi("dogrulama", "Fotoğrafın saklama süresi doldu", { durumKodu: 410, sunucuMesaji: "x" }); return ekle0(kid, i, sc); };
+  let modal = 0;
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => { modal++; return [{ aday_no: 1 }]; } });
+  assert.equal(modal, 1); assert.equal(s.sayac.isle, 1); assert.equal(s.sayac.ekle, 1); assert.equal(d.t.fotolar[0].durum, "yuklendi"); assert.equal(d.t.fotolar[0].onIsleme, null);
+});
+
+test("fotoğraf eklerken 'Kırpmadan kullan' açıkça seçildiyse orijinal eklenir, kırpma sorulmaz", async () => {
+  const s = sahteSunucu({ isleVar: true });
+  const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "bekliyor", kirpmadanOnay: true, onIsleme: { durum: "kirpmadan" } }] }));
+  let modal = 0;
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => { modal++; return null; } });
+  assert.equal(modal, 0); assert.equal(s.sayac.isle, 0); assert.equal(s.sayac.belge, 1); assert.equal(d.t.fotolar[0].durum, "yuklendi");
 });
 
 test("kırpma servisi: yanıt kaybolunca aynı istek kimliğiyle tekrar → çift ek yok", async () => {
@@ -148,9 +194,9 @@ test("ilerleme: kaldığı yerden devamda kalem adımı yok, sıra yalnız bekle
   const s = sahteSunucu({ isleVar: false });
   const d = depo(taslakYap({ fotolar: [{ uri: "f1", ad: "f1.jpg", mime: "image/jpeg", durum: "yuklendi", belgeId: 7 }, { uri: "f2", ad: "f2.jpg", mime: "image/jpeg", durum: "bekliyor" }], adim: { kalemId: 1 } }));
   const asamalar = [];
-  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }],
+  await kalemGonder({ taslak: d.t, kaydet: d.kaydet, api: s.api, kimlik, kirpmaSec: async () => [{ aday_no: 1 }], kirpmaYok: async () => "kirpmadan",
     onAsama: (a) => { asamalar.push(a.sira ? `${a.kod}:${a.sira}/${a.toplam}` : a.kod); throw new Error("ekran hatası"); } });
-  assert.deepEqual(asamalar, ["fis_isleme:1/1", "fis_yukleme:1/1", "bitti"], "kırpma servisi yoksa yükle + oku tek adım");
+  assert.deepEqual(asamalar, ["fis_isleme:1/1", "fis_yukleme:1/1", "bitti"], "kırpma servisi yoksa (kullanıcı kırpmadan seçti) yükle + oku tek adım");
   assert.equal(s.sayac.kalem, 0); assert.equal(s.sayac.belge, 1); assert.equal(d.t.fotolar[1].durum, "yuklendi");
   const s2 = sahteSunucu(); const d2 = depo(taslakYap({ fotolar: [], fissiz: { aktif: true, aciklama: "Fiş verilmedi" } }));
   const a2 = [];

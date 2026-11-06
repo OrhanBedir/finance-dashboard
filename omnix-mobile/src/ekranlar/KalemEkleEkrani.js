@@ -15,7 +15,7 @@ import { avansApi, masrafApi } from "../api/uclar";
 import { isoGun, tarih, tl, tutarCoz } from "../mantik/bicim";
 import { hataMetni } from "../mantik/hata";
 import { MASRAF_KATEGORILERI, kategori } from "../mantik/sabitler";
-import { fotoSil, fotoVarMi, taslak as taslakOku, taslakKaydet, taslakSil, yeniKimlik } from "../taslak/taslakDepo";
+import { fotoSil, fotoVarMi, onizlemeSakla, taslak as taslakOku, taslakKaydet, taslakSil, yeniKimlik } from "../taslak/taslakDepo";
 import { fisSec, FisHatasi } from "../taslak/fis";
 import { KoseDuzenleyici } from "../bilesenler/KoseDuzenleyici";
 import { fotoDegistir, kalemGonder } from "../taslak/masrafGonder";
@@ -62,7 +62,9 @@ export function KalemEkleEkrani({ navigation, route }) {
       }
       if (t) {
         setAlanlar({ ...BOS, ...t.alanlarHam });
-        setFotolar((t.fotolar || []).filter((f) => f.durum === "yuklendi" || fotoVarMi(f.uri)));
+        // Uygulama fiş algılanırken kapandıysa işlem yarıda kalmıştır: kullanıcıya yeniden sorulur (başarı varsayılmaz)
+        setFotolar((t.fotolar || []).filter((f) => f.durum === "yuklendi" || fotoVarMi(f.uri))
+          .map((f) => (f.onIsleme?.durum === "isleniyor" ? { ...f, onIsleme: { durum: "hata", mesaj: "Fiş algılama yarıda kaldı." } } : f)));
         setFissiz(t.fissiz || { aktif: false, aciklama: "" });
         setKayitli(t);
         setGonderimHatasi(t.gonderimHatasi || null);
@@ -95,7 +97,8 @@ export function KalemEkleEkrani({ navigation, route }) {
       otoKayit.current = null;
       taslakKaydet(kapsam, {
         id, tur: "masrafKalem", formId, alanlarHam: alanlar, fissiz, ...sabitAdim(kayitli?.adim),
-        fotolar: fotolar.map((f) => ({ uri: f.uri, ad: f.ad, mime: f.mime, boyut: f.boyut })), // durum alanları depoda birleştirilir
+        // durum alanları depoda birleştirilir; kırpma onayı (onIsleme, önizleme, açık "kırpmadan" seçimi) kullanıcı kararıdır, yazılır
+        fotolar: fotolar.map((f) => ({ uri: f.uri, ad: f.ad, mime: f.mime, boyut: f.boyut, onIsleme: f.onIsleme ?? null, onizlemeUri: f.onizlemeUri ?? null, kirpmadanOnay: !!f.kirpmadanOnay })),
       }).then(setKayitli).catch(() => {});
     }, 400);
     return () => { if (otoKayit.current) clearTimeout(otoKayit.current); };
@@ -112,13 +115,49 @@ export function KalemEkleEkrani({ navigation, route }) {
     if (yeni.plaka && !alanlar.plaka && atananPlaka && k !== "TRAFIK_CEZA") set("plaka", atananPlaka);
   };
 
+  // 06.11.2026: fotoğraf seçilir seçilmez fiş algılanır ve kırpılmış önizleme onaya sunulur (kalem kaydı beklenmez).
+  // Sunucu işlemi forma bağlı ve geçicidir; "Kaydet"te aynı işlem kaleme bağlanır, model ikinci kez çalışmaz.
+  const fotoYaz = (uri, d) => setFotolar((l) => l.map((x) => (x.uri === uri ? { ...x, ...d } : x)));
+  const fotoCikar = (f) => { setFotolar((l) => l.filter((x) => x.uri !== f.uri)); fotoSil(f.uri); if (f.onizlemeUri) fotoSil(f.onizlemeUri); };
+  const onIsle = async (f) => {
+    const isFormId = formId || mevcutKalem?.form_id;
+    if (!isFormId || !masrafApi.fisOnIsle) return; // form yoksa eski akış: kırpma "Kaydet"te
+    fotoYaz(f.uri, { onIsleme: { durum: "isleniyor" }, kirpmadanOnay: false });
+    let yanit;
+    try {
+      yanit = await masrafApi.fisOnIsle(isFormId, { uri: f.uri, ad: f.ad, mime: f.mime });
+      if (!yanit?.isleme_id) throw new Error("Sunucudan beklenmeyen yanıt geldi.");
+    } catch (e) {
+      const mesaj = e?.tur === "bulunamadi" && !e?.sunucuMesaji ? "Sunucu bu özelliği henüz desteklemiyor." : hataMetni(e, e?.message || "Fiş algılanamadı.");
+      fotoYaz(f.uri, { onIsleme: { durum: "hata", mesaj } });
+      Alert.alert("Otomatik kırpma yapılamadı", `${mesaj}\n\nFotoğraf telefonda saklı.`, [
+        { text: "Tekrar dene", onPress: () => onIsle(f) },
+        { text: "Kırpmadan kullan", onPress: () => fotoYaz(f.uri, { onIsleme: { durum: "kirpmadan" }, kirpmadanOnay: true }) },
+        { text: "Kaydederken dene", style: "cancel" },
+      ]);
+      return;
+    }
+    const secim = await kirpmaSec(yanit, f);
+    if (secim?.yenidenCek) { fotoCikar(f); setTimeout(() => fotoEkle("kamera"), 300); return; }
+    if (!Array.isArray(secim) || !secim.length) { fotoCikar(f); return; } // vazgeçildi: fotoğraf eklenmez
+    // Küçük önizleme onaylanan kırpmayı gösterir: otomatik aday → sunucu önizlemesi; köşe düzeltme/kırpmasız → orijinal + etiket
+    const tek = secim.length === 1 ? secim[0] : null;
+    const tur = secim.some((x) => x.kirpma === "yok") ? "kirpmadan" : secim.some((x) => x.kose) ? "duzeltildi" : "kirpik";
+    const aday = (yanit.adaylar || []).find((a) => a.no === (tek?.aday_no ?? secim[0]?.aday_no));
+    let onizlemeUri = null;
+    if (tur === "kirpik" && aday?.onizleme) { try { onizlemeUri = onizlemeSakla(kapsam, aday.onizleme)?.uri || null; } catch { onizlemeUri = null; } }
+    fotoYaz(f.uri, { onIsleme: { durum: "onaylandi", isleme_id: yanit.isleme_id, secimler: secim, tur, adet: secim.length }, onizlemeUri, istekler: null, kirpmadanOnay: false });
+  };
+
   const fotoEkle = async (kaynak) => {
     if (fotoHazir) return;
     setFotoHazir(true);
+    let eklenen = null;
     try {
       const f = await fisSec(kaynak, kapsam);
       if (!f) return; // vazgeçildi
-      setFotolar((l) => [...l, { ...f, durum: "bekliyor" }]);
+      eklenen = { ...f, durum: "bekliyor" };
+      setFotolar((l) => [...l, eklenen]);
       setFissiz({ aktif: false, aciklama: "" });
     } catch (e) {
       if (e instanceof FisHatasi && e.ayarlar) {
@@ -129,14 +168,16 @@ export function KalemEkleEkrani({ navigation, route }) {
     } finally {
       setFotoHazir(false);
     }
+    if (eklenen) onIsle(eklenen);
   };
 
   const fotoKaldir = (i) => {
     const f = fotolar[i];
     if (f.durum === "yuklendi") return; // sunucuya gitmiş fiş buradan silinmez
-    fotoSil(f.uri);
-    setFotolar((l) => l.filter((_, j) => j !== i));
+    if (f.onIsleme?.durum === "isleniyor") return; // algılama sürerken kaldırılmaz (sonuç penceresi gelir, orada vazgeçilir)
+    fotoCikar(f);
   };
+  const algilaniyor = fotolar.some((f) => f.onIsleme?.durum === "isleniyor");
 
   const dogrula = () => {
     const h = {};
@@ -179,6 +220,7 @@ export function KalemEkleEkrani({ navigation, route }) {
 
   const gonder = async () => {
     if (kilit.current) return;
+    if (algilaniyor) { Alert.alert("Fiş algılanıyor", "Fotoğraftaki fiş bulunuyor; bitince kırpılmış hali onayınıza gelecek."); return; }
     const tutar = dogrula();
     if (!tutar) return;
     kilit.current = true;
@@ -192,7 +234,9 @@ export function KalemEkleEkrani({ navigation, route }) {
       const once = (await taslakOku(kapsam, id)) || {};
       const temel = await taslakKaydet(kapsam, {
         id, tur: "masrafKalem", formId, alanlarHam: alanlar, fissiz, gonderimHatasi: null, ...sabitAdim(once.adim),
-        fotolar: fotolar.map((f) => ({ ...f, ...(once.fotolar || []).find((x) => x.uri === f.uri) })),
+        // Gönderim adım bilgisi telefondan; kırpma onayı ise ekrandaki son kullanıcı kararıdır (otomatik kayıt henüz yazmamış olabilir)
+        fotolar: fotolar.map((f) => ({ ...f, ...(once.fotolar || []).find((x) => x.uri === f.uri),
+          ...(f.onIsleme !== undefined ? { onIsleme: f.onIsleme, onizlemeUri: f.onizlemeUri ?? null, kirpmadanOnay: !!f.kirpmadanOnay } : {}) })),
         alanlar: { ...alanlar, tutar },
       });
       const sonuc = await kalemGonder({
@@ -200,6 +244,10 @@ export function KalemEkleEkrani({ navigation, route }) {
         kaydet: async (t) => { const y = await taslakKaydet(kapsam, t); setKayitli(y); setFotolar(y.fotolar); return y; },
         api: masrafApi,
         kirpmaSec,
+        kirpmaYok: () => new Promise((coz) => Alert.alert("Otomatik kırpma yapılamadı", "Kırpma servisine ulaşılamadı. Kalem kaydedildi; fişi kırpmadan ekleyebilir ya da daha sonra tekrar deneyebilirsiniz.", [
+          { text: "Daha sonra", style: "cancel", onPress: () => coz(null) },
+          { text: "Kırpmadan ekle", onPress: () => coz("kirpmadan") },
+        ])),
         kimlik: () => yeniKimlik().replace(/-/g, ""),
         fotoVarMi,
         onAsama: (a) => setAsama({ ...a, t: Date.now() }),
@@ -253,7 +301,7 @@ export function KalemEkleEkrani({ navigation, route }) {
           <Ionicons name="trash-outline" size={22} color={renk.hata} />
         </Pressable>
       ) : null}
-      alt={<Buton baslik={gonderimHatasi ? "Tekrar dene" : "Kaydet"} ikon={gonderimHatasi ? "refresh" : "checkmark"} onPress={gonder} yukleniyor={gonderiliyor} />}
+      alt={<Buton baslik={algilaniyor ? "Fiş algılanıyor…" : gonderimHatasi ? "Tekrar dene" : "Kaydet"} ikon={gonderimHatasi ? "refresh" : "checkmark"} onPress={gonder} yukleniyor={gonderiliyor} devreDisi={algilaniyor} />}
     >
       {gonderimHatasi ? <Bant tonAdi="uyari" baslik="Henüz gönderilmedi" metin={gonderimHatasi} style={{ marginBottom: aralik.m }} /> : null}
       {kalemKaydedildi ? <Bant tonAdi="bilgi" metin="Kalem kaydedildi. Bekleyen fiş(ler) gönderilince tamamlanır." style={{ marginBottom: aralik.m }} /> : null}
@@ -291,11 +339,27 @@ export function KalemEkleEkrani({ navigation, route }) {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: aralik.xs, paddingBottom: aralik.s }}>
             {fotolar.map((f, i) => (
               <View key={f.uri} style={{ width: 92 }}>
-                <Image source={{ uri: f.uri }} style={{ width: 92, height: 120, borderRadius: kose.s, backgroundColor: renk.yuzeyIkincil }} accessibilityLabel={`Fiş ${i + 1}`} />
-                <View style={{ position: "absolute", left: 4, bottom: 4, flexDirection: "row", alignItems: "center", backgroundColor: f.durum === "yuklendi" ? renk.basari : "rgba(15,27,45,0.75)", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 }}>
-                  <Ionicons name={f.durum === "yuklendi" ? "checkmark" : "phone-portrait-outline"} size={11} color="#fff" />
-                  <Metin tur="minik" renk="#fff" style={{ fontSize: 10, marginLeft: 3 }}>{f.durum === "yuklendi" ? "Gönderildi" : "Telefonda"}</Metin>
-                </View>
+                <Image source={{ uri: f.onizlemeUri && fotoVarMi(f.onizlemeUri) ? f.onizlemeUri : f.uri }} style={{ width: 92, height: 120, borderRadius: kose.s, backgroundColor: renk.yuzeyIkincil, resizeMode: f.onizlemeUri ? "contain" : "cover" }} accessibilityLabel={`Fiş ${i + 1}`} />
+                {f.onIsleme?.durum === "isleniyor" ? (
+                  <View style={{ position: "absolute", left: 0, top: 0, width: 92, height: 120, borderRadius: kose.s, backgroundColor: "rgba(15,27,45,0.55)", alignItems: "center", justifyContent: "center" }}>
+                    <ActivityIndicator color="#fff" />
+                    <Metin tur="minik" renk="#fff" style={{ fontSize: 10, marginTop: 4, textAlign: "center" }}>Fiş algılanıyor…</Metin>
+                  </View>
+                ) : null}
+                {(() => {
+                  const r = fisRozeti(f);
+                  return (
+                    <View style={{ position: "absolute", left: 4, bottom: 4, flexDirection: "row", alignItems: "center", backgroundColor: r.zemin, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, maxWidth: 84 }}>
+                      <Ionicons name={r.ikon} size={11} color="#fff" />
+                      <Metin tur="minik" renk="#fff" style={{ fontSize: 10, marginLeft: 3 }} numberOfLines={1}>{r.metin}</Metin>
+                    </View>
+                  );
+                })()}
+                {f.onIsleme?.durum === "hata" && f.durum !== "yuklendi" ? (
+                  <Pressable onPress={() => onIsle(f)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Fiş ${i + 1} kırpmayı tekrar dene`}>
+                    <Metin tur="minik" renk={renk.lacivert} style={{ fontSize: 11, marginTop: 4, fontWeight: "700" }}>Kırpmayı dene</Metin>
+                  </Pressable>
+                ) : null}
                 {f.durum !== "yuklendi" ? (
                   <Pressable onPress={() => fotoKaldir(i)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Fiş ${i + 1} kaldır`}
                     style={{ position: "absolute", right: -6, top: -6, width: 28, height: 28, borderRadius: 14, backgroundColor: renk.yuzey, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: renk.cizgi }}>
@@ -308,8 +372,8 @@ export function KalemEkleEkrani({ navigation, route }) {
         ) : null}
         {!fissiz.aktif ? (
           <View style={{ flexDirection: "row", gap: aralik.s }}>
-            <Buton baslik="Fotoğraf çek" ikon="camera-outline" tur="ikincil" onPress={() => fotoEkle("kamera")} style={{ flex: 1 }} kucuk devreDisi={fotoHazir} />
-            <Buton baslik="Galeriden seç" ikon="images-outline" tur="ikincil" onPress={() => fotoEkle("galeri")} style={{ flex: 1 }} kucuk devreDisi={fotoHazir} />
+            <Buton baslik="Fotoğraf çek" ikon="camera-outline" tur="ikincil" onPress={() => fotoEkle("kamera")} style={{ flex: 1 }} kucuk devreDisi={fotoHazir || algilaniyor} />
+            <Buton baslik="Galeriden seç" ikon="images-outline" tur="ikincil" onPress={() => fotoEkle("galeri")} style={{ flex: 1 }} kucuk devreDisi={fotoHazir || algilaniyor} />
           </View>
         ) : null}
         {fotoHazir ? <Metin tur="minik" renk={renk.metinIkincil} style={{ marginTop: aralik.xs }} accessibilityLiveRegion="polite">Fotoğraf hazırlanıyor…</Metin> : null}
@@ -326,7 +390,7 @@ export function KalemEkleEkrani({ navigation, route }) {
         {hatalar.fis ? <Metin tur="minik" renk={renk.hata} style={{ marginTop: aralik.xs }}>{hatalar.fis}</Metin> : null}
       </Kart>
       <Metin tur="minik" renk={renk.metinSoluk} style={{ marginTop: aralik.xs }}>
-        Fotoğraf telefonda saklanır ve "Kaydet" ile gönderilir. Fiş düz bir zeminde, tamamı görünecek şekilde çekilmelidir.
+        Fiş eklenince otomatik bulunup kırpılır, onayınıza sunulur; "Kaydet" ile gönderilir. Fiş düz bir zeminde, tamamı görünecek şekilde çekilmelidir.
       </Metin>
 
       <KirpmaSecimi durum={kirpma} kapat={(secim) => { kirpma?.coz(secim); setKirpma(null); }} />
@@ -413,6 +477,21 @@ const KIRPMA_MESAJ = {
   AI_HATA: "Otomatik kırpma şu an yapılamadı. Köşeleri elle işaretleyebilir, yeniden çekebilir ya da fotoğrafı olduğu gibi ekleyebilirsiniz.",
 };
 
+// Küçük önizleme rozeti: gönderildi / algılanıyor / kırpıldı / köşeler düzeltildi / kırpmadan (kullanıcı seçimi) / kırpılamadı
+function fisRozeti(f) {
+  if (f.durum === "yuklendi") return { metin: "Gönderildi", ikon: "checkmark", zemin: renk.basari };
+  const o = f.onIsleme;
+  if (o?.durum === "isleniyor") return { metin: "Algılanıyor", ikon: "scan-outline", zemin: "rgba(15,27,45,0.75)" };
+  if (o?.durum === "onaylandi") {
+    if (o.tur === "kirpmadan") return { metin: "Kırpmadan", ikon: "image-outline", zemin: "rgba(15,27,45,0.75)" };
+    if (o.tur === "duzeltildi") return { metin: "Düzeltildi", ikon: "crop-outline", zemin: renk.lacivert };
+    return { metin: o.adet > 1 ? `${o.adet} fiş` : "Kırpıldı", ikon: "crop-outline", zemin: renk.lacivert };
+  }
+  if (o?.durum === "kirpmadan" || f.kirpmadanOnay) return { metin: "Kırpmadan", ikon: "image-outline", zemin: "rgba(15,27,45,0.75)" };
+  if (o?.durum === "hata") return { metin: "Kırpılamadı", ikon: "alert-circle-outline", zemin: renk.uyari };
+  return { metin: "Telefonda", ikon: "phone-portrait-outline", zemin: "rgba(15,27,45,0.75)" };
+}
+
 // Otomatik kırpma sonucu: önerilen kırpma(lar)ı ekle, köşeleri elle düzelt, elle kırp, orijinali ekle ya da yeniden çek.
 // Düzeltilen köşeler sunucuya gider; kırpmayı sunucu orijinal fotoğraftan yapar (kirpma_durum = KULLANICI).
 // Köşe düzenleyici bu Modal'ın içinde katman olarak açılır (iOS aynı anda iki Modal göstermiyor).
@@ -487,11 +566,15 @@ function KirpmaSecimi({ durum, kapat }) {
                 <Buton baslik="Uyarıya rağmen bu haliyle ekle" tur="ikincil" onPress={() => kapat([{ aday_no: adaylar[0].no }])} />
               </>
             ) : (
-              <Buton baslik="Kırpılmış fişi ekle" ikon="checkmark" onPress={() => kapat([{ aday_no: adaylar[0].no }])} />
+              <>
+                <Buton baslik="Kırpmayı kullan" ikon="checkmark" onPress={() => kapat([{ aday_no: adaylar[0].no }])} />
+                <Buton baslik="Köşeleri düzelt" ikon="crop-outline" tur="ikincil" onPress={() => setDuzelt({ aday: adaylar[0] })} />
+              </>
             )}
             <View style={{ flexDirection: "row", gap: aralik.xs }}>
               <Buton baslik="Yeniden çek" ikon="camera-outline" tur="ikincil" kucuk onPress={() => kapat({ yenidenCek: true })} style={{ flex: 1 }} />
-              {fisYok ? <Buton baslik="Kırpmadan ekle" tur="ikincil" kucuk onPress={() => kapat([{ kirpma: "yok" }])} style={{ flex: 1 }} /> : null}
+              {/* 06.11.2026: kırpmasız kullanım her durumda AÇIK kullanıcı seçimi olarak sunulur (sunucu KIRPILMADI kaydeder) */}
+              <Buton baslik="Kırpmadan kullan" tur="ikincil" kucuk onPress={() => kapat([{ kirpma: "yok" }])} style={{ flex: 1 }} />
             </View>
             <Buton baslik="Vazgeç" tur="metin" kucuk onPress={() => kapat(null)} />
           </View>

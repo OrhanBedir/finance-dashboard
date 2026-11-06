@@ -35,6 +35,8 @@ function ocrUyarisi(belge, tutar, kategori) {
  * @param {(t:object)=>Promise<object>} p.kaydet — taslağı kalıcı yazar, güncel taslağı döner
  * @param {object} p.api — { form(id), kalemEkle(g), kalemGuncelle(id,g), belgeYukle(kid,dosya), fisIsle?(kid,dosya), fisEkle?(kid,isl,sec) }
  * @param {(yanit:object, foto:object)=>Promise<Array|null>} [p.kirpmaSec] — otomatik kırpma sonucu için kullanıcı seçimi
+ * @param {(foto:object)=>Promise<"kirpmadan"|"tekrar"|null>} [p.kirpmaYok] — kırpma servisi yanıt vermediğinde açık kullanıcı
+ *   kararı (06.11.2026): "kirpmadan" = orijinali bilerek ekle; diğerleri = fiş eklenmez, kalem kayıtlı kalır, tekrar denenir
  * @param {()=>string} p.kimlik — istek kimliği üretir
  * @param {(uri:string)=>boolean} [p.fotoVarMi]
  * @param {(a:{kod:string, sira?:number, toplam?:number})=>void} [p.onAsama] — ilerleme bildirimi (04.11.2026): ekran kullanıcıya
@@ -42,7 +44,7 @@ function ocrUyarisi(belge, tutar, kategori) {
  *   fis_yukleme (kırpma servisi yoksa: yükle + oku) | fissiz | bitti. sira/toplam: fiş sırası (1'den), gönderilecek fiş sayısı.
  * @returns {Promise<{ kalemId:number, uyarilar:object[], yarim?:boolean, yenidenCek?:{index:number, uri:string} }>}
  */
-export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, fotoVarMi = () => true, onAsama }) {
+export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kirpmaYok, kimlik, fotoVarMi = () => true, onAsama }) {
   let t = taslak;
   const asama = (kod, ek) => { try { onAsama?.({ kod, ...ek }); } catch (_) { /* ekran hatası gönderimi bozmasın */ } };
   const yaz = async (degisim) => { t = await kaydet({ ...t, ...degisim }); return t; };
@@ -101,15 +103,37 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
     const dosya = { uri: f.uri, ad: f.ad, mime: f.mime };
 
     let belge = null;
-    // Otomatik kırpma servisi varsa önce o; yoksa (eski sunucu) doğrudan yükleme
-    if (api.fisIsle && kirpmaSec && !t.kirpmaServisiYok) {
+    // 06.11.2026: fotoğraf seçilirken kırpması onaylandıysa (kalemsiz ön işleme) aynı işlem bu kaleme bağlanır — model
+    // ikinci kez çağrılmaz. Sunucu işlemi bulamazsa (süresi doldu / başka kalem) ön onay düşer, aşağıdaki akış yeniden sorar.
+    if (f.onIsleme?.isleme_id && Array.isArray(f.onIsleme.secimler) && f.onIsleme.secimler.length && api.fisEkle) {
+      const istekler = f.onIsleme.secimler.map((s, n) => ({ ...s, istek_id: f.istekler?.[n] || kimlik() }));
+      await fotoGuncelle({ istekler: istekler.map((s) => s.istek_id) });
+      asama("okuma", sira);
+      try {
+        const r = await api.fisEkle(kalemId, f.onIsleme.isleme_id, istekler);
+        belge = (r?.belgeler || [r])[0];
+      } catch (e) {
+        if (!(e?.tur === "bulunamadi" || [404, 409, 410].includes(e?.durumKodu))) throw e;
+        await fotoGuncelle({ onIsleme: null, istekler: null });
+      }
+    }
+    // Kullanıcı fotoğraf eklerken kırpma yapılamadığı için "Kırpmadan kullan"ı AÇIKÇA seçtiyse orijinal eklenir (kirpildi=0)
+    if (!belge && f.kirpmadanOnay) { asama("fis_yukleme", sira); belge = await api.belgeYukle(kalemId, dosya); }
+    // Otomatik kırpma servisi; yanıt vermezse kullanıcıya açıkça sorulur (sessizce orijinal yüklenmez). Eski taslaklardaki
+    // kalıcı "kirpmaServisiYok" işareti artık okunmaz: her gönderimde servis yeniden denenir.
+    if (!belge && api.fisIsle && kirpmaSec) {
       let yanit = null;
       try {
         asama("fis_isleme", sira);
         yanit = await api.fisIsle(kalemId, dosya);
       } catch (e) {
-        if (e?.tur === "bulunamadi" && !e?.sunucuMesaji) await yaz({ kirpmaServisiYok: true });
-        else throw e;
+        // Yalnız "uç yok" (eski sunucu, sunucu mesajı olmayan 404) kırpmasız eklemeye izin verir — kalem bulunamadı,
+        // yetki ve ağ hataları olduğu gibi gösterilir
+        if (!(e?.tur === "bulunamadi" && !e?.sunucuMesaji)) throw e;
+        const karar = kirpmaYok ? await kirpmaYok(f) : null;
+        if (karar !== "kirpmadan") { form = null; return { kalemId, uyarilar, yarim: true }; }
+        asama("fis_yukleme", sira);
+        belge = await api.belgeYukle(kalemId, dosya);
       }
       if (yanit?.isleme_id) {
         asama("kirpma_onay", sira);
@@ -124,7 +148,8 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
         belge = (r?.belgeler || [r])[0];
       }
     }
-    if (!belge) { asama("fis_yukleme", sira); belge = await api.belgeYukle(kalemId, dosya); }
+    // Kırpma servisi tanımlı değilse (test / eski yapı) doğrudan yükleme
+    if (!belge && !(api.fisIsle && kirpmaSec)) { asama("fis_yukleme", sira); belge = await api.belgeYukle(kalemId, dosya); }
     if (!belge?.id) throw new Error("Fiş yüklenemedi.");
     await fotoGuncelle({ durum: "yuklendi", belgeId: belge.id });
     const u = ocrUyarisi(belge, govde.tutar, govde.kategori);
@@ -144,5 +169,5 @@ export async function kalemGonder({ taslak, kaydet, api, kirpmaSec, kimlik, foto
 // Yeniden çekilen fotoğraf eskisinin yerine geçer: gönderim adım bilgisi (denendi, istek kimlikleri) taşınmaz,
 // böylece yeni fotoğraf yeni istekle eklenir; eski fotoğraf sunucuya hiç eklenmediği için çift ek oluşmaz.
 export function fotoDegistir(fotolar, index, yeni) {
-  return (fotolar || []).map((f, i) => (i === index ? { uri: yeni.uri, ad: yeni.ad, mime: yeni.mime, boyut: yeni.boyut, durum: "bekliyor" } : f));
+  return (fotolar || []).map((f, i) => (i === index ? { uri: yeni.uri, ad: yeni.ad, mime: yeni.mime, boyut: yeni.boyut, durum: "bekliyor", ...(yeni.onIsleme ? { onIsleme: yeni.onIsleme, onizlemeUri: yeni.onizlemeUri } : {}) } : f));
 }
