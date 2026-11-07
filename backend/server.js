@@ -26960,6 +26960,12 @@ async function yemekKartBagla() {
   Object.entries(kn).filter(([, v]) => v.length > 1).forEach(([n, v]) => sonuc.kontrol.push(`Kart no ${n} birden fazla kişide: ${v.join(", ")}`));
   return sonuc;
 }
+// 07.11.2026: seçili ayda çalışma dönemi olmayan kişi için hak ve borç yoktur (hak=0, kalan=0). Gerçekleşmiş ödeme varsa
+// silinmez/iade edilmez: durum INCELEME (mahsup gerekli) olur; yoksa DONEM_DISI. Standart/aya özel hak bilgi olarak kalır.
+function yemekDonemDisiUygula(oz, donemdeCalisti) {
+  if (donemdeCalisti) return { ...oz, donem_disi: false };
+  return { ...oz, donem_disi: true, hak: 0, kalan: 0, fazla: oz.odenen_toplam, durum: oz.odenen_toplam > 0 ? "INCELEME" : "DONEM_DISI" };
+}
 /* Kadro satırları (20.10.2026): liste yemek kartı tablosundan değil GÜNCEL KADRODAN (personel + çalışma
    dönemleri) kurulur; kart yoksa "kart bilgisi eksik". Görünüm: kadro (bugün çalışan), donem (seçili ayda
    çalışmış — ayrılanlar dahil), arsiv (bugün çalışmayan ya da personele bağlı olmayan kartlar). */
@@ -27028,6 +27034,9 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
     const g = kesisim(p.giris || "0000-01-01", p.cikis || "9999-12-31", ayBas, aySon); if (g && (p.aktif || p.cikis)) aralik.push(g);
     arsiv.forEach(d => { const a = kesisim(d.ise_giris || "0000-01-01", d.isten_ayrilma, ayBas, aySon); if (a && !aralik.some(x => x[0] === a[0] && x[1] === a[1])) aralik.push(a); });
     aralik.sort();
+    // 07.11.2026: yemek hakkı uygunluğu HAK DÖNEMİNE göre — seçili ayda geçerli çalışma aralığı (güncel dönem + arşiv
+    // dönemleri; çıkış tarihi son çalışma günü, puantajla aynı) yoksa kişi o ay için hak ve borç oluşturmaz.
+    // Ödeme tarihi (ör. Kasım hakkının Ekim'de ödenmesi) uygunluğu etkilemez; hareketler kendi hak dönemine (donem) yazılır.
     const donemdeCalisti = aralik.length > 0;
     const kart = kartByPid.get(p.id) || kartByAd.get(adAnahtar(p.ad_soyad)) || null;
     const baglanti = kart ? (kart.personel_id === p.id ? "id" : "ad") : null;
@@ -27046,7 +27055,7 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
       gider_firmalari: tarihsel ? [{ firma: (odeme?.firma || kart?.firma || null), tarihsel: true }] : firmalar,
       dagilim_gerekli: !tarihsel && firmalar.length > 1,
       odeme: odeme ? { id: odeme.id, tutar: Number(odeme.tutar), tarih: odeme.tarih_str, firma: odeme.firma, odeyen_firma: odeme.odeyen_firma, dagilim: odeme.dagilim, cashflow_id: odeme.cashflow_id, aciklama: odeme.aciklama } : null,
-      ...odemeOzeti(kart, odeme),
+      ...yemekDonemDisiUygula(odemeOzeti(kart, odeme), donemdeCalisti),
     });
   }
   // Personele bağlı olmayan kartlar (ad eşleşmesi de yok) → arşiv/kontrol satırı
@@ -27060,10 +27069,14 @@ async function yemekKadroSatirlari(req, donem, gorunum) {
       odeme: o ? { id: o.id, tutar: Number(o.tutar), tarih: o.tarih_str, firma: o.firma, odeyen_firma: o.odeyen_firma, dagilim: o.dagilim, cashflow_id: o.cashflow_id } : null,
       ...odemeOzeti(c, o) };
   });
+  // 07.11.2026: varsayılan liste (kadro) = SEÇİLİ AYDA çalışma dönemi olanlar (ay içinde başlayan/ayrılan dahil); bugünkü
+  // aktif/pasif durumu belirleyici değil. "donem" görünümü ayrıca dönem dışı olup o aya ödeme/hak kaydı bulunanları
+  // (inceleme / mahsup gerekli) gösterir. Arşiv aynen.
   let liste;
-  if (gorunum === "donem") liste = satirlar.filter(r => r.donemde_calisti);
+  if (gorunum === "donem") liste = satirlar.filter(r => r.donemde_calisti || r.odenen_toplam > 0 || r.hak_ozel !== null);
   else if (gorunum === "arsiv") liste = [...satirlar.filter(r => !r.calisiyor), ...bagsiz];
-  else liste = satirlar.filter(r => r.calisiyor);
+  else if (gorunum === "tum") liste = [...satirlar, ...bagsiz]; // sunucu içi kontrol (ödeme uçları) — ekran görünümü değil
+  else liste = satirlar.filter(r => r.donemde_calisti);
   const tercih = await yemekDonemTercih(donem);
   return { liste, dilimler, ayBas, aySon, bugun, kartSayisi: kartlar.rows.length, bagsiz: bagsiz.length, tercih };
 }
@@ -27105,8 +27118,12 @@ app.post("/hr/yemek-kartlari/:id/hareket", ikYazma, async (req, res) => {
     // ayın iki firmayı kapsaması değil, KİŞİNİN hak aralığının kapsaması belirleyicidir (Ender Teke vakası).
     // Kilit almadan ÖNCE hesaplanır.
     const kartId = Number(req.params.id);
-    const kadroSatir = (await yemekKadroSatirlari(req, donem, "donem")).liste.find(r => r.kart && r.kart.id === kartId)
-      || (await yemekKadroSatirlari(req, donem, "arsiv")).liste.find(r => r.kart && r.kart.id === kartId) || null;
+    const kadroSatir = (await yemekKadroSatirlari(req, donem, "tum")).liste.find(r => r.kart && r.kart.id === kartId) || null;
+    // 07.11.2026: o hak döneminde çalışma kaydı olmayan personele ödeme (ve aya özel hak) yazılamaz — eski ekran ya da doğrudan istek dahil
+    if (kadroSatir?.donem_disi && kadroSatir.personel_id) {
+      client.release();
+      return res.status(409).json({ ok: false, donem_disi: true, error: `${kadroSatir.ad_soyad} için ${donem} döneminde çalışma kaydı yok (işe giriş ${kadroSatir.giris || "—"}, çıkış ${kadroSatir.cikis || "—"}) — bu döneme yemek ödemesi yapılamaz. Tarih yanlışsa önce personel kartını düzeltin.` });
+    }
     await client.query("BEGIN");
     const kq = await client.query(`SELECT * FROM yemek_kartlari WHERE id=$1 FOR UPDATE`, [kartId]);
     const kart = kq.rows[0];
@@ -27215,9 +27232,13 @@ app.put("/hr/yemek-kartlari/hareket/:id", authMiddleware, async (req, res) => {
     if (!["NAKIT", "KART"].includes(yeni.yontem)) { client.release(); return res.status(400).json({ ok: false, error: "Ödeme yöntemi geçersiz" }); }
     if (yeni.yontem === "KART" && !String(h.kart_no || "").trim()) { client.release(); return res.status(400).json({ ok: false, error: "Kart yüklemesi için kart numarası gerekli" }); }
     // Hak / kalan: diğer geçerli ödemeler + yeni tutar hakkı aşamaz; kişinin firma dilimleri liste ekranıyla aynı
-    const kadroSatir = (await yemekKadroSatirlari(req, h.donem, "donem")).liste.find(r => r.kart && r.kart.id === h.kart_id)
-      || (await yemekKadroSatirlari(req, h.donem, "arsiv")).liste.find(r => r.kart && r.kart.id === h.kart_id) || null;
-    const hak = kadroSatir ? kadroSatir.hak : null;
+    const kadroSatir = (await yemekKadroSatirlari(req, h.donem, "tum")).liste.find(r => r.kart && r.kart.id === h.kart_id) || null;
+    // 07.11.2026: dönem dışı kişide gerçekleşmiş ödeme düzeltilebilir (tarih/yöntem/azaltma) ama artırılamaz — yeni borç doğmaz
+    if (kadroSatir?.donem_disi && kadroSatir.personel_id && yeni.tutar > Number(h.tutar) + 0.5) {
+      client.release();
+      return res.status(409).json({ ok: false, donem_disi: true, error: `${kadroSatir.ad_soyad} için ${h.donem} döneminde çalışma kaydı yok — ödeme tutarı artırılamaz (inceleme / mahsup gerekli)` });
+    }
+    const hak = kadroSatir && !kadroSatir.donem_disi ? kadroSatir.hak : null;
     const digerQ = await pool.query(`SELECT COALESCE((SELECT SUM(tutar) FROM yemek_odeme_hareket WHERE kart_id=$1 AND donem=$2 AND iptal_at IS NULL AND id<>$3),0)
       + COALESCE((SELECT SUM(tutar) FROM yemek_karti_odemeler WHERE kart_id=$1 AND donem=$2),0) AS t`, [h.kart_id, h.donem, h.id]);
     const diger = Number(digerQ.rows[0].t || 0);
@@ -27226,7 +27247,9 @@ app.put("/hr/yemek-kartlari/hareket/:id", authMiddleware, async (req, res) => {
     const dilimler = yemekAyDilimleri(h.donem);
     let dagilim = h.dagilim;
     if (dilimler) {
-      const izinli = kadroSatir && !kadroSatir.gider_firmalari?.[0]?.tarihsel ? kadroSatir.gider_firmalari.map(g => g.firma).filter(Boolean) : dilimler.map(d => d.firma);
+      // Dönem dışı kişide (çalışma aralığı yok) kişisel firma dilimi oluşmaz → ayın firma dilimleri geçerli
+      const kisisel = kadroSatir && !kadroSatir.gider_firmalari?.[0]?.tarihsel ? kadroSatir.gider_firmalari.map(g => g.firma).filter(Boolean) : [];
+      const izinli = kisisel.length ? kisisel : dilimler.map(d => d.firma);
       if (Array.isArray(b.dagilim) && b.dagilim.length) {
         dagilim = b.dagilim.map(x => ({ firma: String(x.firma || "").toUpperCase(), tutar: Number(x.tutar || 0) })).filter(x => x.tutar > 0);
         const yabanci = dagilim.find(x => !izinli.includes(x.firma));
@@ -27478,6 +27501,11 @@ app.post("/hr/yemek-kartlari/:id/ode", ikYazma, async (req, res) => {
     const kq = await pool.query(`SELECT * FROM yemek_kartlari WHERE id=$1`, [req.params.id]);
     if (!kq.rows[0]) return res.status(404).json({ ok: false, error: "Kart bulunamadı" });
     const kart = kq.rows[0];
+    // 07.11.2026: hak döneminde çalışma kaydı olmayan personele ödeme yazılamaz (yeni hareket ucuyla aynı kural)
+    if (/^\d{4}-\d{2}$/.test(String(donem))) {
+      const sat = (await yemekKadroSatirlari(req, String(donem), "tum")).liste.find(r => r.kart && r.kart.id === kart.id);
+      if (sat?.donem_disi && sat.personel_id) return res.status(409).json({ ok: false, donem_disi: true, error: `${sat.ad_soyad} için ${donem} döneminde çalışma kaydı yok — bu döneme yemek ödemesi yapılamaz` });
+    }
     // 20.10.2026: gider firması HAK DÖNEMİNE göre (ödeme gününe göre değil). 01.10.2026+ aylarda AHY yazılmaz;
     // iki firmaya bölünen ayda (Ekim 2026) dağılım kullanıcıdan gelir ve toplamı tutara eşit olmalı (30/31 ya da
     // yarı yarıya varsayımı yapılmaz). Ödeyen firma/kasa ayrı tutulur; nakit akışına TEK kayıt düşer.

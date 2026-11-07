@@ -23070,6 +23070,10 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
     } catch {}
   };
   useEffect(() => { loadYemek(); }, [puantajAy, yemekGorunum]);
+  // 07.11.2026: personel kartında giriş/çıkış tarihi kaydedilince (personel listesi yenilenir) ve sekmeye dönülünce yemek
+  // uygunluğu sunucudan yeniden okunur — "Kadroya Eşitle"ye basmak gerekmez, eski satır ekranda kalmaz
+  const _yemekIlk = useRef(true);
+  useEffect(() => { if (_yemekIlk.current) { _yemekIlk.current = false; return; } if (tab === "yemek") loadYemek(); }, [personelList, tab]);
   const yemekKartGuncelle = async (id, patch) => {
     try {
       await fetch(`${API_BASE}/hr/yemek-kartlari/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...AUTH_H() }, body: JSON.stringify(patch) });
@@ -24015,23 +24019,26 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
         const GEREKCE_AD = { UCRETSIZ_IZIN: "Ücretsiz izin", AY_ICI_GIRIS_CIKIS: "Ay içinde işe başlama/ayrılma", DIGER: "Diğer" };
         const kadro = yemekKadro || { liste: [], dilimler: null, tercih: null };
         const tercih = kadro.tercih || { yontem: donem <= "2026-10" ? "NAKIT" : "KART", kaynak: "varsayilan" };
-        const gorunumAd = { kadro: "Güncel kadro", donem: "Seçili dönemde çalışanlar", arsiv: "Arşiv" }[yemekGorunum];
+        const gorunumAd = { kadro: "Bu ayın kadrosu", donem: "Dönem kayıtları (inceleme dahil)", arsiv: "Arşiv" }[yemekGorunum];
         const donemAd = (() => { const [y, m] = donem.split("-"); return `${["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"][Number(m)-1]} ${y}`; })();
         const satirFirma = (r) => (r.gider_firmalari || []).map(g => g.firma).filter(Boolean);
         const etiket = (r) => { const f = satirFirma(r); return f.length ? f.map(firmaAd).join(" / ") : "—"; };
         const yontemEtiket = (r) => { const y = (r.yontemler || []); if (!y.length) return "—"; return y.map(yontemAd).sort().reverse().join(" + "); };
-        const durumMetni = (r) => r.durum === "TANIMSIZ" ? "Yemek hakkı tanımlanmamış" : r.durum === "HAK_YOK" ? "Bu dönem yemek hakkı yok"
+        // 07.11.2026: dönem dışı (seçili ayda çalışma kaydı yok) — hak ve borç yok; ödeme yapılmışsa inceleme / mahsup gerekli
+        const durumMetni = (r) => r.durum === "DONEM_DISI" ? "Bu ayda çalışma kaydı yok — hak yok" : r.durum === "INCELEME" ? `Çalışma kaydı yokken ödeme ${P(r.odenen_toplam)} — inceleme / mahsup gerekli`
+          : r.durum === "TANIMSIZ" ? "Yemek hakkı tanımlanmamış" : r.durum === "HAK_YOK" ? "Bu dönem yemek hakkı yok"
           : r.durum === "ODENDI" ? "Ödendi" : r.durum === "KISMI" ? `Kısmi ödendi · Alacaklı ${P(r.kalan)}`
           : r.durum === "FAZLA" ? `Fazla ödeme ${P(r.fazla)} — iade/düzeltme gerekir` : `Ödenmedi · ${P(r.hak)}`;
         const durumRozet = (r, kucuk) => {
-          const st = r.durum === "TANIMSIZ" ? ["#fef3c7", "#92400e"] : r.durum === "HAK_YOK" ? ["#f1f5f9", "#475569"]
+          const st = r.durum === "DONEM_DISI" ? ["#f1f5f9", "#475569"] : r.durum === "INCELEME" ? ["#ffedd5", "#9a3412"]
+            : r.durum === "TANIMSIZ" ? ["#fef3c7", "#92400e"] : r.durum === "HAK_YOK" ? ["#f1f5f9", "#475569"]
             : r.durum === "ODENDI" ? ["#dcfce7", "#166534"] : r.durum === "KISMI" ? ["#fef9c3", "#854d0e"]
             : r.durum === "FAZLA" ? ["#fee2e2", "#991b1b"] : ["#fee2e2", "#b91c1c"];
           return <span style={{ display:"inline-block", padding: kucuk ? "2px 9px" : "3px 11px", borderRadius:"999px", fontSize: kucuk ? "11px" : "11.5px", fontWeight:800, background:st[0], color:st[1], whiteSpace:"normal", lineHeight:1.3 }}>{r.durum === "ODENDI" ? "✓ " : ""}{durumMetni(r)}</span>;
         };
         // Sıralama: hesaplanan duruma göre grup (ödendi → kısmi → ödenmedi → hak tanımsız/yok), grup içinde Türkçe alfabetik.
         // Veri yalnız loadYemek ile değişir → pencere açıkken / tutar yazılırken satırlar yer değiştirmez.
-        const grup = (r) => (r.durum === "ODENDI" || r.durum === "FAZLA") ? 0 : r.durum === "KISMI" ? 1 : r.durum === "ODENMEDI" ? 2 : 3;
+        const grup = (r) => (r.durum === "ODENDI" || r.durum === "FAZLA") ? 0 : (r.durum === "KISMI" || r.durum === "INCELEME") ? 1 : r.durum === "ODENMEDI" ? 2 : 3;
         const liste = (kadro.liste || []).filter(r => {
           if (yemekFiltre.ad && !_trNorm(r.ad_soyad).includes(_trNorm(yemekFiltre.ad))) return false;
           if (yemekFiltre.firma && !satirFirma(r).includes(yemekFiltre.firma)) return false;
@@ -24050,8 +24057,9 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
         const topNakit = liste.reduce((sm, r) => sm + Number(r.nakit_odenen || 0), 0);
         const topKart = liste.reduce((sm, r) => sm + Number(r.kart_odenen || 0), 0);
         const topBorc = liste.reduce((sm, r) => sm + (r.kalan || 0), 0);
-        const kartEksikSayisi = liste.filter(r => r.kart_eksik).length;
-        const tutarsizSayisi = liste.filter(r => r.tutar_tanimsiz).length;
+        // Kart / tutar eksikleri yalnız o ay hakkı olanlarda sayılır (dönem dışı satırlar uyarı üretmez)
+        const kartEksikSayisi = liste.filter(r => r.kart_eksik && !r.donem_disi).length;
+        const tutarsizSayisi = liste.filter(r => r.tutar_tanimsiz && !r.donem_disi).length;
         const thY = { padding:"10px 12px", textAlign:"left", fontSize:"11px", fontWeight:700, color:"#64748b", background:"#f8fafc", borderBottom:"1.5px solid #e5e7eb", textTransform:"uppercase", letterSpacing:"0.4px", whiteSpace:"nowrap" };
         const tdY = { padding:"10px 12px", fontSize:"13px", color:"#374151", borderBottom:"1px solid #f1f5f9", verticalAlign:"top" };
         const rozet = (bg, c, t, title) => <span key={t} title={title} style={{ display:"inline-block", background:bg, color:c, padding:"1px 8px", borderRadius:"999px", fontSize:"10.5px", fontWeight:700, marginRight:"4px", marginTop:"3px" }}>{t}</span>;
@@ -24110,7 +24118,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
         // Satır işlem düğmeleri (masaüstü ve kart düzeni ortak)
         const islemler = (r, key) => {
           const har = (r.hareketler || []); const aktifHar = har.filter(h => !h.iptal && h.kaynak === "hareket");
-          const odenebilir = !!r.kart && r.hak !== null && r.kalan > 0 && (r.calisiyor || r.donemde_calisti);
+          // 07.11.2026: yalnız seçili hak döneminde çalışma kaydı olan kişiye ödeme (bugün çalışıyor olmak yetmez)
+          const odenebilir = !!r.kart && r.hak !== null && r.kalan > 0 && r.donemde_calisti && !r.donem_disi;
           return (
             <div style={{ display:"flex", gap:"5px", flexWrap:"wrap", alignItems:"center" }}>
               {r.personel_id && (!r.kart || r.tutar_tanimsiz) && <button onClick={() => kartEkle(r)} style={btnS("#1e3a5f", "#fff")}>{r.kart ? "Tutar Tanımla" : "＋ Tutar / Kart Tanımla"}</button>}
@@ -24211,7 +24220,8 @@ function HrDashboard({ onBack, currentUser, initialTab, onTabChange, sadeceSekme
             {/* Görünüm + filtreler */}
             <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", alignItems:"center", marginBottom:"12px" }}>
               <div style={{ display:"inline-flex", border:"1.5px solid #1e3a5f", borderRadius:"9px", overflow:"hidden" }}>
-                {[["kadro","Güncel Kadro"],["donem","Seçili Dönemde Çalışanlar"],["arsiv","Arşiv"]].map(([k,l]) => (
+                {/* 07.11.2026: "Bu Ayın Kadrosu" = seçili ayda çalışma dönemi olanlar (giriş/çıkış tarihine göre; bugünkü durum değil) */}
+                {[["kadro","Bu Ayın Kadrosu"],["donem","Dönem Kayıtları (inceleme dahil)"],["arsiv","Arşiv"]].map(([k,l]) => (
                   <button key={k} onClick={() => setYemekGorunum(k)} style={{ padding:"7px 12px", border:"none", cursor:"pointer", fontSize:"12.5px", fontWeight:700, background: yemekGorunum===k ? "#1e3a5f" : "#fff", color: yemekGorunum===k ? "#fff" : "#1e3a5f" }}>{l}</button>
                 ))}
               </div>
